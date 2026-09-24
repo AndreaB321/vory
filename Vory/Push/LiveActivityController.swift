@@ -111,7 +111,7 @@ final class LiveActivityController: TurnActivityReporting {
             tokenTask = h.observePushTokens(storedID: chat.storedID, startedAt: startedAt)
             stateTask = h.observeState()
             Self.lastStartError = nil; Self.lastStartedAt = Date()
-            Self.note("started for “\(chat.title.prefix(24))”")
+            Self.note("started for “\(chat.title.prefix(24))” (session \(chat.storedID.prefix(12)))")
         } catch {
             handle = nil
             Self.lastStartError = error.localizedDescription

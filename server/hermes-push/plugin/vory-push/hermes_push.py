@@ -48,7 +48,7 @@ except ImportError as exc:  # pragma: no cover
 log = logging.getLogger("hermes-push")
 
 # Keep in step with plugin/vory-push/plugin.yaml; the app compares the two.
-VERSION = "1.0.10"
+VERSION = "1.0.11"
 USER_AGENT = f"Vory-Push/{VERSION} (Hermes companion)"
 try:
     # Fingerprint of the code actually running: the app compares it with the copy it ships, so a
@@ -446,8 +446,21 @@ class Relay:
     def _status(self, **fields) -> None:
         write_status(**fields, **self.last_test, **self.last_la)
 
-    def _note_la(self, event: str, ok: bool) -> None:
-        self.last_la = {"last_la_event": event, "last_la_ok": ok, "last_la_response": self.apns.last_response[:200], "last_la_at": time.time()}
+    def _note_la(self, event: str, ok: bool, detail: str | None = None) -> None:
+        self.last_la = {"last_la_event": event, "last_la_ok": ok, "last_la_response": (detail if detail is not None else self.apns.last_response)[:300], "last_la_at": time.time()}
+
+    def _la_skip(self, what: str, stored: str) -> None:
+        """No phone qualified for a Live Activity push: say what each phone's device file looked like,
+        so a token that never arrived or a session id that does not match is visible in the app."""
+        seen = []
+        for d in load_devices(self.gw.url):
+            if d.get("platform") != "ios":
+                continue
+            tok = d.get("live_activity_token")
+            sid = d.get("live_activity_session_id") or "-"
+            age = int(time.time() - float(d.get("live_activity_started_at") or 0)) if tok else 0
+            seen.append(f"{(d.get('device_name') or d.get('device_id') or '?')[:14]}: token={'yes' if tok else 'no'} session={sid[:12]} age={age}s")
+        self._note_la(f"skipped ({what}) for session {stored[:12]}", False, "; ".join(seen) or "no iOS device files")
 
     def _maybe_send_test(self) -> None:
         """The app drops `test-request.json` next to the config; answer it with one real push to every
@@ -521,7 +534,10 @@ class Relay:
         Returns the ids of the devices reached."""
         now = int(time.time())
         reached = set()
-        for d in self.live_activity_devices(stored):
+        targets = self.live_activity_devices(stored)
+        if not targets:
+            self._la_skip(f"finish {phase}", stored)
+        for d in targets:
             state = {"phase": phase, "detail": "Turn finished" if phase == "done" else "The turn failed", "outputTokens": 0,
                      "contextPercent": None, "needsAttention": False,
                      "startedAtUnix": float(d.get("live_activity_started_at") or now), "endedAtUnix": float(now)}
@@ -543,7 +559,10 @@ class Relay:
         ``alert`` the Island expands and buzzes. Returns the ids of the devices reached."""
         now = int(time.time())
         reached = set()
-        for d in self.live_activity_devices(stored):
+        targets = self.live_activity_devices(stored)
+        if not targets and alert:
+            self._la_skip("alert update", stored)
+        for d in targets:
             state = {"phase": "streaming", "detail": "Working…", "outputTokens": 0, "contextPercent": None, "needsAttention": False,
                      "startedAtUnix": float(d.get("live_activity_started_at") or now), "endedAtUnix": None, **state_patch}
             aps = {"timestamp": now, "event": "update", "content-state": state}

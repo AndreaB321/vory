@@ -128,8 +128,10 @@ final class PushRegistrar: PushRegistrationSyncing {
             lastRegistrationPath = path
             registeredAt = Date()
             lastError = nil
+            if let sid = liveActivitySessionID { LiveActivityController.note("token published for session \(sid.prefix(12))") }
         } catch {
             lastError = "Could not publish the push registration: \(error.localizedDescription)"
+            if liveActivityToken != nil { LiveActivityController.note("token publish FAILED: \(error.localizedDescription)") }
         }
     }
 
