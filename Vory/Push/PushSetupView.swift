@@ -1140,7 +1140,7 @@ final class PushSetupModel {
         }
         // Another maintenance action still tailing its log would make the restart a silent no-op.
         for _ in 0..<20 where rt.maintenance.isBusy { try? await Task.sleep(for: .seconds(1)) }
-        await rt.maintenance.restartGateway(runtime: rt)
+        await rt.maintenance.restartGateway(runtime: rt, profile: heartbeat?.profile == "default" ? nil : heartbeat?.profile)
         if case .failed(let why) = rt.maintenance.phase { restartError = why; return }
         restartPending = false
         // Give the process a moment to come back and write its first heartbeat.
@@ -1227,9 +1227,32 @@ final class PushSetupModel {
         } catch { console("FAILED enable: \(error.localizedDescription)"); updateOutcome = (false, error.localizedDescription); return }
         done += 1; withAnimation(.snappy) { updateProgress = done / total }
 
+        // Companions from 1.0.12 on pick new code up by themselves; give that half a minute first.
+        updateStage = "Reloading…"
+        console("files in place; waiting for the companion to reload itself")
+        for _ in 0..<10 {
+            try? await Task.sleep(for: .seconds(3))
+            await checkCompanion(runtime: rt)
+            if let hb = heartbeat, hb.version == target, !runningOlderCode {
+                console("companion v\(target) reloaded in place (no restart needed)")
+                withAnimation(.snappy) { updateProgress = 5 / total }
+                updateStage = "Verifying…"
+                for _ in 0..<10 where !companionHealthy { try? await Task.sleep(for: .seconds(3)); await checkCompanion(runtime: rt) }
+                guard companionHealthy else { break }
+                withAnimation(.snappy) { updateProgress = 1 }
+                updateStage = "Update Complete"
+                console("companion v\(target) running and connected")
+                updateOutcome = (true, "Updated to v\(target). The companion is running and connected.")
+                try? await Task.sleep(for: .seconds(5))
+                withAnimation(.smooth(duration: 0.5)) { showUpdateConsole = false }
+                try? await Task.sleep(for: .seconds(2))
+                withAnimation(.smooth(duration: 0.5)) { updateOutcome = nil; updateProgress = 0; updateStage = "" }
+                return
+            }
+        }
         updateNeedsRestart = true
         updateStage = "Restart to finish"
-        console("files in place; the gateway restart finishes the update")
+        console("the running companion did not pick the files up; a restart of the \(heartbeat?.profile ?? "default") gateway will")
         scheduleRestartCountdown(runtime: rt)
     }
 
@@ -1241,7 +1264,7 @@ final class PushSetupModel {
         updating = true; showUpdateConsole = true
         defer { updating = false }
         updateStage = "Restarting Gateway…"
-        console("POST /api/gateway/restart")
+        console("POST /api/gateway/restart (profile \(heartbeat?.profile ?? "default"))")
         let mirror = Task { [weak self] in
             // Mirror the gateway's own restart output into the console as it arrives.
             var seen = 0
@@ -1251,7 +1274,7 @@ final class PushSetupModel {
                 if log.count > seen { for line in log[seen...] { self?.console("gateway: \(line)") }; seen = log.count }
             }
         }
-        await rt.maintenance.restartGateway(runtime: rt)
+        await rt.maintenance.restartGateway(runtime: rt, profile: heartbeat?.profile == "default" ? nil : heartbeat?.profile)
         mirror.cancel()
         if case .failed(let why) = rt.maintenance.phase { console("FAILED restart: \(why)"); updateOutcome = (false, "Restart failed: \(why)"); return }
         console("gateway restart finished")
@@ -1422,6 +1445,7 @@ final class PushSetupModel {
     struct CompanionHeartbeat: Decodable {
         var version: String
         var scriptSha256: String?
+        var profile: String?
         var updatedAt: Double
         var connected: Bool?
         var transport: String?
@@ -1436,7 +1460,7 @@ final class PushSetupModel {
         var lastLaResponse: String?
         var lastLaAt: Double?
         enum CodingKeys: String, CodingKey {
-            case version, scriptSha256 = "script_sha256", updatedAt = "updated_at", connected, transport, attached, devices, error
+            case version, scriptSha256 = "script_sha256", profile, updatedAt = "updated_at", connected, transport, attached, devices, error
             case lastTestNonce = "last_test_nonce", lastTestDevices = "last_test_devices", lastTestDetail = "last_test_detail"
             case lastLaEvent = "last_la_event", lastLaOk = "last_la_ok", lastLaResponse = "last_la_response", lastLaAt = "last_la_at"
         }

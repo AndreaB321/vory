@@ -98,8 +98,13 @@ public final class MaintenanceModel {
     }
 
     public func restartGateway(runtime rt: GatewayRuntime) async {
+        await restartGateway(runtime: rt, profile: rt.selectedProfile)
+    }
+
+    /// Restart one profile's gateway (nil = the default profile's), not necessarily the one selected in the app.
+    public func restartGateway(runtime rt: GatewayRuntime, profile: String?) async {
         await run(runtime: rt, name: "gateway-restart", label: "Restarting gateway") {
-            try await rt.api.send("POST", "/api/gateway/restart", profile: rt.selectedProfile, body: EmptyBody())
+            try await rt.api.send("POST", "/api/gateway/restart", profile: profile, body: EmptyBody())
         }
     }
 

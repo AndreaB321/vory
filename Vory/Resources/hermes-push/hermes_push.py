@@ -48,7 +48,7 @@ except ImportError as exc:  # pragma: no cover
 log = logging.getLogger("hermes-push")
 
 # Keep in step with plugin/vory-push/plugin.yaml; the app compares the two.
-VERSION = "1.0.11"
+VERSION = "1.0.12"
 USER_AGENT = f"Vory-Push/{VERSION} (Hermes companion)"
 try:
     # Fingerprint of the code actually running: the app compares it with the copy it ships, so a
@@ -275,6 +275,17 @@ class ConfigChanged(Exception):
     """The app rewrote hermes-push.conf: reconnect with the new settings, no restart needed."""
 
 
+class CodeChanged(Exception):
+    """hermes_push.py on disk is no longer the code running: the host reloads or re-execs it."""
+
+
+def code_changed() -> bool:
+    try:
+        return hashlib.sha256(Path(__file__).read_bytes()).hexdigest() != SCRIPT_SHA256
+    except OSError:
+        return False
+
+
 def conf_mtime() -> float:
     try:
         return _CONF_PATH.stat().st_mtime if _CONF_PATH else 0.0
@@ -292,7 +303,8 @@ def write_status(**fields) -> None:
     try:
         p = status_path()
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps({"version": VERSION, "script_sha256": SCRIPT_SHA256, "pid": os.getpid(), "updated_at": time.time(), **fields}), encoding="utf-8")
+        p.write_text(json.dumps({"version": VERSION, "script_sha256": SCRIPT_SHA256, "pid": os.getpid(), "updated_at": time.time(),
+                                 "profile": os.environ.get("HERMES_PROFILE") or "default", **fields}), encoding="utf-8")
     except Exception as exc:  # noqa: BLE001
         log.debug("status write failed: %s", exc)
 
@@ -646,6 +658,8 @@ class Relay:
                 last_poll = 0.0
                 while True:
                     if time.time() - last_poll > self.poll:
+                        if code_changed():
+                            raise CodeChanged()
                         if conf_mtime() != self._conf_loaded:
                             raise ConfigChanged()
                         await self.discover()
@@ -663,6 +677,15 @@ class Relay:
                 log.info("hermes-push.conf changed; reloading")
                 await self._reload_config()
                 backoff = 1
+            except CodeChanged:
+                log.info("hermes_push.py changed on disk; handing over to the new code")
+                try:
+                    if self.gw.ws:
+                        await self.gw.ws.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                self._status(connected=False, gateway=self.gw.public_url, transport=self.gw.transport, error="reloading new code…")
+                raise
             except Exception as exc:  # noqa: BLE001
                 log.warning("disconnected: %s; retrying in %ss", exc, backoff)
                 self._status(connected=False, gateway=self.gw.public_url, transport=self.gw.transport, error=str(exc)[:400])
@@ -760,7 +783,11 @@ def main() -> None:
         sys.exit(0 if ok == len(devs) else 1)
     relay = Relay()
     relay.apns.dry_run = args.dry_run
-    asyncio.run(relay.run())
+    try:
+        asyncio.run(relay.run())
+    except CodeChanged:
+        log.info("re-executing with the updated hermes_push.py")
+        os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
 if __name__ == "__main__":

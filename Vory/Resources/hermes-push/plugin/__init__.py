@@ -18,12 +18,21 @@ def _run() -> None:
         sys.path.insert(0, str(here))
     try:
         import asyncio
+        import importlib
         import hermes_push
         hermes_push._load_conf()
         if not _claim_single_instance(hermes_push):
             return
-        relay = hermes_push.Relay()
-        asyncio.run(relay.run())
+        while not _stop.is_set():
+            try:
+                asyncio.run(hermes_push.Relay().run())
+                return
+            except hermes_push.CodeChanged:
+                # The app put a newer hermes_push.py next to us: pick it up in place, no gateway restart.
+                log.info("vory-push: reloading updated hermes_push.py")
+                hermes_push = importlib.reload(hermes_push)
+                hermes_push._CONF.clear()
+                hermes_push._load_conf()
     except SystemExit as exc:
         log.warning("vory-push not started: %s", exc)
     except Exception:  # noqa: BLE001
