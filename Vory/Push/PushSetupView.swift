@@ -74,12 +74,14 @@ struct PushSetupView: View {
     }
 
     @State private var forward = true
+    /// Measured from whichever page is showing; the next page starts from it instead of a guess.
+    @State private var headerHeight: CGFloat = 230
     /// True a moment after the last step completes, once the bot has finished its hop.
     @State private var doneSettled = false
 
     var body: some View {
         ZStack {
-            StepPage(step: step, done: isDone(step), isCurrent: true, hint: hint(for: step)) {
+            StepPage(step: step, done: isDone(step), isCurrent: true, hint: hint(for: step), headerHeight: $headerHeight) {
                 if let rt { content(for: step, runtime: rt) } else { Text("Connect a gateway first.").foregroundStyle(.secondary) }
             }
             .id(step)
@@ -607,14 +609,15 @@ struct StepPage<Content: View>: View {
     var done: Bool
     var isCurrent: Bool
     var hint: String
+    @Binding var headerHeight: CGFloat
     @ViewBuilder var content: () -> Content
     @State private var hop = false
     @State private var bubbleShown = false
-    @State private var headerHeight: CGFloat = 220
 
     var body: some View {
         Form { content() }
             .scrollContentBackground(.hidden)
+            .listSectionSpacing(24)
             .contentMargins(.top, headerHeight - 2, for: .scrollContent)
             .contentMargins(.bottom, 72, for: .scrollContent)
             .overlay(alignment: .top) { header }
@@ -1258,10 +1261,8 @@ final class PushSetupModel {
                 updateStage = "Update Complete"
                 console("companion v\(target) running and connected")
                 updateOutcome = (true, "Updated to v\(target). The companion is running and connected.")
-                try? await Task.sleep(for: .seconds(5))
-                withAnimation(.smooth(duration: 0.5)) { showUpdateConsole = false }
-                try? await Task.sleep(for: .seconds(2))
-                withAnimation(.smooth(duration: 0.5)) { updateOutcome = nil; updateProgress = 0; updateStage = "" }
+                try? await Task.sleep(for: .seconds(4))
+                withAnimation(.smooth(duration: 0.7)) { showUpdateConsole = false; updateOutcome = nil; updateProgress = 0; updateStage = "" }
                 return
             }
         }
@@ -1316,10 +1317,8 @@ final class PushSetupModel {
         updateStage = "Update Complete"
         console("companion v\(target) running and connected")
         updateOutcome = (true, "Updated to v\(target). The companion is running and connected.")
-        try? await Task.sleep(for: .seconds(5))
-        withAnimation(.smooth(duration: 0.5)) { showUpdateConsole = false }
-        try? await Task.sleep(for: .seconds(2))
-        withAnimation(.smooth(duration: 0.5)) { updateOutcome = nil; updateProgress = 0; updateStage = "" }
+        try? await Task.sleep(for: .seconds(4))
+        withAnimation(.smooth(duration: 0.7)) { showUpdateConsole = false; updateOutcome = nil; updateProgress = 0; updateStage = "" }
     }
 
     // MARK: Test notification
