@@ -482,8 +482,13 @@ struct CompanionUpdateRows: View {
                     if !setup.updating, setup.updateOutcome == nil, !setup.updateNeedsRestart {
                         Text("Delivers Live Activity alerts through the Island, picks up config changes without a restart, and reports its health to this app.")
                             .font(.footnote).foregroundStyle(.secondary).padding(.top, 2)
-                        Label("Needs a gateway restart to finish (running turns are interrupted for a few seconds).", systemImage: "arrow.clockwise")
-                            .font(.footnote).foregroundStyle(.orange).padding(.top, 2)
+                        if setup.runningCanSelfReload {
+                            Label("Installs in place — no Gateway restart.", systemImage: "checkmark.circle")
+                                .font(.footnote).foregroundStyle(.secondary).padding(.top, 2)
+                        } else {
+                            Label("Needs a Gateway restart to finish (running turns pause for a few seconds).", systemImage: "arrow.clockwise")
+                                .font(.footnote).foregroundStyle(.orange).padding(.top, 2)
+                        }
                     }
                 }
                 Spacer(minLength: 0)
@@ -1155,6 +1160,16 @@ final class PushSetupModel {
 
     /// A newer companion is in this build than on the gateway (version or file contents).
     var updateAvailable: Bool { installedVersion != nil && !(installedVersion == Self.bundledPluginVersion && installedScriptMatches) }
+    /// Companions from 1.0.12 on pick up a new file by themselves; older ones need the gateway restarted.
+    var runningCanSelfReload: Bool {
+        guard let v = heartbeat?.version else { return false }
+        let a = v.split(separator: ".").compactMap { Int($0) }, b = [1, 0, 12]
+        for i in 0..<max(a.count, b.count) {
+            let x = i < a.count ? a[i] : 0, y = i < b.count ? b[i] : 0
+            if x != y { return x > y }
+        }
+        return true
+    }
     var updating = false
     /// 0…1 across upload, enable, restart and the first healthy heartbeat.
     var updateProgress: Double = 0
