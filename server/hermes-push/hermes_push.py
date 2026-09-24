@@ -51,7 +51,7 @@ except ImportError as exc:  # pragma: no cover
 log = logging.getLogger("hermes-push")
 
 # Keep in step with plugin/vory-push/plugin.yaml; the app compares the two.
-VERSION = "1.0.19"
+VERSION = "1.0.20"
 USER_AGENT = f"Vory-Push/{VERSION} (Hermes companion)"
 try:
     # Fingerprint of the code actually running: the app compares it with the copy it ships, so a
@@ -757,12 +757,14 @@ class Relay:
             err = p.get("error")
             if err:
                 self.end_live_activities(a["stored"], "error", bot=bot, runtime_id=sid, usage=p.get("usage"))
-                self.push_all("error", f"{bot} · turn failed", f"{title}: {str(err)[:400]}", self.meta(sid), collapse=f"turn-{sid}")
+                self.push_all("error", f"{bot} · turn failed", f"{title}: {str(err)[:400]}", {**self.meta(sid), "title": title, "text": str(err)[:1500]}, collapse=f"turn-{sid}")
             else:
                 text = p.get("text") if isinstance(p.get("text"), str) else ""
                 label = "cron job finished" if a.get("source") == "cron" else title
                 self.end_live_activities(a["stored"], "done", bot=bot, runtime_id=sid, usage=p.get("usage"))
-                self.push_all("cron" if a.get("source") == "cron" else "turn", f"{bot} · {label}" if a.get("source") == "cron" else bot, f"{title}: {(text or 'Done')[:400]}", self.meta(sid), collapse=f"turn-{sid}")
+                # The reply window (long-press) shows `text` in full and the chat under `title`.
+                self.push_all("cron" if a.get("source") == "cron" else "turn", f"{bot} · {label}" if a.get("source") == "cron" else bot, f"{title}: {(text or 'Done')[:400]}",
+                              {**self.meta(sid), "title": title, "text": (text or "Done")[:1500]}, collapse=f"turn-{sid}")
         elif kind == "error" and a:
             self.push_all("error", f"{a.get('bot') or a.get('profile', 'Hermes')} · error", f"{a['title']}: {str(p.get('message', ''))[:180]}", self.meta(sid), collapse=f"err-{sid}")
         elif kind == "request.cancel":

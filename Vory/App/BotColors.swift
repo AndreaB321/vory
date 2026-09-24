@@ -19,6 +19,7 @@ enum BotColors {
         if let data = try? JSONEncoder().encode(map), let s = String(data: data, encoding: .utf8) {
             UserDefaults.standard.set(s, forKey: storageKey)
         }
+        BotLooks.mirror()
     }
 
     static func hex(for profile: String, overrides: [String: String]? = nil) -> String {
@@ -106,5 +107,21 @@ struct BotAvatar: View {
                 .font(.system(size: size * 0.48, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white)
         }
+    }
+}
+
+
+/// Bot colours and avatar choices, copied into the shared keychain so the notification
+/// extensions (which cannot read the app's UserDefaults) draw the same bot the app shows.
+enum BotLooks {
+    struct Payload: Codable {
+        var colors: [String: String]
+        var avatars: [String: String]
+    }
+    static let account = "botLooks"
+
+    static func mirror() {
+        let payload = Payload(colors: BotColors.stored(), avatars: BotAvatarStore.stored())
+        try? Keychain.setCodable(payload, account: account)
     }
 }

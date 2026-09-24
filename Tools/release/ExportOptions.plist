@@ -24,6 +24,8 @@
 	<dict>
 		<key>com.vorantx.vory.notifications</key>
 		<string>Vory Notification Service App Store</string>
+		<key>com.vorantx.vory.notificationcontent</key>
+		<string>Vory Notification Content App Store</string>
 		<key>com.vorantx.vory.watchkitapp</key>
 		<string>Vory Watch App Store</string>
 		<key>com.vorantx.vory.watchkitapp.complications</key>
