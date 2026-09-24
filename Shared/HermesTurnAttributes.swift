@@ -43,8 +43,12 @@ public struct HermesTurnAttributes: ActivityAttributes, Sendable {
     public var tintHex: String
     /// The bot's display name (profile label); the widget leads with it, not the chat title.
     public var botName: String?
+    /// The bot's avatar choice as stored by the app ("initial", "photo", "animated:<style>"); the
+    /// widget draws the animated styles itself and falls back to the initial for the rest.
+    public var avatar: String?
 
-    public init(sessionTitle: String, storedSessionID: String, connectionID: String, profile: String, model: String = "", tintHex: String = "", botName: String? = nil) {
+    public init(sessionTitle: String, storedSessionID: String, connectionID: String, profile: String, model: String = "", tintHex: String = "",
+                botName: String? = nil, avatar: String? = nil) {
         self.sessionTitle = sessionTitle
         self.storedSessionID = storedSessionID
         self.connectionID = connectionID
@@ -52,6 +56,7 @@ public struct HermesTurnAttributes: ActivityAttributes, Sendable {
         self.model = model
         self.tintHex = tintHex
         self.botName = botName
+        self.avatar = avatar
     }
 }
 #endif

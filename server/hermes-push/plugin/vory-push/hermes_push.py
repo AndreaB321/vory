@@ -21,6 +21,8 @@ Configuration (environment variables, all HERMES_PUSH_*):
   HERMES_PUSH_APNS_SANDBOX         1 for development builds (default: follow each device's apns_environment)
   HERMES_PUSH_DEVICES_DIR          default <HERMES_HOME>/push/devices
   HERMES_PUSH_POLL_SECONDS         session discovery / test-request interval (default 3)
+  HERMES_PUSH_FINISH_EXPAND        1 to make the finish alert expand the Dynamic Island (default: buzz only,
+                                   the Live Activity stays collapsed and just changes to "Finished")
 
 Dependencies: websockets, PyJWT, cryptography (all present in the Hermes venv).
 """
@@ -48,7 +50,7 @@ except ImportError as exc:  # pragma: no cover
 log = logging.getLogger("hermes-push")
 
 # Keep in step with plugin/vory-push/plugin.yaml; the app compares the two.
-VERSION = "1.0.17"
+VERSION = "1.0.18"
 USER_AGENT = f"Vory-Push/{VERSION} (Hermes companion)"
 try:
     # Fingerprint of the code actually running: the app compares it with the copy it ships, so a
@@ -153,6 +155,9 @@ class APNs:
                 return False
             body.update({"enc": enc, "collapse_id": collapse_id, "thread_id": (alert or {}).get("thread_id", ""),
                          "interruption": (alert or {}).get("interruption", "active")})
+        elif push_type == "sound":
+            # A buzz with nothing to read: no banner, just the notification sound and haptic.
+            body.update({"thread_id": (alert or {}).get("thread_id", ""), "collapse_id": collapse_id})
         elif push_type == "liveactivity":
             body.update({"token": token_override, "content_state": content_state or {}, "event": event or "update"})
             if la_alert:
@@ -194,6 +199,8 @@ class APNs:
                 alert = {**(aps.get("alert") or {}), "category": aps.get("category", "HERMES_TURN"), "thread_id": aps.get("thread-id", ""),
                          "interruption": aps.get("interruption-level", "active"), "hermes": payload.get("hermes", {})}
                 return self.send_via_relay(device, alert=alert, collapse_id=collapse_id)
+            if push_type == "sound":
+                return self.send_via_relay(device, push_type="sound", alert={"thread_id": aps.get("thread-id", "")}, collapse_id=collapse_id)
             if push_type == "liveactivity":
                 # No extension can decrypt a Live Activity update, so only generic words travel.
                 state = dict(aps.get("content-state") or {})
@@ -218,7 +225,7 @@ class APNs:
             return True
         cmd = ["curl", "-sS", "--http2", "-o", "-", "-w", "\n%{http_code}",
                "-H", f"authorization: bearer {self.token()}", "-H", f"apns-topic: {topic}",
-               "-H", f"apns-push-type: {push_type}", "-H", "apns-priority: 10", "-H", "apns-expiration: 0",
+               "-H", f"apns-push-type: {'alert' if push_type == 'sound' else push_type}", "-H", "apns-priority: 10", "-H", "apns-expiration: 0",
                "-H", "content-type: application/json"]
         if collapse_id:
             cmd += ["-H", f"apns-collapse-id: {collapse_id[:64]}"]
@@ -559,12 +566,19 @@ class Relay:
                      "outputTokens": int(tokens) if isinstance(tokens, (int, float)) else 0,
                      "contextPercent": int(pct) if isinstance(pct, (int, float)) else None, "needsAttention": False,
                      "startedAtUnix": float(d.get("live_activity_started_at") or now), "endedAtUnix": float(now)}
-            alert = {"title": bot, "body": "Finished — tap to read the reply" if phase == "done" else "The turn failed — tap to see why", "sound": "default"}
-            ok = self.apns.send(d, {"aps": {"timestamp": now, "event": "update", "content-state": state, "alert": alert}},
-                                push_type="liveactivity", token_override=d["live_activity_token"])
-            self._note_la(f"finish alert ({phase})", ok)
+            aps = {"timestamp": now, "event": "update", "content-state": state}
+            expand = env("HERMES_PUSH_FINISH_EXPAND") in {"1", "true", "yes"}
+            if expand:
+                aps["alert"] = {"title": bot, "body": "Finished — tap to read the reply" if phase == "done" else "The turn failed — tap to see why", "sound": "default"}
+            ok = self.apns.send(d, {"aps": aps}, push_type="liveactivity", token_override=d["live_activity_token"])
+            self._note_la(f"finish {'alert' if expand else 'update'} ({phase})", ok)
             if ok:
                 reached.add(d.get("device_id"))
+                if not expand:
+                    # The Island stays collapsed (an alerting update always expands it); a sound-only
+                    # push gives the buzz. It carries no words, so nothing needs encrypting.
+                    buzz = self.apns.send(d, {"aps": {"sound": "default", "thread-id": stored}}, push_type="sound", collapse_id=f"buzz-{stored[:50]}")
+                    self._note_la("finish buzz", buzz)
             # No separate "end" push: when the phone holds pushes (idle, sandbox), only the latest state
             # gets applied and an end would swallow the alert. The finished card stays until the app is
             # opened, and the app ends it then.

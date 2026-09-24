@@ -34,6 +34,9 @@ final class PushRegistrar: PushRegistrationSyncing {
             let sid = n.userInfo?["storedID"] as? String
             Task { @MainActor in
                 let active = (token?.isEmpty == false)
+                // Clearing is per chat: a finished chat's activity going away must not drop the
+                // token of the one still running.
+                if !active, let sid, let current = self?.liveActivitySessionID, current != sid { return }
                 LiveActivityController.note(active ? "publishing token to the gateway" : "token cleared on the gateway")
                 self?.liveActivityToken = active ? token : nil
                 self?.liveActivityStartedAt = active ? started : nil

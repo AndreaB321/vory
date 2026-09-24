@@ -4,7 +4,7 @@
 //
 // POST /v1/register   {install_id, secret, device_token, platform, bundle_id, environment, live_activity_token?}
 // POST /v1/push       {install_id, secret, enc, collapse_id?, thread_id?, interruption?,
-//                      push_type?: "alert"|"liveactivity"|"complication", token?, content_state?, event?, dismissal_date?, alert?}
+//                      push_type?: "alert"|"sound"|"liveactivity"|"complication", token?, content_state?, event?, dismissal_date?, alert?}
 // DELETE /v1/register {install_id, secret}
 // GET  /v1/health
 
@@ -107,6 +107,12 @@ async function push(request, env) {
     if (b.alert && typeof b.alert === "object") {
       payload.aps.alert = { title: String(b.alert.title || "Vory").slice(0, 80), body: String(b.alert.body || "").slice(0, 160), sound: "default" };
     }
+  } else if (type === "sound") {
+    // A buzz with nothing to read: the phone plays its notification sound and haptic but shows no
+    // banner. Used when a Live Activity already carries the news and should stay collapsed.
+    headers["apns-push-type"] = "alert";
+    payload = { aps: { sound: "default", "thread-id": String(b.thread_id || "").slice(0, 120) } };
+    if (b.collapse_id) headers["apns-collapse-id"] = String(b.collapse_id).slice(0, 64);
   } else if (type === "complication") {
     if (dev.platform !== "watchos") return reply(400, { error: "complication pushes are for watches" });
     topic = dev.bundle_id + ".complication";
@@ -121,8 +127,10 @@ async function push(request, env) {
   const host = dev.environment === "development" ? "api.sandbox.push.apple.com" : "api.push.apple.com";
   const res = await fetch(`https://${host}/3/device/${token}`, { method: "POST", headers, body: JSON.stringify(payload) });
   const text = await res.text();
-  if (res.status === 410 || (res.status === 400 && text.includes("BadDeviceToken"))) {
-    await env.DEVICES.delete("dev:" + b.install_id);   // token is dead; let the app re-register
+  // A dead device token means the install is gone: drop it so the app re-registers. A dead Live
+  // Activity token only means that activity ended, so the registration stays.
+  if (type !== "liveactivity" && (res.status === 410 || (res.status === 400 && text.includes("BadDeviceToken")))) {
+    await env.DEVICES.delete("dev:" + b.install_id);
   }
   return reply(res.ok ? 200 : 502, { ok: res.ok, apns_status: res.status, apns: text.slice(0, 200) });
 }

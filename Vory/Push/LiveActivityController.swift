@@ -82,6 +82,9 @@ final class LiveActivityController: TurnActivityReporting {
             var st = a.content.state
             st.endedAtUnix = st.endedAtUnix ?? Date().timeIntervalSince1970
             h.end(st)
+            // Its push token dies with it; a finish that was left up for the companion's buzz
+            // (token kept) must not leave the gateway aiming at a dead activity.
+            NotificationCenter.default.post(name: .hermesLiveActivityToken, object: nil, userInfo: ["token": "", "storedID": sid, "startedAt": 0.0])
         }
     }
 
@@ -116,7 +119,8 @@ final class LiveActivityController: TurnActivityReporting {
         let botName = chat.runtime.profiles.first { $0.name == chat.profileName }?.label ?? chat.profileName
         let attributes = HermesTurnAttributes(sessionTitle: chat.title, storedSessionID: chat.storedID,
                                               connectionID: chat.runtime.connection.id.uuidString, profile: chat.profileName,
-                                              model: shortModel, tintHex: BotColors.hex(for: chat.profileName), botName: botName)
+                                              model: shortModel, tintHex: BotColors.hex(for: chat.profileName), botName: botName,
+                                              avatar: BotAvatarStore.choice(for: chat.profileName).raw)
         let state = HermesTurnAttributes.ContentState(phase: "streaming", detail: "Thinking…", outputTokens: chat.usage?.output ?? 0,
                                                        contextPercent: chat.usage?.contextPercent, needsAttention: false, startedAt: startedAt)
         do {
@@ -167,22 +171,33 @@ final class LiveActivityController: TurnActivityReporting {
                                                       outputTokens: chat.usage?.output ?? 0, contextPercent: chat.usage?.contextPercent, needsAttention: false,
                                                       startedAt: startedAt, endedAt: Date())
         var alertedID: String?
+        var keepToken = false
         if let handle {
             Self.endingIDs.insert(handle.activity.id); self.handle = nil
             if !inFront {
-                // The app is still awake in the background: it beats the companion's push, so it must
-                // deliver the alert itself — expand the Island and buzz. Nothing ends the activity here:
-                // ending removes it from the Island and cuts the expanded alert short, so the finished
-                // card stays (exactly like the companion's push) until the app is next opened.
-                handle.alert(state, title: botName, body: phase == "error" ? "The turn failed — tap to see why" : "Finished — tap to read the reply")
+                // The app is still awake in the background, so it has the news before the companion's
+                // push. Nothing ends the activity here: ending removes it from the Island, and the
+                // finished card should stay (exactly like the companion's path) until the app opens.
                 alertedID = handle.activity.id
-                Self.note("alerted from the app (background), card kept until the app opens")
+                if LocalNotifier.companionDelivers {
+                    // Collapsed finish: the card switches to "Finished" without expanding, and the
+                    // companion's push, which follows this same activity, delivers the buzz.
+                    handle.update(state)
+                    keepToken = true
+                    Self.note("finished from the app (background), buzz left to the companion")
+                } else {
+                    handle.alert(state, title: botName, body: phase == "error" ? "The turn failed — tap to see why" : "Finished — tap to read the reply")
+                    Self.note("alerted from the app (background), card kept until the app opens")
+                }
             } else {
                 handle.end(state)
             }
         }
-        // The companion routes finish/approval alerts through an active activity; tell it there is none now.
-        NotificationCenter.default.post(name: .hermesLiveActivityToken, object: nil, userInfo: ["token": "", "storedID": chat.storedID, "startedAt": 0.0])
+        // The companion routes finish/approval alerts through an active activity; tell it there is none
+        // now — unless the activity was just left up for the companion's finish push to reach.
+        if !keepToken {
+            NotificationCenter.default.post(name: .hermesLiveActivityToken, object: nil, userInfo: ["token": "", "storedID": chat.storedID, "startedAt": 0.0])
+        }
         // Whatever else the system still shows for this chat (an activity from before a relaunch, or one
         // whose end push never arrived) goes with it. The one that just alerted is left alone.
         for a in Activity<HermesTurnAttributes>.activities where a.attributes.storedSessionID == chat.storedID && a.id != alertedID {

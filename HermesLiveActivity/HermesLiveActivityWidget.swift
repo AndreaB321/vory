@@ -27,7 +27,7 @@ struct HermesTurnLiveActivity: Widget {
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     HStack(spacing: 8) {
-                        PhaseBadge(phase: context.state.phase, attention: context.state.needsAttention, size: 30, botHex: context.attributes.tintHex)
+                        BotMark(attributes: context.attributes, state: context.state, size: 34)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(context.attributes.displayBotName).font(.headline).lineLimit(1)
                             Text(PhaseText.headline(for: context.state)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -51,7 +51,11 @@ struct HermesTurnLiveActivity: Widget {
                     .padding(.top, 4)
                 }
             } compactLeading: {
-                PhaseGlyph(phase: context.state.phase, attention: context.state.needsAttention, botHex: context.attributes.tintHex)
+                HStack(spacing: 4) {
+                    BotMark(attributes: context.attributes, state: context.state, size: 22)
+                    PhaseGlyph(phase: context.state.phase, attention: context.state.needsAttention, botHex: context.attributes.tintHex)
+                        .font(.caption2.weight(.semibold))
+                }
             } compactTrailing: {
                 if context.state.needsAttention {
                     Text("Reply").font(.caption2.weight(.semibold)).foregroundStyle(.orange)
@@ -152,6 +156,52 @@ struct PhaseGlyph: View {
     }
 }
 
+/// The bot itself: its animated character as a still frame (WidgetKit views cannot animate) or
+/// its initial on the bot colour, with a small phase badge on the corner. Photos live in the app's
+/// own container, which the widget cannot read, so they fall back to the initial.
+struct BotMark: View {
+    var attributes: HermesTurnAttributes
+    var state: HermesTurnAttributes.ContentState
+    var size: CGFloat
+
+    private var tint: Color { Color(hexString: attributes.tintHex) ?? PhaseStyle.tint("streaming") }
+    private var style: String? {
+        guard let raw = attributes.avatar, raw.hasPrefix("animated:") else { return nil }
+        return String(raw.dropFirst("animated:".count))
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            if let style {
+                Canvas(opaque: false, rendersAsynchronously: false) { ctx, sz in
+                    let r = CGRect(origin: .zero, size: sz)
+                    ctx.clip(to: Path(ellipseIn: r))
+                    ctx.fill(Path(ellipseIn: r), with: .linearGradient(Gradient(colors: [tint.opacity(0.95), tint.opacity(0.65)]), startPoint: .zero, endPoint: CGPoint(x: 0, y: sz.height)))
+                    let z = AvatarArt.zoom(style)
+                    ctx.translateBy(x: sz.width / 2, y: sz.height / 2)
+                    ctx.scaleBy(x: z, y: z)
+                    ctx.translateBy(x: -sz.width / 2, y: -sz.height / 2)
+                    AvatarArt.draw(style, in: &ctx, size: sz, time: 0, active: false)
+                }
+            } else {
+                ZStack {
+                    Circle().fill(tint.gradient)
+                    Text(String(attributes.displayBotName.prefix(1)).uppercased())
+                        .font(.system(size: size * 0.48, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                }
+            }
+            if size >= 28 {
+                PhaseBadge(phase: state.phase, attention: state.needsAttention, size: size * 0.42, botHex: attributes.tintHex)
+                    .overlay(Circle().strokeBorder(.black.opacity(0.9), lineWidth: 1.5))
+                    .offset(x: size * 0.08, y: size * 0.08)
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
 /// Tinted disc with the phase glyph, used at larger sizes.
 struct PhaseBadge: View {
     var phase: String
@@ -179,21 +229,13 @@ struct StatsRow: View {
     var state: HermesTurnAttributes.ContentState
     var body: some View {
         HStack(spacing: 12) {
-            if let end = state.endedAt {
-                // Once the turn is over the total time is the figure that matters; the token count
-                // the companion knows at that point is often nothing.
-                HStack(spacing: 4) {
-                    Image(systemName: "clock")
-                    Text(Duration.seconds(max(0, end.timeIntervalSince(state.startedAt))).formatted(.time(pattern: .minuteSecond)) + " total").monospacedDigit()
-                }
-                .font(.caption)
-            } else {
-                HStack(spacing: 4) {
-                    Image(systemName: "text.word.spacing")
-                    Text("\(Format.tokens(state.outputTokens)) tokens").monospacedDigit()
-                }
-                .font(.caption)
+            // The timer already sits in the corner of every layout, so this row is tokens and
+            // context, never the time again.
+            HStack(spacing: 4) {
+                Image(systemName: "text.word.spacing")
+                Text("\(Format.tokens(state.outputTokens)) tokens").monospacedDigit()
             }
+            .font(.caption)
             if let pct = state.contextPercent {
                 HStack(spacing: 5) {
                     Text("Context").font(.caption)
@@ -224,7 +266,7 @@ struct LockScreenTurnView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 12) {
-                PhaseBadge(phase: state.phase, attention: state.needsAttention, size: 40, botHex: attributes.tintHex)
+                BotMark(attributes: attributes, state: state, size: 44)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(attributes.displayBotName).font(.headline).lineLimit(1)
                     Text(attributes.sessionTitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
