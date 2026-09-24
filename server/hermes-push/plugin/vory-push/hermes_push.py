@@ -48,7 +48,7 @@ except ImportError as exc:  # pragma: no cover
 log = logging.getLogger("hermes-push")
 
 # Keep in step with plugin/vory-push/plugin.yaml; the app compares the two.
-VERSION = "1.0.14.1"
+VERSION = "1.0.15"
 USER_AGENT = f"Vory-Push/{VERSION} (Hermes companion)"
 try:
     # Fingerprint of the code actually running: the app compares it with the copy it ships, so a
@@ -561,7 +561,8 @@ class Relay:
             self._note_la(f"finish alert ({phase})", ok)
             if ok:
                 reached.add(d.get("device_id"))
-            end_payload = {"aps": {"timestamp": now + 4, "event": "end", "content-state": state, "dismissal-date": now + 45}}
+            # The finished card stays until the app is opened (iOS caps this at four hours).
+            end_payload = {"aps": {"timestamp": now + 4, "event": "end", "content-state": state, "dismissal-date": now + 4 * 3600}}
             try:
                 asyncio.get_running_loop().call_later(4, lambda d=d, p=end_payload: self.apns.send(d, p, push_type="liveactivity", token_override=d["live_activity_token"]))
             except RuntimeError:
