@@ -1,0 +1,446 @@
+import QuickLook
+import SwiftUI
+import VoryCore
+
+struct TranscriptView: View {
+    @Bindable var chat: ChatSession
+    /// Long-press › "Edit & resend" hands the text back to the composer.
+    var onEditMessage: (String) -> Void = { _ in }
+    /// Height of the floating dock, so the last line clears it while text still scrolls under.
+    var bottomInset: CGFloat = 60
+    /// Height of the floating header (the nav bar is hidden in a chat).
+    var topInset: CGFloat = 96
+    @State private var stickToBottom = true
+    @State private var awayFromBottom = false
+    /// Reasoning disclosures that are open, keyed by item id — kept here so a re-rendered row
+    /// does not forget it (the earlier "can't collapse again" bug).
+    @State private var openReasoning: Set<String> = []
+    @State private var selectText: String?
+    /// 0…1 while the user drags the transcript left, revealing per-message times like Messages.
+    @State private var timeReveal: CGFloat = 0
+    @AppStorage(ChatStyle.showToolCalls) private var showToolCalls = true
+    @AppStorage(ChatStyle.showReasoning) private var showReasoning = true
+    @AppStorage(ChatStyle.showTurnStats) private var showTurnStats = true
+    @AppStorage(ChatStyle.showSystemNotes) private var showSystemNotes = true
+
+    private var visibleItems: [TranscriptItem] {
+        chat.items.filter { item in
+            switch item.kind {
+            case .tool, .subagent: return showToolCalls
+            case .system: return showSystemNotes
+            default: return true
+            }
+        }
+    }
+
+    private var rows: [TranscriptRowModel] { TranscriptRowModel.build(visibleItems) }
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    if chat.items.isEmpty {
+                        VStack(spacing: 8) {
+                            BotAvatar(profile: chat.profileName, size: 56)
+                            Text("Say something to \(chat.profileName)").foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity).padding(.top, 80)
+                    }
+                    ForEach(rows) { row in
+                        if let sep = row.separator {
+                            Text(sep).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity).padding(.vertical, 6)
+                        }
+                        TranscriptRow(item: row.item, showReasoning: showReasoning, showStats: showTurnStats, onEdit: onEditMessage,
+                                      reasoningOpen: Binding(get: { openReasoning.contains(row.item.id) },
+                                                             set: { if $0 { openReasoning.insert(row.item.id) } else { openReasoning.remove(row.item.id) } }),
+                                      onSelectText: { selectText = $0 })
+                            .id(row.item.id)
+                            .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
+                            .offset(x: -timeReveal * 56)
+                            .overlay(alignment: .trailing) {
+                                Text(row.item.timestamp, style: .time).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                                    .fixedSize().offset(x: 60 - timeReveal * 56).opacity(timeReveal)
+                                    .accessibilityHidden(timeReveal < 0.5)
+                            }
+                    }
+                    if let s = chat.statusLine, chat.isRunning {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text(s).font(.caption).foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 4)
+                    }
+                    Color.clear.frame(height: 0).id("bottom")
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .animation(.snappy(duration: 0.28), value: chat.items.count)
+            }
+            .contentMargins(.bottom, bottomInset + 8, for: .scrollContent)
+            .contentMargins(.top, topInset + 8, for: .scrollContent)
+            .onScrollGeometryChange(for: Bool.self) { g in
+                g.contentSize.height - (g.contentOffset.y + g.containerSize.height) > 120
+            } action: { _, away in
+                withAnimation(.snappy) { awayFromBottom = away }
+                stickToBottom = !away
+            }
+            .overlay(alignment: .bottomTrailing) {
+                JumpToBottomButton(visible: awayFromBottom) {
+                    withAnimation(.snappy) { proxy.scrollTo("bottom", anchor: .bottom) }
+                    stickToBottom = true
+                }
+                .padding(.trailing, 16).padding(.bottom, bottomInset + 12)
+            }
+            .sheet(item: Binding(get: { selectText.map { SelectTextItem(text: $0) } }, set: { selectText = $0?.text })) { SelectTextSheet(text: $0.text) }
+            .ignoresSafeArea(edges: .top)
+            // Drag from the right edge inward to peek at message times, then it springs back.
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 24)
+                    .onChanged { v in
+                        guard abs(v.translation.width) > abs(v.translation.height), v.translation.width < 0 else { return }
+                        timeReveal = min(1, -v.translation.width / 80)
+                    }
+                    .onEnded { _ in withAnimation(.snappy) { timeReveal = 0 } }
+            )
+            .scrollDismissesKeyboard(.interactively)
+            .defaultScrollAnchor(.bottom)
+            // Whole item, not just `.kind`: the tokens/sec footer lands after the text does and
+            // must pull the bottom back into view too.
+            .onChange(of: chat.items.last) { _, _ in
+                if stickToBottom { withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo("bottom", anchor: .bottom) } }
+            }
+            .onChange(of: chat.items.count) { _, _ in
+                if stickToBottom { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
+        }
+    }
+}
+
+/// UserDefaults keys for the Appearance › Chat toggles.
+enum ChatStyle {
+    static let showToolCalls = "chat.showToolCalls"
+    static let showReasoning = "chat.showReasoning"
+    static let showTurnStats = "chat.showTurnStats"
+    static let showSystemNotes = "chat.showSystemNotes"
+}
+
+/// A transcript item plus the "Tue, Sep 22 at 6:30 PM" separator that precedes it when the
+/// conversation paused for a while, the way Messages breaks up a thread.
+struct TranscriptRowModel: Identifiable {
+    var item: TranscriptItem
+    var separator: String?
+    var id: String { item.id }
+
+    static let gap: TimeInterval = 15 * 60
+
+    static func build(_ items: [TranscriptItem], now: Date = Date()) -> [TranscriptRowModel] {
+        var out: [TranscriptRowModel] = []
+        var last: Date?
+        for item in items {
+            var sep: String?
+            if last == nil || item.timestamp.timeIntervalSince(last!) > gap {
+                sep = label(for: item.timestamp, now: now)
+            }
+            last = item.timestamp
+            out.append(TranscriptRowModel(item: item, separator: sep))
+        }
+        return out
+    }
+
+    static func label(for date: Date, now: Date) -> String {
+        let cal = Calendar.current
+        let time = date.formatted(date: .omitted, time: .shortened)
+        if cal.isDate(date, inSameDayAs: now) { return "Today \(time)" }
+        if let y = cal.date(byAdding: .day, value: -1, to: now), cal.isDate(date, inSameDayAs: y) { return "Yesterday \(time)" }
+        if let w = cal.date(byAdding: .day, value: -6, to: now), date > w { return date.formatted(.dateTime.weekday(.wide)) + " \(time)" }
+        return date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()) + " at \(time)"
+    }
+}
+
+struct SelectTextItem: Identifiable { let text: String; var id: String { text } }
+
+struct TranscriptRow: View {
+    var item: TranscriptItem
+    var showReasoning = true
+    var showStats = true
+    var onEdit: (String) -> Void = { _ in }
+    var reasoningOpen: Binding<Bool> = .constant(false)
+    var onSelectText: (String) -> Void = { _ in }
+
+    var body: some View {
+        switch item.kind {
+        case .user(let text, let attachments):
+            HStack {
+                Spacer(minLength: 56)
+                VStack(alignment: .trailing, spacing: 6) {
+                    if !attachments.isEmpty { AttachmentStrip(attachments: attachments) }
+                    if !text.isEmpty {
+                        Text(text)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 14).padding(.vertical, 9)
+                            .foregroundStyle(.white)
+                            .background(Color.accentColor, in: .rect(cornerRadius: 18))
+                            .contextMenu {
+                                Button { UIPasteboard.general.string = text } label: { Label("Copy", systemImage: "doc.on.doc") }
+                                Button { onSelectText(text) } label: { Label("Select Text", systemImage: "selection.pin.in.out") }
+                                Button { onEdit(text) } label: { Label("Edit & resend", systemImage: "pencil") }
+                                ShareLink(item: text) { Label("Share", systemImage: "square.and.arrow.up") }
+                            }
+                    }
+                }
+            }
+        case .assistant(let text, let reasoning, let streaming):
+            HStack {
+                VStack(alignment: .leading, spacing: 6) {
+                    if showReasoning, let reasoning, !reasoning.isEmpty { ReasoningDisclosure(text: reasoning, open: reasoningOpen) }
+                    MarkdownView(text: text)
+                    if streaming && text.isEmpty {
+                        HStack(spacing: 4) { ForEach(0..<3, id: \.self) { _ in Circle().fill(.secondary).frame(width: 6, height: 6) } }
+                            .padding(.vertical, 2)
+                    }
+                    if showStats, let s = item.stats {
+                        Text(s.label).font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
+                            .accessibilityLabel("Turn statistics: \(s.label)")
+                    }
+                }
+                .padding(.horizontal, 14).padding(.vertical, 9)
+                .background(Color(.systemGray5), in: .rect(cornerRadius: 18))
+                .contextMenu {
+                    Button { UIPasteboard.general.string = text } label: { Label("Copy", systemImage: "doc.on.doc") }
+                    Button { onSelectText(text) } label: { Label("Select Text", systemImage: "selection.pin.in.out") }
+                    ShareLink(item: text) { Label("Share", systemImage: "square.and.arrow.up") }
+                }
+                Spacer(minLength: 40)
+            }
+        case .tool(let act):
+            ToolCardView(activity: act)
+        case .system(let text, let symbol):
+            HStack(spacing: 6) {
+                Image(systemName: symbol)
+                Text(text)
+            }
+            .font(.caption).foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 2)
+        case .error(let text):
+            Label(text, systemImage: "exclamationmark.triangle.fill")
+                .font(.footnote)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.red.opacity(0.12), in: .rect(cornerRadius: 12))
+                .foregroundStyle(.red)
+                .textSelection(.enabled)
+        case .subagent(let goal, let status):
+            HStack(spacing: 8) {
+                Image(systemName: status == "running" ? "person.2.circle" : "person.2.circle.fill")
+                Text(goal).lineLimit(2)
+                Spacer()
+                Text(status).font(.caption2).foregroundStyle(.secondary)
+            }
+            .font(.footnote)
+            .padding(10)
+            .glassEffect(.regular, in: .rect(cornerRadius: 12))
+        }
+    }
+}
+
+struct ReasoningDisclosure: View {
+    var text: String
+    @Binding var open: Bool
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            // One full-width hit target, edge to edge, rather than DisclosureGroup's label-only one.
+            Button { withAnimation(.snappy) { open.toggle() } } label: {
+                HStack {
+                    Label("Reasoning", systemImage: "brain").font(.caption).foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(open ? 90 : 0))
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(open ? "Hide reasoning" : "Show reasoning")
+            if open {
+                Text(text).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+        }
+    }
+}
+
+/// Renders markdown blocks; inline styling from AttributedString(markdown:).
+struct MarkdownView: View {
+    var text: String
+
+    var body: some View {
+        let blocks = MarkdownParser.blocks(from: text)
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                render(block)
+            }
+        }
+        .textSelection(.enabled)
+    }
+
+    @ViewBuilder private func render(_ block: MarkdownBlock) -> some View {
+        switch block {
+        case .paragraph(let t):
+            Text(MarkdownParser.inline(t))
+        case .heading(let level, let t):
+            Text(MarkdownParser.inline(t)).font(level <= 1 ? .title2.weight(.bold) : level == 2 ? .title3.weight(.semibold) : .headline)
+        case .code(let lang, let code, let closed):
+            // Wrapped, not side-scrolling: a horizontal pan inside a bubble used to fight the
+            // timestamp reveal. Long lines wrap; a copy button sits in the corner.
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    if let lang, !lang.isEmpty { Text(lang).font(.caption2).foregroundStyle(.secondary) }
+                    Spacer(minLength: 0)
+                    if closed { CopyButton(text: code) } else { ProgressView().controlSize(.mini) }
+                }
+                .padding(.horizontal, 10).padding(.top, 6)
+                Text(code).font(.system(.footnote, design: .monospaced)).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true).padding(10)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 10))
+        case .bullets(let items):
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, it in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) { Text("•"); Text(MarkdownParser.inline(it)) }
+                }
+            }
+        case .numbered(let items):
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(items.enumerated()), id: \.offset) { i, it in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) { Text("\(i + 1).").monospacedDigit(); Text(MarkdownParser.inline(it)) }
+                }
+            }
+        case .quote(let t):
+            HStack(spacing: 10) {
+                RoundedRectangle(cornerRadius: 2).fill(.secondary).frame(width: 3)
+                Text(MarkdownParser.inline(t)).foregroundStyle(.secondary)
+            }
+        case .rule:
+            Divider()
+        }
+    }
+}
+
+struct ToolCardView: View {
+    var activity: ToolActivity
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                statusIcon
+                Text(activity.displayName).font(.subheadline.weight(.medium))
+                if let risk = activity.risk { Text(risk).font(.caption2).padding(.horizontal, 6).padding(.vertical, 2).background(.orange.opacity(0.2), in: .capsule) }
+                Spacer()
+                if let d = activity.durationSeconds { Text(String(format: "%.1fs", d)).font(.caption2).foregroundStyle(.secondary) }
+                Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption).foregroundStyle(.secondary)
+            }
+            if let c = activity.context, !c.isEmpty, !expanded {
+                Text(c).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
+            if let s = activity.summary, !s.isEmpty, !expanded {
+                Text(s).font(.caption).lineLimit(2)
+            }
+            if expanded {
+                if let a = activity.argsText, !a.isEmpty {
+                    Text(activity.name == "terminal" || activity.name == "bash" ? "Command" : "Arguments").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    CodeBlock(text: a, lineCap: 40)
+                }
+                if let r = activity.resultText, !r.isEmpty {
+                    Text("Output").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    CodeBlock(text: r, lineCap: 30)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 14))
+        .contentShape(.rect)
+        .onTapGesture { withAnimation(.snappy) { expanded.toggle() } }
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Double-tap to expand the tool log")
+    }
+
+    @ViewBuilder private var statusIcon: some View {
+        switch activity.status {
+        case .running: ProgressView().controlSize(.small)
+        case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+        case .failed: Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+        }
+    }
+}
+
+/// Monospaced block with a light background, capped at `lineCap` lines until "Show more" —
+/// a terminal transcript can be thousands of lines.
+struct CodeBlock: View {
+    var text: String
+    var lineCap: Int
+    @State private var showAll = false
+
+    private var lines: [Substring] { text.split(separator: "\n", omittingEmptySubsequences: false) }
+    private var shown: String {
+        showAll || lines.count <= lineCap ? String(text.prefix(20_000)) : lines.prefix(lineCap).joined(separator: "\n")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(shown).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true).padding(10).padding(.trailing, 24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 10))
+            .overlay(alignment: .topTrailing) { CopyButton(text: text).padding(6) }
+            if lines.count > lineCap {
+                Button(showAll ? "Show less" : "Show \(lines.count - lineCap) more lines") { withAnimation(.snappy) { showAll.toggle() } }
+                    .font(.caption)
+            }
+        }
+    }
+}
+
+struct AttachmentStrip: View {
+    var attachments: [AttachmentPreview]
+    @State private var preview: URL?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(attachments) { a in
+                Button { if let u = a.localURL { preview = u } } label: {
+                    if a.kind == .image, let u = a.localURL, let img = UIImage(contentsOfFile: u.path) {
+                        Image(uiImage: img).resizable().scaledToFill().frame(width: 96, height: 96).clipShape(.rect(cornerRadius: 12))
+                    } else {
+                        Label(a.name, systemImage: a.kind == .pdf ? "doc.richtext" : a.kind == .audio ? "waveform" : a.kind == .video ? "video" : "doc")
+                            .font(.caption).lineLimit(1)
+                            .padding(8).glassEffect(.regular, in: .rect(cornerRadius: 10))
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .quickLookPreview($preview)
+    }
+}
+
+/// Small clipboard button that flips to a check mark for a moment after copying.
+struct CopyButton: View {
+    var text: String
+    @State private var copied = false
+    var body: some View {
+        Button {
+            UIPasteboard.general.string = text
+            withAnimation(.snappy) { copied = true }
+            Task { try? await Task.sleep(for: .seconds(1.5)); withAnimation { copied = false } }
+        } label: {
+            Image(systemName: copied ? "checkmark" : "doc.on.doc").font(.caption).foregroundStyle(copied ? .green : .secondary)
+                .frame(width: 24, height: 20).contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(copied ? "Copied" : "Copy code")
+    }
+}

@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Archive Vory and upload it to TestFlight, non-interactively.
+#
+# Needs an App Store Connect API key, so no Apple ID password or 2FA prompt is involved.
+# Configure it once by exporting these (or putting them in Tools/release/.env, which is gitignored):
+#
+#   ASC_KEY_ID=ABCD123456                 # the API key's Key ID
+#   ASC_ISSUER_ID=aaaaaaaa-bbbb-....      # the Issuer ID from the Keys page
+#   ASC_KEY_PATH=$HOME/.appstoreconnect/private_keys/AuthKey_ABCD123456.p8
+#   VORY_PUSH_RELAY_URL=https://vory-push-relay.example.workers.dev   # optional: the push relay you deployed
+#
+# One-time setup that must happen in a browser first, because Apple allows no other route:
+#   1. Accept any pending agreements in App Store Connect.
+#   2. Create the app record for the bundle id below, named "Vory: Hermes Agent UI".
+# After that this script can run unattended for every subsequent build.
+
+set -euo pipefail
+
+cd "$(dirname "$0")/../.."
+ROOT="$PWD"
+[ -f Tools/release/.env ] && . Tools/release/.env
+
+PROJECT="Vory.xcodeproj"
+SCHEME="Vory"
+BUNDLE_ID="com.vorantx.vory"
+ARCHIVE_DIR="${ARCHIVE_DIR:-$ROOT/build/archives}"
+
+fail() { printf '\n%s\n' "$1" >&2; exit 1; }
+
+for var in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_PATH; do
+    [ -n "${!var:-}" ] || fail "$var is not set. See the header of this script."
+done
+[ -f "$ASC_KEY_PATH" ] || fail "API key not found at $ASC_KEY_PATH"
+
+# App Store Connect rejects a build number it has already seen for this version, so derive a
+# monotonic one from the clock rather than relying on anyone remembering to bump it.
+BUILD_NUMBER="${BUILD_NUMBER:-$(date +%y%m%d%H%M)}"
+# Info.plist holds the $(MARKETING_VERSION) macro, so read the real value from the project.
+MARKETING_VERSION="${MARKETING_VERSION:-$(grep -m1 'MARKETING_VERSION = ' "$PROJECT/project.pbxproj" | sed 's/.*= *//; s/;//')}"
+
+ARCHIVE="$ARCHIVE_DIR/Vory-$BUILD_NUMBER.xcarchive"
+mkdir -p "$ARCHIVE_DIR"
+
+AUTH=(-authenticationKeyPath "$ASC_KEY_PATH"
+      -authenticationKeyID "$ASC_KEY_ID"
+      -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+
+echo "==> Archiving $BUNDLE_ID $MARKETING_VERSION ($BUILD_NUMBER)"
+xcodebuild archive \
+    -project "$PROJECT" \
+    -scheme "$SCHEME" \
+    -configuration Release \
+    -destination 'generic/platform=iOS' \
+    -archivePath "$ARCHIVE" \
+    -allowProvisioningUpdates \
+    "${AUTH[@]}" \
+    CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+    VORY_PUSH_RELAY_URL="${VORY_PUSH_RELAY_URL:-}" \
+    | grep -E 'error:|warning: .*(signing|provision)|ARCHIVE' || true
+
+[ -d "$ARCHIVE" ] || fail "Archive was not produced. Re-run without the grep filter to see why."
+
+echo "==> Exporting with manual distribution signing"
+EXPORT_DIR="$ARCHIVE_DIR/export-$BUILD_NUMBER"
+rm -rf "$EXPORT_DIR"
+xcodebuild -exportArchive \
+    -archivePath "$ARCHIVE" \
+    -exportOptionsPlist Tools/release/ExportOptions.plist \
+    -exportPath "$EXPORT_DIR" \
+    "${AUTH[@]}"
+
+IPA="$(ls "$EXPORT_DIR"/*.ipa 2>/dev/null | head -1)"
+[ -n "$IPA" ] || fail "No .ipa was produced in $EXPORT_DIR"
+
+# Guard the one thing that silently breaks background push: a build signed for the sandbox
+# APNs environment will never receive notifications sent to the production host.
+# PlistBuddy cannot read a pipe ("Error Reading File: /dev/stdin"), so go through real files.
+GUARD_TMP="$(mktemp -d)"
+unzip -p "$IPA" 'Payload/*.app/embedded.mobileprovision' > "$GUARD_TMP/prov.cms" 2>/dev/null || true
+security cms -D -i "$GUARD_TMP/prov.cms" -o "$GUARD_TMP/prov.plist" 2>/dev/null || true
+APS="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:aps-environment' "$GUARD_TMP/prov.plist" 2>/dev/null || true)"
+rm -rf "$GUARD_TMP"
+[ "$APS" = "production" ] || fail "Expected aps-environment=production in the signed build, got '${APS:-absent}'."
+echo "    signed with aps-environment=production"
+
+echo "==> Uploading to TestFlight"
+xcrun altool --upload-app --type ios --file "$IPA" \
+    --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+
+cat <<EOS
+
+Uploaded build $BUILD_NUMBER of version $MARKETING_VERSION.
+
+Apple now processes it, which usually takes a few minutes. Internal testers get it automatically
+once processing finishes; no review is involved. Export compliance is already answered in
+Info.plist, so nothing should be waiting on you.
+EOS

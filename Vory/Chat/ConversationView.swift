@@ -1,0 +1,232 @@
+import SwiftUI
+import VoryCore
+
+struct ConversationView: View {
+    @Environment(AppModel.self) private var model
+    var route: ChatRoute
+
+    @State private var chat: ChatSession?
+    @State private var loadError: String?
+    @State private var showContext = false
+    @State private var showProfile = false
+    @State private var composerText = ""
+    @State private var dockHeight: CGFloat = 60
+    @State private var headerHeight: CGFloat = 96
+    @Namespace private var glassNamespace
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        Group {
+            if let chat {
+                TranscriptView(chat: chat, onEditMessage: { composerText = $0 }, bottomInset: dockHeight, topInset: headerHeight)
+                    .overlay {
+                        if let e = chat.resumeError, chat.items.isEmpty {
+                            ContentUnavailableView("Could not open chat", systemImage: "exclamationmark.triangle", description: Text(e))
+                        }
+                    }
+                    // Like Messages: header and dock float over the thread and the text scrolls under their glass.
+                    .overlay(alignment: .bottom) {
+                        BottomDock(chat: chat, text: $composerText, namespace: glassNamespace)
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { if $0 < 400 { dockHeight = $0 } }
+                    }
+                    .overlay(alignment: .top) {
+                        ChatHeader(chat: chat, onBack: { dismiss() }, onProfile: { showProfile = true }, onContext: { showContext = true },
+                                   onNewChat: { Task { await newChat() } }, onClose: { model.runtime?.closeChat(chat); dismiss() })
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { if $0 < 200 { headerHeight = $0 } }
+                    }
+                    .navigationTitle(chat.title)
+                    .toolbar(.hidden, for: .navigationBar)
+                    .sheet(isPresented: $showContext) { ContextBreakdownSheet(chat: chat) }
+                    .sheet(isPresented: $showProfile) { ProfileInfoSheet(chat: chat, profileName: chat.profileName) }
+                    .onChange(of: model.pendingRoute) { _, r in handle(route: r, chat: chat) }
+                    .onAppear { handle(route: model.pendingRoute, chat: chat) }
+            } else if let loadError {
+                ContentUnavailableView("Could not open chat", systemImage: "exclamationmark.triangle", description: Text(loadError))
+            } else {
+                ProgressView("Opening…")
+            }
+        }
+        // Like Messages: inside a conversation the composer owns the bottom edge.
+        .toolbarVisibility(.hidden, for: .tabBar)
+        // The navigation bar is hidden, which switches off UIKit's edge-swipe back; put it back.
+        .background(InteractivePopEnabler())
+        .task { await open() }
+    }
+
+    private func open() async {
+        guard let runtime = model.runtime else { loadError = "No gateway connected."; return }
+        do {
+            if let p = route.profile, !p.isEmpty, runtime.selectedProfile != p { runtime.selectedProfile = p }
+            // Stored chats return at once with the cached transcript and sync behind the header.
+            if let sid = route.storedID { chat = try await runtime.openChat(storedID: sid, title: route.title) }
+            else { chat = try await runtime.newChat() }
+        } catch {
+            loadError = error.localizedDescription
+        }
+    }
+
+    private func newChat() async {
+        guard let runtime = model.runtime else { return }
+        do { chat = try await runtime.newChat() } catch { loadError = error.localizedDescription }
+    }
+
+    private func handle(route r: PendingRoute?, chat: ChatSession) {
+        guard let r, r.storedSessionID == chat.storedID else { return }
+        model.pendingRoute = nil
+    }
+}
+
+/// Composer + queue + cards, in one glass container so the composer morphs into an approval card.
+struct BottomDock: View {
+    @Bindable var chat: ChatSession
+    @Binding var text: String
+    var namespace: Namespace.ID
+
+    var body: some View {
+        GlassEffectContainer(spacing: 12) {
+            VStack(spacing: 10) {
+                if let banner = chat.banner {
+                    HStack {
+                        Text(banner).font(.footnote).lineLimit(3)
+                        Spacer()
+                        Button { chat.banner = nil } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.plain)
+                    }
+                    .padding(12)
+                    .glassEffect(.regular, in: .rect(cornerRadius: 16))
+                }
+                if !chat.queue.isEmpty { QueueStrip(chat: chat) }
+                if let card = chat.firstCard {
+                    PendingCardView(chat: chat, card: card)
+                        .glassEffectID("dock", in: namespace)
+                        .contextMenu {
+                            if card.method == "approval" {
+                                Button { Task { await chat.respond(card: card, result: ["choice": "once"]) } } label: { Label("Allow once", systemImage: "checkmark") }
+                                Button { Task { await chat.respond(card: card, result: ["choice": "session"]) } } label: { Label("Allow for this session", systemImage: "checkmark.circle") }
+                                Button { Task { await chat.respond(card: card, result: ["choice": "always"]) } } label: { Label("Always allow", systemImage: "checkmark.seal") }
+                                Divider()
+                                Button(role: .destructive) { Task { await chat.respond(card: card, result: ["choice": "deny"]) } } label: { Label("Deny", systemImage: "xmark") }
+                            }
+                        }
+                } else {
+                    ComposerView(chat: chat, text: $text)
+                        .glassEffectID("dock", in: namespace)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 8)
+        }
+        .animation(.snappy, value: chat.firstCard?.id)
+    }
+}
+
+struct QueueStrip: View {
+    @Bindable var chat: ChatSession
+    @State private var editing: QueuedMessage?
+    @State private var draft = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Queued (\(chat.queue.count))").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            ForEach(chat.queue) { q in
+                HStack {
+                    Text(q.text).font(.subheadline).lineLimit(2)
+                    Spacer()
+                    Button { editing = q; draft = q.text } label: { Image(systemName: "pencil") }.buttonStyle(.plain)
+                    Button(role: .destructive) { chat.removeQueued(q.id) } label: { Image(systemName: "trash") }.buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(12)
+        .glassEffect(.regular, in: .rect(cornerRadius: 16))
+        .alert("Edit queued message", isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
+            TextField("Message", text: $draft)
+            Button("Save") { if let e = editing { chat.updateQueued(e.id, text: draft) }; editing = nil }
+            Button("Cancel", role: .cancel) { editing = nil }
+        }
+    }
+}
+
+/// The floating chat header, built like the Messages one: a glass back circle, a centred pill with
+/// the bot's avatar above the name (status while the agent works), and a glass … circle.
+struct ChatHeader: View {
+    @Bindable var chat: ChatSession
+    var onBack: () -> Void
+    var onProfile: () -> Void
+    var onContext: () -> Void
+    var onNewChat: () -> Void
+    var onClose: () -> Void
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Button(action: onBack) {
+                Image(systemName: "chevron.left").font(.title3.weight(.semibold))
+                    .frame(width: 44, height: 44).glassEffect(.regular.interactive(), in: .circle)
+            }
+            .buttonStyle(.plain).accessibilityLabel("Back").accessibilityIdentifier("chat.back")
+            Spacer(minLength: 0)
+            Button(action: onProfile) {
+                VStack(spacing: 4) {
+                    BotAvatar(profile: chat.profileName, size: 40, active: chat.isRunning)
+                    HStack(spacing: 3) {
+                        // Hug the text like Messages does; long titles are shortened in code rather
+                        // than letting a max-width frame stretch the pill across the screen.
+                        Text(chat.title.count > 26 ? String(chat.title.prefix(25)) + "…" : chat.title).font(.caption.weight(.semibold)).lineLimit(1)
+                        Image(systemName: "chevron.right").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
+                    }
+                    Text(chat.isRunning ? (chat.statusLine ?? "Thinking…") : (chat.isResuming ? "Syncing…" : chat.subtitle))
+                        .font(.caption2).lineLimit(1)
+                        .foregroundStyle(chat.isRunning ? BotColors.color(for: chat.profileName) : .secondary)
+                        .contentTransition(.numericText())
+                        .animation(.snappy, value: chat.statusLine)
+                }
+                .padding(.horizontal, 14).padding(.top, 6).padding(.bottom, 8)
+                .fixedSize()
+                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 22))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Chat info: \(chat.title), \(chat.subtitle)")
+            .accessibilityIdentifier("chat.titlePill")
+            Spacer(minLength: 0)
+            Menu {
+                Menu {
+                    ModelMenuContent(chat: chat)
+                } label: { Label("Model: \(chat.modelName.isEmpty ? "none" : (chat.modelName.split(separator: "/").last.map(String.init) ?? chat.modelName))", systemImage: "cpu") }
+                Button(action: onContext) { Label("Context usage\(chat.usage?.computedContextPercent.map { " · \($0)%" } ?? "")", systemImage: "gauge.with.dots.needle.33percent") }
+                Button(action: onProfile) { Label("Bot info", systemImage: "person.text.rectangle") }
+                Divider()
+                Button(action: onNewChat) { Label("New Chat", systemImage: "square.and.pencil") }
+                Button { Task { await chat.loadUsage() } } label: { Label("Refresh usage", systemImage: "arrow.clockwise") }
+                Divider()
+                Button(role: .destructive, action: onClose) { Label("Close session", systemImage: "xmark.circle") }
+            } label: {
+                Image(systemName: "ellipsis").font(.title3.weight(.semibold))
+                    .frame(width: 44, height: 44).glassEffect(.regular.interactive(), in: .circle)
+            }
+            .menuStyle(.button).buttonStyle(.plain)
+            .accessibilityIdentifier("chat.more")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+    }
+}
+
+/// Re-enables the navigation controller's interactive pop gesture while its bar is hidden, so a
+/// swipe from the left edge still goes back like every stock app.
+struct InteractivePopEnabler: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> Controller { Controller() }
+    func updateUIViewController(_ c: Controller, context: Context) { c.enable() }
+
+    final class Controller: UIViewController, UIGestureRecognizerDelegate {
+        override func didMove(toParent parent: UIViewController?) { super.didMove(toParent: parent); enable() }
+        override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); enable() }
+        func enable() {
+            guard let nav = navigationController ?? parent?.navigationController, let g = nav.interactivePopGestureRecognizer else { return }
+            g.isEnabled = true
+            g.delegate = self
+        }
+        func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
+            (navigationController ?? parent?.navigationController).map { $0.viewControllers.count > 1 } ?? false
+        }
+    }
+}

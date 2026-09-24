@@ -1,0 +1,748 @@
+#!/usr/bin/env python3
+"""hermes-push: APNs relay for the Hermes iOS app.
+
+Runs next to YOUR Hermes install. It connects to your gateway's /api/ws as an ordinary
+client, watches live sessions, and sends Apple Push Notifications to the devices that the
+iOS app registered under <HERMES_HOME>/push/devices/*.json.
+
+Pushes: approval waiting, clarify/secret question waiting, turn finished, turn error,
+cron session finished. Live Activities registered by the app are ended when the turn ends.
+
+Configuration (environment variables, all HERMES_PUSH_*):
+  HERMES_PUSH_GATEWAY_URL          e.g. http://127.0.0.1:9119 (local) or https://hermes.example.com
+  HERMES_PUSH_PUBLIC_URL           the URL the phone itself uses; carried in every push so the app can route it
+  HERMES_PUSH_GATEWAY_TOKEN        dashboard session token (HERMES_DASHBOARD_SESSION_TOKEN) -- loopback / no auth gate
+  HERMES_PUSH_GATEWAY_BEARER       OR a bearer access token for a gated gateway (from /auth/native/token)
+  HERMES_PUSH_CF_ACCESS_CLIENT_ID / HERMES_PUSH_CF_ACCESS_CLIENT_SECRET   optional Cloudflare Access service token
+  HERMES_PUSH_APNS_KEY_FILE        path to your AuthKey_XXXXXXXXXX.p8
+  HERMES_PUSH_APNS_KEY_ID          the 10-char key id
+  HERMES_PUSH_APNS_TEAM_ID         your Apple Developer team id
+  HERMES_PUSH_APNS_TOPIC           the app's bundle id (default com.vorantx.vory)
+  HERMES_PUSH_APNS_SANDBOX         1 for development builds (default: follow each device's apns_environment)
+  HERMES_PUSH_DEVICES_DIR          default <HERMES_HOME>/push/devices
+  HERMES_PUSH_POLL_SECONDS         session discovery / test-request interval (default 3)
+
+Dependencies: websockets, PyJWT, cryptography (all present in the Hermes venv).
+"""
+from __future__ import annotations
+
+import asyncio
+import glob
+import hashlib
+import json
+import logging
+import os
+import ssl
+import subprocess
+import sys
+import time
+import uuid
+from pathlib import Path
+
+try:
+    import jwt  # PyJWT
+    import websockets
+except ImportError as exc:  # pragma: no cover
+    sys.exit(f"missing dependency: {exc}. Run with the Hermes venv python or `pip install websockets pyjwt cryptography`.")
+
+log = logging.getLogger("hermes-push")
+
+# Keep in step with plugin/vory-push/plugin.yaml; the app compares the two.
+VERSION = "1.0.10"
+USER_AGENT = f"Vory-Push/{VERSION} (Hermes companion)"
+try:
+    # Fingerprint of the code actually running: the app compares it with the copy it ships, so a
+    # reinstall without a gateway restart is caught even when the version number did not move.
+    SCRIPT_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+except Exception:  # noqa: BLE001
+    SCRIPT_SHA256 = ""
+
+
+_CONF_PATH: Path | None = None
+_CONF: dict[str, str] = {}
+
+
+def _load_conf() -> None:
+    """KEY=VALUE file named by HERMES_PUSH_CONFIG (or <HERMES_HOME>/push/hermes-push.conf when it
+    exists). Environment variables win over the file. The Vory app writes this file."""
+    global _CONF_PATH
+    candidates = [os.environ.get("HERMES_PUSH_CONFIG", "").strip()]
+    home = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
+    candidates.append(str(home / "push" / "hermes-push.conf"))
+    for c in candidates:
+        if c and Path(c).expanduser().is_file():
+            _CONF_PATH = Path(c).expanduser()
+            for line in _CONF_PATH.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                _CONF[k.strip().removeprefix("export ").strip()] = v.strip().strip('"').strip("'")
+            return
+
+
+def env(name: str, default: str = "") -> str:
+    return (os.environ.get(name) or _CONF.get(name) or default).strip()
+
+
+def save_conf_value(name: str, value: str) -> None:
+    """Persist a rotated credential back to the config file (no-op without one)."""
+    if _CONF_PATH is None:
+        return
+    lines = _CONF_PATH.read_text(encoding="utf-8").splitlines()
+    out, done = [], False
+    for line in lines:
+        if line.split("=", 1)[0].strip().removeprefix("export ").strip() == name:
+            out.append(f"{name}={value}"); done = True
+        else:
+            out.append(line)
+    if not done:
+        out.append(f"{name}={value}")
+    _CONF_PATH.write_text("\n".join(out) + "\n", encoding="utf-8")
+    _CONF[name] = value
+
+
+# ── APNs ──────────────────────────────────────────────────────────────────────────────────────
+
+
+def encrypt_for_device(device: dict, obj: dict) -> str | None:
+    """AES-256-GCM with the key the app minted for this install (`payload_key`, base64). The relay
+    forwards the ciphertext untouched; the app's notification extension opens it."""
+    key_b64 = device.get("payload_key")
+    if not key_b64:
+        return None
+    import base64, os as _os
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    key = base64.b64decode(key_b64)
+    nonce = _os.urandom(12)
+    ct = AESGCM(key).encrypt(nonce, json.dumps(obj, separators=(",", ":")).encode(), None)
+    return base64.b64encode(nonce + ct).decode()
+
+
+class APNs:
+    """Delivery: through the developer's relay when the device registered with one (no APNs key
+    needed here), otherwise straight to APNs over HTTP/2 via curl with your own key."""
+
+    def __init__(self) -> None:
+        self.key_file = env("HERMES_PUSH_APNS_KEY_FILE")
+        self.key_id = env("HERMES_PUSH_APNS_KEY_ID")
+        self.team_id = env("HERMES_PUSH_APNS_TEAM_ID")
+        self.topic = env("HERMES_PUSH_APNS_TOPIC", "com.vorantx.vory")
+        self.force_sandbox = env("HERMES_PUSH_APNS_SANDBOX") in {"1", "true", "yes"}
+        self._jwt = ""
+        self._jwt_at = 0.0
+        #: What the relay / APNs answered last, for the app's test-notification diagnostics.
+        self.last_response = ""
+        self.direct = bool(self.key_file and self.key_id and self.team_id)
+        self._key = Path(self.key_file).read_text(encoding="utf-8") if self.direct else ""
+        if not self.direct:
+            log.info("no APNs key configured: only devices registered with a relay will be reached")
+
+    def send_via_relay(self, device: dict, *, alert: dict | None = None, push_type: str = "alert", collapse_id: str | None = None,
+                       token_override: str | None = None, content_state: dict | None = None, event: str | None = None,
+                       la_alert: dict | None = None, dismissal_date: int | None = None) -> bool:
+        relay = device.get("relay") or {}
+        url, install_id, secret = relay.get("url", "").rstrip("/"), relay.get("install_id"), relay.get("secret")
+        if not (url and install_id and secret):
+            return False
+        body: dict = {"install_id": install_id, "secret": secret, "push_type": push_type}
+        if push_type == "alert":
+            enc = encrypt_for_device(device, alert or {})
+            if not enc:
+                log.warning("device %s has a relay but no payload_key; skipping", device.get("device_id"))
+                return False
+            body.update({"enc": enc, "collapse_id": collapse_id, "thread_id": (alert or {}).get("thread_id", ""),
+                         "interruption": (alert or {}).get("interruption", "active")})
+        elif push_type == "liveactivity":
+            body.update({"token": token_override, "content_state": content_state or {}, "event": event or "update"})
+            if la_alert:
+                body["alert"] = la_alert   # plain words only: no extension can decrypt a Live Activity push
+            if dismissal_date:
+                body["dismissal_date"] = dismissal_date
+        if self.dry_run:
+            log.info("DRY-RUN relay %s %s → %s %s", push_type, device.get("device_name") or device.get("device_id"), url, json.dumps(body)[:200])
+            return True
+        import urllib.request, urllib.error
+        req = urllib.request.Request(url + "/v1/push", method="POST", data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json", "User-Agent": USER_AGENT})
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                self.last_response = f"relay {r.status}: {r.read().decode('utf-8', 'replace')[:160]}"
+                return r.status == 200
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", "replace")[:200]
+            self.last_response = f"relay {exc.code}: {body}"
+            log.warning("relay %s → %s %s", device.get("device_id"), exc.code, body)
+            return False
+        except Exception as exc:  # noqa: BLE001
+            self.last_response = f"relay unreachable: {exc}"
+            log.warning("relay call failed: %s", exc)
+            return False
+
+    def token(self) -> str:
+        if time.time() - self._jwt_at > 45 * 60:
+            self._jwt = jwt.encode({"iss": self.team_id, "iat": int(time.time())}, self._key, algorithm="ES256", headers={"kid": self.key_id})
+            self._jwt_at = time.time()
+        return self._jwt
+
+    dry_run = False
+
+    def send(self, device: dict, payload: dict, *, push_type: str = "alert", collapse_id: str | None = None, token_override: str | None = None) -> bool:
+        if device.get("relay"):
+            aps = payload.get("aps", {})
+            if push_type == "alert":
+                alert = {**(aps.get("alert") or {}), "category": aps.get("category", "HERMES_TURN"), "thread_id": aps.get("thread-id", ""),
+                         "interruption": aps.get("interruption-level", "active"), "hermes": payload.get("hermes", {})}
+                return self.send_via_relay(device, alert=alert, collapse_id=collapse_id)
+            if push_type == "liveactivity":
+                # No extension can decrypt a Live Activity update, so only generic words travel.
+                state = dict(aps.get("content-state") or {})
+                state["detail"] = {"waiting": "Waiting for you", "done": "Turn finished", "error": "The turn failed"}.get(state.get("phase"), "Working…")
+                return self.send_via_relay(device, push_type="liveactivity", token_override=token_override, content_state=state, event=aps.get("event"),
+                                           la_alert=aps.get("alert"), dismissal_date=aps.get("dismissal-date"))
+            return self.send_via_relay(device, push_type=push_type)
+        if not self.direct:
+            return False
+        sandbox = self.force_sandbox or device.get("apns_environment") == "development"
+        host = "api.sandbox.push.apple.com" if sandbox else "api.push.apple.com"
+        token = token_override or device.get("apns_token", "")
+        if not token:
+            return False
+        # Each device file names the bundle it was built with (iOS, macOS and watchOS apps have
+        # their own), so the topic follows the device rather than one global setting.
+        topic = (device.get("bundle_id") or self.topic) + (".push-type.liveactivity" if push_type == "liveactivity" else "")
+        if device.get("platform") == "watchos" and push_type == "complication":
+            topic = (device.get("bundle_id") or self.topic) + ".complication"
+        if self.dry_run:
+            log.info("DRY-RUN %s %s → %s [%s] %s", push_type, device.get("device_name") or device.get("device_id"), host, topic, json.dumps(payload)[:300])
+            return True
+        cmd = ["curl", "-sS", "--http2", "-o", "-", "-w", "\n%{http_code}",
+               "-H", f"authorization: bearer {self.token()}", "-H", f"apns-topic: {topic}",
+               "-H", f"apns-push-type: {push_type}", "-H", "apns-priority: 10", "-H", "apns-expiration: 0",
+               "-H", "content-type: application/json"]
+        if collapse_id:
+            cmd += ["-H", f"apns-collapse-id: {collapse_id[:64]}"]
+        cmd += ["-d", json.dumps(payload), f"https://{host}/3/device/{token}"]
+        try:
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("apns curl failed: %s", exc)
+            return False
+        body, _, code = (out.stdout or "").rpartition("\n")
+        if code != "200":
+            log.warning("apns %s → %s %s", device.get("device_id"), code, body.strip())
+            return False
+        return True
+
+
+# ── device registry ───────────────────────────────────────────────────────────────────────────
+
+
+def devices_dir() -> Path:
+    if d := env("HERMES_PUSH_DEVICES_DIR"):
+        return Path(d).expanduser()
+    home = Path(env("HERMES_HOME") or Path.home() / ".hermes")
+    return home / "push" / "devices"
+
+
+def load_devices(gateway_url: str) -> list[dict]:
+    out = []
+    for f in glob.glob(str(devices_dir() / "*.json")):
+        try:
+            d = json.loads(Path(f).read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        if d.get("platform") in {"ios", "macos", "watchos"} and d.get("apns_token"):
+            out.append(d)
+    return out
+
+
+def describe_error(exc: BaseException) -> str:
+    """One short line per failure cause, in words the app can show."""
+    reason = getattr(exc, "reason", None)
+    text = str(reason if reason is not None else exc)
+    if "refused" in text.lower() or "Errno 111" in text or "Errno 61" in text:
+        return "connection refused (nothing listens there on this machine)"
+    if isinstance(exc, asyncio.TimeoutError) or "timed out" in text.lower():
+        return "timed out"
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status:
+        return f"WebSocket rejected with HTTP {status}"
+    return text.strip("<>")[:160]
+
+
+class ConfigChanged(Exception):
+    """The app rewrote hermes-push.conf: reconnect with the new settings, no restart needed."""
+
+
+def conf_mtime() -> float:
+    try:
+        return _CONF_PATH.stat().st_mtime if _CONF_PATH else 0.0
+    except OSError:
+        return 0.0
+
+
+def status_path() -> Path:
+    return devices_dir().parent / "status.json"
+
+
+def write_status(**fields) -> None:
+    """Heartbeat the app reads back (Settings › Background push) to show the companion is up
+    and which version is actually running."""
+    try:
+        p = status_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"version": VERSION, "script_sha256": SCRIPT_SHA256, "pid": os.getpid(), "updated_at": time.time(), **fields}), encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001
+        log.debug("status write failed: %s", exc)
+
+
+# ── gateway client ────────────────────────────────────────────────────────────────────────────
+
+
+class Gateway:
+    def __init__(self) -> None:
+        #: Exactly the URL the user typed in the app; nothing else is tried.
+        self.url = env("HERMES_PUSH_GATEWAY_URL").rstrip("/")
+        if not self.url:
+            sys.exit("set HERMES_PUSH_GATEWAY_URL")
+        #: The URL the phone uses: pushes carry it so the app can route to the right connection.
+        self.public_url = env("HERMES_PUSH_PUBLIC_URL").rstrip("/") or self.url
+        #: How the last connection was made, for the status heartbeat.
+        self.transport = ""
+        self.token = env("HERMES_PUSH_GATEWAY_TOKEN")
+        self.bearer = env("HERMES_PUSH_GATEWAY_BEARER")
+        self.refresh_token = env("HERMES_PUSH_GATEWAY_REFRESH_TOKEN")
+        # Cloudflare's bot rules answer 403 to the stock Python-urllib agent; name ourselves instead.
+        self.headers: dict[str, str] = {"User-Agent": USER_AGENT}
+        cid, csec = env("HERMES_PUSH_CF_ACCESS_CLIENT_ID"), env("HERMES_PUSH_CF_ACCESS_CLIENT_SECRET")
+        if cid and csec:
+            self.headers.update({"CF-Access-Client-Id": cid, "CF-Access-Client-Secret": csec})
+        if self.bearer:
+            self.headers["Authorization"] = f"Bearer {self.bearer}"
+        elif self.token:
+            self.headers["X-Hermes-Session-Token"] = self.token
+        self.ws = None
+        self._id = 0
+        self._pending: dict[int, asyncio.Future] = {}
+        self.events: asyncio.Queue = asyncio.Queue()
+
+    def _http(self, method: str, path: str, body: dict | None = None, *, _retry: bool = True) -> dict:
+        import urllib.error
+        import urllib.request
+        req = urllib.request.Request(self.url + path, method=method, headers={**self.headers, "Accept": "application/json", "Content-Type": "application/json"},
+                                     data=json.dumps(body).encode() if body is not None else None)
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return json.loads(r.read().decode())
+        except urllib.error.HTTPError as exc:
+            if exc.code == 401 and _retry and self.refresh_token and self.refresh():
+                return self._http(method, path, body, _retry=False)
+            raise
+
+    def refresh(self) -> bool:
+        """Rotate the bearer through /auth/native/refresh; the new refresh token is written back
+        to the config file so the next restart still works."""
+        import urllib.request
+        req = urllib.request.Request(self.url + "/auth/native/refresh", method="POST",
+                                     headers={k: v for k, v in self.headers.items() if k != "Authorization"} | {"Content-Type": "application/json"},
+                                     data=json.dumps({"refresh_token": self.refresh_token}).encode())
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                data = json.loads(r.read().decode())
+        except Exception as exc:  # noqa: BLE001
+            log.warning("token refresh failed: %s", exc)
+            return False
+        access = data.get("access_token") or ""
+        if not access:
+            return False
+        self.bearer = access
+        self.headers["Authorization"] = f"Bearer {access}"
+        if data.get("refresh_token"):
+            self.refresh_token = data["refresh_token"]
+            save_conf_value("HERMES_PUSH_GATEWAY_REFRESH_TOKEN", self.refresh_token)
+        save_conf_value("HERMES_PUSH_GATEWAY_BEARER", access)
+        log.info("gateway bearer refreshed")
+        return True
+
+    def _ws_for(self, base: str) -> tuple[str, str]:
+        """WebSocket URL (with credential) for one base URL, plus how it authenticates. ``self.url``
+        must already be ``base`` so the ticket request goes to the same place."""
+        scheme = "wss" if base.startswith("https") else "ws"
+        ws_base = scheme + base[base.index("://"):] + "/api/ws"
+        if self.bearer:
+            import urllib.error
+            try:
+                ticket = self._http("POST", "/api/auth/ws-ticket", {})["ticket"]
+            except urllib.error.HTTPError as exc:
+                body = exc.read().decode("utf-8", "replace")[:300].lower()
+                hint = " (Cloudflare refused it — the companion needs the Access service token, or use a loopback URL)" if "cloudflare" in body or "cf-" in body \
+                    else " (sign-in rejected — sign in for the companion again)" if exc.code in (401, 403) else ""
+                raise RuntimeError(f"HTTP {exc.code} {exc.reason}{hint}") from None
+            except urllib.error.URLError as exc:
+                raise RuntimeError(describe_error(exc)) from None
+            return f"{ws_base}?ticket={ticket}", "companion bearer"
+        return f"{ws_base}?token={self.token}", "session token"
+
+    async def connect(self) -> None:
+        """Connect to the configured URL; the error says what that URL answered, for the app."""
+        try:
+            ready, how = await asyncio.to_thread(self._ws_for, self.url)
+            kwargs = {"additional_headers": {k: v for k, v in self.headers.items() if not k.startswith("Authorization") and k != "X-Hermes-Session-Token"},
+                      "max_size": 64 * 1024 * 1024}
+            # A hung upgrade (tunnel, half-open socket) must not freeze the relay without a heartbeat.
+            self.ws = await asyncio.wait_for(websockets.connect(ready, **kwargs), timeout=30)
+        except Exception as exc:  # noqa: BLE001
+            raise ConnectionError(f"{self.url}: {describe_error(exc)}") from None
+        self.transport = f"{self.url} ({how})"
+        asyncio.create_task(self._reader())
+        await self.call("client.capabilities", {"server_requests": False})
+
+    async def _reader(self) -> None:
+        try:
+            async for raw in self.ws:
+                for line in str(raw).splitlines():
+                    if not line.strip():
+                        continue
+                    try:
+                        msg = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if msg.get("method") == "event":
+                        await self.events.put(msg.get("params") or {})
+                    elif "id" in msg and isinstance(msg["id"], int) and (fut := self._pending.pop(msg["id"], None)):
+                        if "error" in msg:
+                            fut.set_exception(RuntimeError(msg["error"].get("message", "rpc error")))
+                        else:
+                            fut.set_result(msg.get("result") or {})
+                    elif isinstance(msg.get("id"), str) and msg.get("method"):
+                        await self.ws.send(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32601, "message": "hermes-push does not answer requests"}}))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("ws reader ended: %s", exc)
+        await self.events.put({"type": "__closed__"})
+
+    async def call(self, method: str, params: dict | None = None, timeout: float = 60) -> dict:
+        self._id += 1
+        fut = asyncio.get_running_loop().create_future()
+        self._pending[self._id] = fut
+        await self.ws.send(json.dumps({"jsonrpc": "2.0", "id": self._id, "method": method, "params": params or {}}))
+        return await asyncio.wait_for(fut, timeout)
+
+
+# ── relay ─────────────────────────────────────────────────────────────────────────────────────
+
+
+class Relay:
+    def __init__(self) -> None:
+        self.apns = APNs()
+        self.gw = Gateway()
+        self.attached: dict[str, dict] = {}   # runtime session id → {stored, title, profile, bot, source}
+        self.labels: dict[str, str] = {}      # profile name → display name
+        self.notified: set[str] = set()       # request ids already pushed
+        self.poll = float(env("HERMES_PUSH_POLL_SECONDS", "3"))
+        self.last_test: dict = {}                # last_test_nonce / last_test_devices / last_test_at, for the heartbeat
+        self.last_la: dict = {}                  # what the last Live Activity push was and what the relay said
+
+    def _status(self, **fields) -> None:
+        write_status(**fields, **self.last_test, **self.last_la)
+
+    def _note_la(self, event: str, ok: bool) -> None:
+        self.last_la = {"last_la_event": event, "last_la_ok": ok, "last_la_response": self.apns.last_response[:200], "last_la_at": time.time()}
+
+    def _maybe_send_test(self) -> None:
+        """The app drops `test-request.json` next to the config; answer it with one real push to every
+        registered phone and note the nonce in the heartbeat so the app can tell 'sent' from 'arrived'."""
+        p = status_path().with_name("test-request.json")
+        if not p.exists():
+            return
+        try:
+            req = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            req = {}
+        try:
+            p.unlink()
+        except OSError:
+            pass
+        nonce = str(req.get("nonce") or uuid.uuid4())
+        sent = self.push_all("test", "Vory", "Test notification from your gateway ✓", {"nonce": nonce, "session_id": ""}, collapse="vory-test")
+        self.last_test = {"last_test_nonce": nonce, "last_test_devices": sent, "last_test_at": time.time(), "last_test_detail": self.apns.last_response}
+        self._status(connected=True, gateway=self.gw.public_url, transport=self.gw.transport, attached=len(self.attached), devices=len(load_devices(self.gw.url)))
+        log.info("test notification %s sent to %d device(s)", nonce[:8], sent)
+
+    def push_all(self, kind: str, title: str, body: str, meta: dict, collapse: str | None = None, skip: set | frozenset = frozenset()) -> int:
+        """Returns how many devices accepted the push. ``skip`` names devices already reached another
+        way (their Live Activity alerted), so they do not get a second buzz for the same thing."""
+        payload = {
+            "aps": {"alert": {"title": title, "body": body}, "sound": "default", "thread-id": meta.get("session_id", ""),
+                    "category": {"approval": "HERMES_APPROVAL", "clarify": "HERMES_CLARIFY", "error": "HERMES_ERROR"}.get(kind, "HERMES_TURN"),
+                    "interruption-level": "time-sensitive" if kind in {"approval", "clarify"} else "active"},
+            "hermes": {"kind": kind, "gateway": self.gw.public_url, **meta},
+        }
+        sent = 0
+        for d in load_devices(self.gw.url):
+            if d.get("platform") == "watchos" or d.get("device_id") in skip:
+                continue  # the phone's alert is mirrored to the watch; a direct one would double up
+            sent += 1 if self.apns.send(d, payload, collapse_id=collapse) else 0
+        self.refresh_complications()
+        return sent
+
+    _last_complication_push = 0.0
+
+    def refresh_complications(self) -> None:
+        """Ask watch complications to reload (budgeted by Apple at ~50/day, so at most one every
+        three minutes here). The watch app fetches fresh state and reloads its timelines."""
+        now = time.time()
+        if now - self._last_complication_push < 180:
+            return
+        watches = [d for d in load_devices(self.gw.url) if d.get("platform") == "watchos"]
+        if not watches:
+            return
+        self._last_complication_push = now
+        for d in watches:
+            self.apns.send(d, {"aps": {"content-available": 1}, "hermes": {"kind": "complication", "gateway": self.gw.public_url}}, push_type="complication")
+
+    def live_activity_devices(self, stored: str) -> list[dict]:
+        """Phones showing a Live Activity for this session right now: they get their news through it
+        (the Island expands and buzzes) instead of a separate banner."""
+        out = []
+        for d in load_devices(self.gw.url):
+            if not d.get("live_activity_token") or d.get("platform") != "ios":
+                continue
+            # Only the activity for this session; a device carries the token of its latest one.
+            if d.get("live_activity_session_id") and d["live_activity_session_id"] != stored:
+                continue
+            if time.time() - float(d.get("live_activity_started_at") or 0) > 3 * 3600:
+                continue
+            out.append(d)
+        return out
+
+    def end_live_activities(self, stored: str, phase: str, bot: str = "Hermes") -> set:
+        """Finish the activity with an alert (expanded Island, haptic), then dismiss it shortly after.
+        Returns the ids of the devices reached."""
+        now = int(time.time())
+        reached = set()
+        for d in self.live_activity_devices(stored):
+            state = {"phase": phase, "detail": "Turn finished" if phase == "done" else "The turn failed", "outputTokens": 0,
+                     "contextPercent": None, "needsAttention": False,
+                     "startedAtUnix": float(d.get("live_activity_started_at") or now), "endedAtUnix": float(now)}
+            alert = {"title": bot, "body": "Finished — tap to read the reply" if phase == "done" else "The turn failed — tap to see why", "sound": "default"}
+            ok = self.apns.send(d, {"aps": {"timestamp": now, "event": "update", "content-state": state, "alert": alert}},
+                                push_type="liveactivity", token_override=d["live_activity_token"])
+            self._note_la(f"finish alert ({phase})", ok)
+            if ok:
+                reached.add(d.get("device_id"))
+            end_payload = {"aps": {"timestamp": now + 4, "event": "end", "content-state": state, "dismissal-date": now + 45}}
+            try:
+                asyncio.get_running_loop().call_later(4, lambda d=d, p=end_payload: self.apns.send(d, p, push_type="liveactivity", token_override=d["live_activity_token"]))
+            except RuntimeError:
+                self.apns.send(d, end_payload, push_type="liveactivity", token_override=d["live_activity_token"])
+        return reached
+
+    def update_live_activities(self, stored: str, state_patch: dict, alert: dict | None = None) -> set:
+        """Mid-turn update (tool running, waiting for you): only what the companion can know. With
+        ``alert`` the Island expands and buzzes. Returns the ids of the devices reached."""
+        now = int(time.time())
+        reached = set()
+        for d in self.live_activity_devices(stored):
+            state = {"phase": "streaming", "detail": "Working…", "outputTokens": 0, "contextPercent": None, "needsAttention": False,
+                     "startedAtUnix": float(d.get("live_activity_started_at") or now), "endedAtUnix": None, **state_patch}
+            aps = {"timestamp": now, "event": "update", "content-state": state}
+            if alert:
+                aps["alert"] = {**alert, "sound": "default"}
+            ok = self.apns.send(d, {"aps": aps}, push_type="liveactivity", token_override=d["live_activity_token"])
+            self._note_la("update" + (" alert" if alert else ""), ok)
+            if ok:
+                reached.add(d.get("device_id"))
+        return reached
+
+    async def discover(self) -> None:
+        try:
+            listed = (await self.gw.call("profiles.list", {})).get("profiles", [])
+            self.labels = {p["name"]: p.get("display_name") or p["name"] for p in listed if p.get("name")}
+            profiles = [p.get("name") for p in listed] or [None]
+        except Exception:  # noqa: BLE001
+            profiles = [None]
+        for profile in profiles:
+            params = {"profile": profile} if profile else {}
+            try:
+                live = (await self.gw.call("session.active_list", params)).get("sessions", [])
+            except Exception as exc:  # noqa: BLE001
+                log.debug("active_list failed for %s: %s", profile, exc)
+                continue
+            for s in live:
+                sid = s.get("id")
+                if not sid or sid in self.attached:
+                    continue
+                try:
+                    snap = await self.gw.call("session.activate", {**params, "session_id": sid, "omit_messages": True})
+                except Exception as exc:  # noqa: BLE001
+                    log.debug("activate %s failed: %s", sid, exc)
+                    continue
+                stored = snap.get("stored_session_id") or sid
+                info = snap.get("info") or {}
+                pname = profile or info.get("profile_name") or "default"
+                self.attached[sid] = {"stored": stored, "title": s.get("title") or info.get("title") or "Hermes", "profile": pname,
+                                      "bot": self.labels.get(pname, pname), "source": s.get("source") or ""}
+                log.info("attached %s (%s, profile %s)", self.attached[sid]["title"], stored[:12], self.attached[sid]["profile"])
+                for req in snap.get("open_requests") or []:
+                    self.handle_request(sid, req.get("id", ""), req.get("method", ""), req.get("params") or {})
+                if pa := snap.get("pending_approval"):
+                    self.handle_request(sid, "queue-" + str(pa.get("request_id")), "approval", pa)
+
+    def meta(self, sid: str) -> dict:
+        a = self.attached.get(sid, {})
+        return {"session_id": a.get("stored", sid), "profile": a.get("profile", "default")}
+
+    def handle_request(self, sid: str, rid: str, method: str, params: dict) -> None:
+        if not rid or rid in self.notified:
+            return
+        self.notified.add(rid)
+        a = self.attached.get(sid, {})
+        title = a.get("title", "Hermes")
+        bot = a.get("bot") or a.get("profile", "Hermes")
+        if method == "approval":
+            body = params.get("description") or params.get("command") or "A command is waiting for your decision"
+            via_la = self.update_live_activities(a.get("stored", sid), {"phase": "waiting", "detail": str(body)[:80], "needsAttention": True},
+                                                 alert={"title": bot, "body": "Approval needed — tap to answer"})
+            self.push_all("approval", f"{bot} · approval needed", f"{title}: {str(body)[:180]}", {**self.meta(sid), "request_id": params.get("request_id", rid)}, collapse=rid, skip=via_la)
+        elif method == "clarify":
+            q = params.get("question") or (params.get("questions") or [{}])[0].get("question") or "Hermes has a question"
+            self.push_all("clarify", f"{bot} · question", f"{title}: {str(q)[:180]}", {**self.meta(sid), "request_id": rid}, collapse=rid)
+        elif method in {"sudo", "secret", "vault.unlock_prompt", "vault.save_login", "vault.code"}:
+            self.push_all("clarify", f"{bot} · input needed", f"{title}: {params.get('prompt') or method}", {**self.meta(sid), "request_id": rid}, collapse=rid)
+
+    async def run(self) -> None:
+        backoff = 1
+        self._conf_loaded = conf_mtime()
+        while True:
+            try:
+                if conf_mtime() != self._conf_loaded:
+                    log.info("hermes-push.conf changed; reloading")
+                    await self._reload_config()
+                self._status(connected=False, gateway=self.gw.public_url, transport=self.gw.transport, error="connecting…")
+                await self.gw.connect()
+                log.info("connected to %s", self.gw.url)
+                backoff = 1
+                self.attached.clear()
+                last_poll = 0.0
+                while True:
+                    if time.time() - last_poll > self.poll:
+                        if conf_mtime() != self._conf_loaded:
+                            raise ConfigChanged()
+                        await self.discover()
+                        self._maybe_send_test()
+                        last_poll = time.time()
+                        self._status(connected=True, gateway=self.gw.public_url, transport=self.gw.transport, attached=len(self.attached), devices=len(load_devices(self.gw.url)))
+                    try:
+                        ev = await asyncio.wait_for(self.gw.events.get(), timeout=self.poll)
+                    except asyncio.TimeoutError:
+                        continue
+                    if ev.get("type") == "__closed__":
+                        raise ConnectionError("socket closed")
+                    self.on_event(ev)
+            except ConfigChanged:
+                log.info("hermes-push.conf changed; reloading")
+                await self._reload_config()
+                backoff = 1
+            except Exception as exc:  # noqa: BLE001
+                log.warning("disconnected: %s; retrying in %ss", exc, backoff)
+                self._status(connected=False, gateway=self.gw.public_url, transport=self.gw.transport, error=str(exc)[:400])
+                # Back off, but wake early when the app drops a new config in.
+                for _ in range(backoff):
+                    await asyncio.sleep(1)
+                    if conf_mtime() != self._conf_loaded:
+                        break
+                backoff = min(30, backoff * 2)
+
+    async def _reload_config(self) -> None:
+        try:
+            if self.gw.ws:
+                await self.gw.ws.close()
+        except Exception:  # noqa: BLE001
+            pass
+        _CONF.clear()
+        _load_conf()
+        while True:
+            self._conf_loaded = conf_mtime()
+            try:
+                self.gw = Gateway()
+                self.apns = APNs()
+                return
+            except SystemExit as exc:
+                self._status(connected=False, gateway="", transport="", error=f"config incomplete: {exc}")
+                await asyncio.sleep(self.poll)
+                _CONF.clear()
+                _load_conf()
+
+    async def _attach_then_handle(self, sid: str, ev: dict) -> None:
+        await self.discover()
+        if sid in self.attached:
+            self.on_event(ev)
+
+    def on_event(self, ev: dict) -> None:
+        kind, sid, p = ev.get("type", ""), ev.get("session_id", ""), ev.get("payload") or {}
+        a = self.attached.get(sid)
+        if kind == "message.complete" and not a and sid:
+            # A chat that started since the last discovery poll: attach now so its finish still
+            # ends the phone's Live Activity and sends the alert.
+            asyncio.create_task(self._attach_then_handle(sid, ev))
+            return
+        if kind == "session.title" and a:
+            a["title"] = p.get("title") or a["title"]
+        elif kind == "message.complete" and a:
+            title = a["title"]; bot = a.get("bot") or a.get("profile", "Hermes")
+            err = p.get("error")
+            if err:
+                via_la = self.end_live_activities(a["stored"], "error", bot=bot)
+                self.push_all("error", f"{bot} · turn failed", f"{title}: {str(err)[:180]}", self.meta(sid), collapse=f"turn-{sid}", skip=via_la)
+            else:
+                text = p.get("text") if isinstance(p.get("text"), str) else ""
+                label = "cron job finished" if a.get("source") == "cron" else title
+                via_la = self.end_live_activities(a["stored"], "done", bot=bot)
+                self.push_all("cron" if a.get("source") == "cron" else "turn", f"{bot} · {label}" if a.get("source") == "cron" else bot, f"{title}: {(text or 'Done')[:180]}", self.meta(sid), collapse=f"turn-{sid}", skip=via_la)
+        elif kind == "error" and a:
+            self.push_all("error", f"{a.get('bot') or a.get('profile', 'Hermes')} · error", f"{a['title']}: {str(p.get('message', ''))[:180]}", self.meta(sid), collapse=f"err-{sid}")
+        elif kind == "request.cancel":
+            self.notified.discard(p.get("id", ""))
+        elif kind == "session.reclaimed":
+            self.attached.pop(p.get("session_id", ""), None)
+
+
+def main() -> None:
+    import argparse
+    _load_conf()
+    ap = argparse.ArgumentParser(description="Relay Hermes gateway events to APNs for the Vory apps.")
+    ap.add_argument("--list", action="store_true", help="print the registered devices and exit")
+    ap.add_argument("--test", action="store_true", help="send one test alert to every registered device and exit")
+    ap.add_argument("--dry-run", action="store_true", help="log what would be sent instead of calling APNs")
+    ap.add_argument("-v", "--verbose", action="store_true")
+    args = ap.parse_args()
+    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    if args.list:
+        gw = env("HERMES_PUSH_GATEWAY_URL").rstrip("/")
+        devs = load_devices(gw)
+        print(f"{len(devs)} device(s) in {devices_dir()}")
+        for d in devs:
+            print(f"  {d.get('platform'):8} {d.get('device_name') or d.get('device_id'):28} {d.get('bundle_id')}  env={d.get('apns_environment')}  live_activity={'yes' if d.get('live_activity_token') else 'no'}")
+        return
+    if args.test:
+        apns = APNs(); apns.dry_run = args.dry_run
+        gw = env("HERMES_PUSH_GATEWAY_URL").rstrip("/")
+        devs = load_devices(gw)
+        if not devs:
+            sys.exit(f"no devices registered in {devices_dir()} — open Vory › Settings › Notifications › Register now first")
+        if not apns.direct and not any(d.get("relay") for d in devs):
+            sys.exit("no APNs key configured and no device registered with a relay")
+        ok = 0
+        for d in devs:
+            ok += apns.send(d, {"aps": {"alert": {"title": "hermes-push is working", "body": "Background notifications from your gateway are live."}, "sound": "default"},
+                               "hermes": {"kind": "test", "gateway": gw}}, collapse_id="hermes-push-test")
+        print(f"sent to {ok}/{len(devs)} device(s)")
+        sys.exit(0 if ok == len(devs) else 1)
+    relay = Relay()
+    relay.apns.dry_run = args.dry_run
+    asyncio.run(relay.run())
+
+
+if __name__ == "__main__":
+    main()

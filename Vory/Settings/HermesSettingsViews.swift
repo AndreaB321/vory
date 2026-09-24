@@ -1,0 +1,722 @@
+import SwiftUI
+import VoryCore
+
+// MARK: Model
+
+struct ModelSettingsView: View {
+    @Environment(AppModel.self) private var model
+    @State private var options: ModelOptionsResult?
+    @State private var auxiliary: JSONValue?
+    @State private var error: String?
+    @State private var confirm: (message: String, provider: String, modelName: String, scope: String, task: String?)?
+
+    private var rt: GatewayRuntime? { model.runtime }
+
+    var body: some View {
+        List {
+            if let o = options {
+                Section {
+                    LabeledContent("Current", value: o.model?.isEmpty == false ? "\(o.provider ?? "")/\(o.model!)" : "not set")
+                    modelMenu(title: "Change default model", providers: o.providers) { p, m in Task { await set(scope: "main", task: nil, provider: p, model: m, confirmed: false) } }
+                } header: { Text("Main model") } footer: { Text("Writes model.default and model.provider in this profile's config.yaml. New sessions use it; running chats keep their own model.") }
+                if let tasks = auxiliary?["tasks"]?.arrayValue {
+                    Section("Auxiliary models") {
+                        ForEach(tasks, id: \.self) { t in
+                            let task = t["task"]?.stringValue ?? ""
+                            let prov = t["provider"]?.stringValue ?? "auto"
+                            let mdl = t["model"]?.stringValue ?? ""
+                            modelMenu(title: task.replacingOccurrences(of: "_", with: " ").capitalized + ": " + (mdl.isEmpty ? prov : "\(prov)/\(mdl)"), providers: o.providers, allowAuto: true) { p, m in
+                                Task { await set(scope: "auxiliary", task: task, provider: p, model: m, confirmed: false) }
+                            }
+                        }
+                    }
+                }
+            } else if let error {
+                if RestartRequiredCallout.matches(error) { RestartRequiredCallout(message: error) }
+                else { Text(error).foregroundStyle(.red) }
+            } else { ProgressView() }
+        }
+        .refreshable { await load() }
+        .task(id: rt?.selectedProfile) { await load() }
+        .alert("Confirm model", isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } })) {
+            Button("Use it anyway") { if let c = confirm { Task { await set(scope: c.scope, task: c.task, provider: c.provider, model: c.modelName, confirmed: true) } } }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text(confirm?.message ?? "") }
+    }
+
+    private func modelMenu(title: String, providers: [ModelProvider], allowAuto: Bool = false, pick: @escaping (String, String) -> Void) -> some View {
+        Menu {
+            if allowAuto { Button("Auto (follow main)") { pick("auto", "") } }
+            ForEach(providers) { p in
+                Section(p.name) { ForEach(p.models ?? [], id: \.self) { m in Button(m) { pick(p.slug, m) } } }
+            }
+        } label: { Text(title) }
+    }
+
+    private func load() async {
+        guard let rt else { return }
+        do {
+            options = try await rt.api.get("/api/model/options", profile: rt.selectedProfile)
+            auxiliary = try? await rt.api.get("/api/model/auxiliary", profile: rt.selectedProfile)
+            error = nil
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func set(scope: String, task: String?, provider: String, model: String, confirmed: Bool) async {
+        guard let rt else { return }
+        var body: [String: JSONValue] = ["scope": .string(scope), "provider": .string(provider), "model": .string(model)]
+        if let task { body["task"] = .string(task) }
+        if confirmed { body["confirm_expensive_model"] = true }
+        do {
+            let r: JSONValue = try await rt.api.send("POST", "/api/model/set", profile: rt.selectedProfile, json: .object(body))
+            if r["confirm_required"]?.boolValue == true { confirm = (r["confirm_message"]?.stringValue ?? "This model may be expensive.", provider, model, scope, task); return }
+            await load()
+        } catch { self.error = error.localizedDescription }
+    }
+}
+
+// MARK: Config (schema-driven form over /api/config)
+
+struct ConfigFormView: View {
+    @Environment(AppModel.self) private var model
+    @State private var config: JSONValue = .object([:])
+    @State private var schema: ConfigSchemaResponse?
+    @State private var error: String?
+    @State private var search = ""
+    @State private var saving: Set<String> = []
+
+    private var rt: GatewayRuntime? { model.runtime }
+
+    private var categories: [(String, [(String, ConfigSchemaField)])] {
+        guard let s = schema else { return [] }
+        let order = s.categoryOrder ?? []
+        var groups: [String: [(String, ConfigSchemaField)]] = [:]
+        for (k, f) in s.fields where search.isEmpty || k.localizedCaseInsensitiveContains(search) || (f.description ?? "").localizedCaseInsensitiveContains(search) {
+            groups[f.category ?? "other", default: []].append((k, f))
+        }
+        return groups.keys.sorted { a, b in
+            let ia = order.firstIndex(of: a) ?? Int.max, ib = order.firstIndex(of: b) ?? Int.max
+            return ia == ib ? a < b : ia < ib
+        }.map { ($0, groups[$0]!.sorted { $0.0 < $1.0 }) }
+    }
+
+    var body: some View {
+        List {
+            if let error { Text(error).foregroundStyle(.red).font(.footnote) }
+            ForEach(categories, id: \.0) { cat, fields in
+                Section(cat.capitalized) {
+                    ForEach(fields, id: \.0) { key, field in
+                        row(key: key, field: field)
+                    }
+                }
+            }
+        }
+        .searchable(text: $search, prompt: "Search config keys")
+        .overlay { if schema == nil && error == nil { ProgressView() } }
+        .refreshable { await load() }
+        .task(id: rt?.selectedProfile) { await load() }
+    }
+
+    @ViewBuilder private func row(key: String, field: ConfigSchemaField) -> some View {
+        let current = value(at: key)
+        VStack(alignment: .leading, spacing: 4) {
+            switch field.type {
+            case "boolean":
+                Toggle(key, isOn: Binding(get: { current?.boolValue ?? false }, set: { v in Task { await write(key, .bool(v)) } }))
+            case "select":
+                Picker(key, selection: Binding(get: { current?.displayText ?? "" }, set: { v in Task { await write(key, .string(v)) } })) {
+                    ForEach(field.options ?? [], id: \.self) { Text($0.isEmpty ? "(none)" : $0).tag($0) }
+                }
+            case "number":
+                LabeledContent(key) {
+                    NumberField(value: current?.doubleValue ?? 0) { v in Task { await write(key, .number(v)) } }
+                }
+            default:
+                LabeledContent(key) {
+                    StringField(value: current?.displayText ?? "") { v in Task { await write(key, .string(v)) } }
+                }
+            }
+            if let d = field.description, !d.isEmpty { Text(d).font(.caption).foregroundStyle(.secondary) }
+        }
+        .opacity(saving.contains(key) ? 0.5 : 1)
+    }
+
+    private func value(at dotted: String) -> JSONValue? {
+        var cur: JSONValue? = config["config"] ?? config
+        for part in dotted.split(separator: ".") { cur = cur?[String(part)] }
+        return cur
+    }
+
+    private func load() async {
+        guard let rt else { return }
+        do {
+            config = try await rt.api.get("/api/config", profile: rt.selectedProfile)
+            schema = try await rt.api.get("/api/config/schema", profile: rt.selectedProfile)
+            error = nil
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func write(_ dotted: String, _ v: JSONValue) async {
+        guard let rt else { return }
+        saving.insert(dotted); defer { saving.remove(dotted) }
+        var nested: JSONValue = v
+        for part in dotted.split(separator: ".").reversed() { nested = .object([String(part): nested]) }
+        do {
+            let _: JSONValue = try await rt.api.send("PUT", "/api/config", profile: rt.selectedProfile, json: .object(["config": nested]))
+            await load()
+        } catch { self.error = "\(dotted): \(error.localizedDescription)" }
+    }
+}
+
+struct StringField: View {
+    var value: String
+    var commit: (String) -> Void
+    @State private var text = ""
+    var body: some View {
+        TextField("", text: $text).multilineTextAlignment(.trailing).autocorrectionDisabled().textInputAutocapitalization(.never)
+            .onAppear { text = value }
+            .onChange(of: value) { _, v in text = v }
+            .onSubmit { if text != value { commit(text) } }
+    }
+}
+
+struct NumberField: View {
+    var value: Double
+    var commit: (Double) -> Void
+    @State private var text = ""
+    var body: some View {
+        TextField("", text: $text).keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+            .onAppear { text = value.rounded() == value ? String(Int(value)) : String(value) }
+            .onSubmit { if let d = Double(text), d != value { commit(d) } }
+    }
+}
+
+// MARK: Env (API keys)
+
+struct EnvView: View {
+    @Environment(AppModel.self) private var model
+    @State private var vars: [String: EnvVarInfo] = [:]
+    @State private var error: String?
+    @State private var editing: String?
+    @State private var newValue = ""
+    @State private var search = ""
+    @State private var showAdd = false
+    @State private var newKey = ""
+
+    private var rt: GatewayRuntime? { model.runtime }
+    private var grouped: [(String, [String])] {
+        let keys = vars.keys.filter { search.isEmpty || $0.localizedCaseInsensitiveContains(search) }
+        let g = Dictionary(grouping: keys) { vars[$0]?.category ?? "Other" }
+        return g.keys.sorted().map { ($0, g[$0]!.sorted()) }
+    }
+
+    var body: some View {
+        List {
+            if let error { Text(error).foregroundStyle(.red).font(.footnote) }
+            ForEach(grouped, id: \.0) { cat, keys in
+                Section(cat) {
+                    ForEach(keys, id: \.self) { k in
+                        Button { editing = k; newValue = "" } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack {
+                                    Text(k).font(.body.monospaced())
+                                    Spacer()
+                                    Text(vars[k]?.set == true ? (vars[k]?.redacted ?? "set") : "Not set").font(.caption).foregroundStyle(vars[k]?.set == true ? .green : .secondary)
+                                }
+                                if let d = vars[k]?.description { Text(d).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                            }
+                        }
+                        .tint(.primary)
+                        .swipeActions {
+                            if vars[k]?.set == true { Button(role: .destructive) { Task { await clear(k) } } label: { Label("Clear", systemImage: "trash") } }
+                        }
+                    }
+                }
+            }
+        }
+        .searchable(text: $search)
+        .toolbar { ToolbarItem(placement: .primaryAction) { Button { showAdd = true } label: { Label("Add", systemImage: "plus") } } }
+        .refreshable { await load() }
+        .task(id: rt?.selectedProfile) { await load() }
+        .alert(editing ?? "", isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
+            SecureField("Value", text: $newValue)
+            Button("Save") { if let k = editing { Task { await save(k, newValue) } } }
+            if vars[editing ?? ""]?.set == true { Button("Clear", role: .destructive) { if let k = editing { Task { await clear(k) } } } }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("The value is sent to your gateway's .env and never shown again.") }
+        .alert("Add variable", isPresented: $showAdd) {
+            TextField("NAME", text: $newKey).textInputAutocapitalization(.characters)
+            SecureField("Value", text: $newValue)
+            Button("Save") { Task { await save(newKey.trimmingCharacters(in: .whitespaces), newValue) } }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    private func load() async {
+        guard let rt else { return }
+        do { vars = try await rt.api.get("/api/env", profile: rt.selectedProfile); error = nil }
+        catch { self.error = error.localizedDescription }
+    }
+
+    private func save(_ key: String, _ value: String) async {
+        guard let rt, !key.isEmpty else { return }
+        do {
+            let _: JSONValue = try await rt.api.send("PUT", "/api/env", profile: rt.selectedProfile, json: ["key": .string(key), "value": .string(value)])
+            newValue = ""; newKey = ""
+            await load()
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func clear(_ key: String) async {
+        guard let rt else { return }
+        do {
+            let _: JSONValue = try await rt.api.send("DELETE", "/api/env", profile: rt.selectedProfile, json: ["key": .string(key)])
+            await load()
+        } catch { self.error = error.localizedDescription }
+    }
+}
+
+// MARK: Tools / Skills / MCP
+
+struct ToolsView: View {
+    @Environment(AppModel.self) private var model
+    @State private var toolsets: [ToolsetInfo] = []
+    @State private var error: String?
+    private var rt: GatewayRuntime? { model.runtime }
+
+    var body: some View {
+        List {
+            if let error { Text(error).foregroundStyle(.red).font(.footnote) }
+            ForEach(toolsets) { t in
+                Toggle(isOn: Binding(get: { t.enabled }, set: { v in Task { await toggle(t, v) } })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack { Text(t.label ?? t.name); if t.configured == false { Text("needs setup").font(.caption2).foregroundStyle(.orange) } }
+                        if let d = t.description { Text(d).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                        if let tools = t.tools, !tools.isEmpty { Text(tools.joined(separator: ", ")).font(.caption2).foregroundStyle(.tertiary).lineLimit(1) }
+                    }
+                }
+            }
+        }
+        .refreshable { await load() }
+        .task(id: rt?.selectedProfile) { await load() }
+    }
+
+    private func load() async {
+        guard let rt else { return }
+        do { toolsets = try await rt.api.get("/api/tools/toolsets", profile: rt.selectedProfile); error = nil }
+        catch { self.error = error.localizedDescription }
+    }
+
+    private func toggle(_ t: ToolsetInfo, _ enabled: Bool) async {
+        guard let rt else { return }
+        do {
+            let _: JSONValue = try await rt.api.send("PUT", "/api/tools/toolsets/\(t.name)", profile: rt.selectedProfile, json: ["enabled": .bool(enabled)])
+            await load()
+        } catch { self.error = error.localizedDescription }
+    }
+}
+
+struct SkillsView: View {
+    @Environment(AppModel.self) private var model
+    @State private var skills: [SkillInfo] = []
+    @State private var error: String?
+    @State private var search = ""
+    private var rt: GatewayRuntime? { model.runtime }
+
+    var body: some View {
+        List {
+            if let error { Text(error).foregroundStyle(.red).font(.footnote) }
+            ForEach(skills.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }) { s in
+                Toggle(isOn: Binding(get: { s.enabled ?? true }, set: { v in Task { await toggle(s, v) } })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack { Text(s.name); if let p = s.provenance { Text(p).font(.caption2).foregroundStyle(.tertiary) } }
+                        if let d = s.description { Text(d).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                    }
+                }
+            }
+        }
+        .searchable(text: $search)
+        .refreshable { await load() }
+        .task(id: rt?.selectedProfile) { await load() }
+    }
+
+    private func load() async {
+        guard let rt else { return }
+        do { skills = try await rt.api.get("/api/skills", profile: rt.selectedProfile); error = nil }
+        catch { self.error = error.localizedDescription }
+    }
+
+    private func toggle(_ s: SkillInfo, _ enabled: Bool) async {
+        guard let rt else { return }
+        do {
+            let _: JSONValue = try await rt.api.send("PUT", "/api/skills/toggle", profile: rt.selectedProfile, json: ["name": .string(s.name), "enabled": .bool(enabled)])
+            await load()
+        } catch { self.error = error.localizedDescription }
+    }
+}
+
+struct MCPView: View {
+    @Environment(AppModel.self) private var model
+    @State private var servers: [MCPServerInfo] = []
+    @State private var error: String?
+    @State private var testResult: String?
+    @State private var pendingDelete: MCPServerInfo?
+    private var rt: GatewayRuntime? { model.runtime }
+
+    var body: some View {
+        List {
+            if let error { Text(error).foregroundStyle(.red).font(.footnote) }
+            if let testResult { Text(testResult).font(.footnote) }
+            ForEach(servers) { s in
+                Toggle(isOn: Binding(get: { s.enabled ?? true }, set: { v in Task { await setEnabled(s, v) } })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(s.name)
+                        Text(s.url ?? ([s.command].compactMap { $0 } + (s.args ?? [])).joined(separator: " ")).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                .swipeActions {
+                    Button(role: .destructive) { pendingDelete = s } label: { Label("Remove", systemImage: "trash") }
+                    Button { Task { await test(s) } } label: { Label("Test", systemImage: "bolt") }.tint(.blue)
+                }
+            }
+        }
+        .refreshable { await load() }
+        .task(id: rt?.selectedProfile) { await load() }
+        .alert("Remove MCP server?", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })) {
+            Button("Remove", role: .destructive) { if let s = pendingDelete { Task { await remove(s) } } }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    private func load() async {
+        guard let rt else { return }
+        do {
+            let raw: JSONValue = try await rt.api.get("/api/mcp/servers", profile: rt.selectedProfile)
+            servers = Self.parse(raw)
+            error = nil
+        } catch { self.error = error.localizedDescription }
+    }
+
+    static func parse(_ raw: JSONValue) -> [MCPServerInfo] {
+        let container = raw["servers"] ?? raw
+        if let arr = container.arrayValue { return arr.compactMap { try? $0.decode(MCPServerInfo.self) } }
+        if let obj = container.objectValue {
+            return obj.keys.sorted().compactMap { name in
+                var o = obj[name]?.objectValue ?? [:]
+                o["name"] = .string(name)
+                return try? JSONValue.object(o).decode(MCPServerInfo.self)
+            }
+        }
+        return []
+    }
+
+    private func setEnabled(_ s: MCPServerInfo, _ enabled: Bool) async {
+        guard let rt else { return }
+        do {
+            let _: JSONValue = try await rt.api.send("PUT", "/api/mcp/servers/\(s.name)/enabled", profile: rt.selectedProfile, json: ["enabled": .bool(enabled)])
+            await load()
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func test(_ s: MCPServerInfo) async {
+        guard let rt else { return }
+        do {
+            let r: JSONValue = try await rt.api.send("POST", "/api/mcp/servers/\(s.name)/test", profile: rt.selectedProfile, body: EmptyBody())
+            testResult = "\(s.name): \(r["status"]?.stringValue ?? (r["ok"]?.boolValue == true ? "ok" : r.displayText)) — \(r["tool_count"]?.intValue.map { "\($0) tools" } ?? "")"
+        } catch { testResult = "\(s.name): \(error.localizedDescription)" }
+    }
+
+    private func remove(_ s: MCPServerInfo) async {
+        guard let rt else { return }
+        do {
+            let _: JSONValue = try await rt.api.send("DELETE", "/api/mcp/servers/\(s.name)", profile: rt.selectedProfile, body: EmptyBody())
+            await load()
+        } catch { self.error = error.localizedDescription }
+    }
+}
+
+// MARK: Approvals
+
+struct ApprovalsView: View {
+    @Environment(AppModel.self) private var model
+    @State private var mode = "smart"
+    @State private var timeout = 300.0
+    @State private var error: String?
+    @State private var loaded = false
+    private var rt: GatewayRuntime? { model.runtime }
+
+    var body: some View {
+        List {
+            Section {
+                Picker("Mode", selection: $mode) {
+                    Text("Smart").tag("smart"); Text("Manual").tag("manual"); Text("Off").tag("off")
+                }
+                .onChange(of: mode) { _, v in if loaded { Task { await write(["mode": .string(v)]) } } }
+                LabeledContent("Timeout (seconds)") {
+                    NumberField(value: timeout) { v in Task { await write(["timeout": .number(v)]) } }
+                }
+            } header: { Text("approvals") } footer: {
+                Text("Smart lets a guardian model auto-approve routine commands and escalate risky ones. Manual asks you for every dangerous command. Off disables the gate. YOLO (skip approvals) is per session, default off, and lives in the chat's model menu.")
+            }
+            if let error { Text(error).foregroundStyle(.red).font(.footnote) }
+        }
+        .task(id: rt?.selectedProfile) { await load() }
+    }
+
+    private func load() async {
+        guard let rt else { return }
+        do {
+            let cfg: JSONValue = try await rt.api.get("/api/config", profile: rt.selectedProfile)
+            let a = cfg["config"]?["approvals"] ?? cfg["approvals"]
+            mode = a?["mode"]?.stringValue ?? "smart"
+            timeout = a?["timeout"]?.doubleValue ?? 300
+            loaded = true
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func write(_ fields: [String: JSONValue]) async {
+        guard let rt else { return }
+        do {
+            let _: JSONValue = try await rt.api.send("PUT", "/api/config", profile: rt.selectedProfile, json: ["config": .object(["approvals": .object(fields)])])
+            await load()
+        } catch { self.error = error.localizedDescription }
+    }
+}
+
+// MARK: Cron
+
+struct CronView: View {
+    @Environment(AppModel.self) private var model
+    @State private var jobs: [CronJob] = []
+    @State private var raw: [String: JSONValue] = [:]
+    @State private var error: String?
+    private var rt: GatewayRuntime? { model.runtime }
+
+    var body: some View {
+        List {
+            if let error { Text(error).foregroundStyle(.red).font(.footnote) }
+            if jobs.isEmpty, error == nil { ContentUnavailableView("No cron jobs", systemImage: "clock", description: Text("Jobs scheduled on any profile of this gateway appear here.")) }
+            ForEach(jobs, id: \.identity) { j in
+                NavigationLink { CronJobDetailView(job: j, raw: raw[j.identity] ?? .null, onChange: { Task { await load() } }) } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: j.enabled == false || j.state == "paused" ? "pause.circle" : "clock").foregroundStyle(j.enabled == false || j.state == "paused" ? Color.secondary : Color.green)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(j.name?.isEmpty == false ? j.name! : (j.jobId ?? j.id ?? "job")).font(.body.weight(.medium)).lineLimit(1)
+                            Text(CronSchedule.describe(j.schedule)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer()
+                        if let n = j.nextRunAt, let d = ISO8601DateFormatter().date(from: n) { Text(d, format: .relative(presentation: .named)).font(.caption2).foregroundStyle(.tertiary) }
+                    }
+                }
+            }
+        }
+        .refreshable { await load() }
+        .task { await load() }
+    }
+
+    private func load() async {
+        guard let rt else { return }
+        do {
+            // No profile filter: the dashboard lists every profile's jobs when none is given.
+            let r: JSONValue = try await rt.api.get("/api/cron/jobs")
+            let arr = r["jobs"]?.arrayValue ?? r["items"]?.arrayValue ?? r.arrayValue ?? []
+            var out: [CronJob] = []; var rawMap: [String: JSONValue] = [:]
+            for j in arr {
+                let c: CronJob
+                if let d = try? j.decode(CronJob.self), d.id != nil || d.jobId != nil || d.name != nil { c = d }
+                else { c = CronJob(id: j["id"]?.stringValue ?? j["job_id"]?.stringValue, name: j["name"]?.stringValue, schedule: j["schedule"]?.stringValue ?? j["schedule"]?.displayText, prompt: j["prompt"]?.stringValue, enabled: j["enabled"]?.boolValue, state: j["state"]?.stringValue) }
+                out.append(c); rawMap[c.identity] = j
+            }
+            jobs = out; raw = rawMap; error = nil
+        } catch { self.error = error.localizedDescription }
+    }
+}
+
+/// Human wording for the common cron shapes; anything else is shown verbatim.
+enum CronSchedule {
+    static func describe(_ s: String?) -> String {
+        guard let s, !s.isEmpty else { return "no schedule" }
+        let p = s.split(separator: " ").map(String.init)
+        guard p.count == 5, let h = Int(p[1]), let m = Int(p[0]) else { return s }
+        let time = String(format: "%d:%02d", h == 0 ? 12 : (h > 12 ? h - 12 : h), m) + (h >= 12 ? " PM" : " AM")
+        let days = ["0": "Sunday", "1": "Monday", "2": "Tuesday", "3": "Wednesday", "4": "Thursday", "5": "Friday", "6": "Saturday", "7": "Sunday"]
+        if p[2] == "*", p[3] == "*" {
+            switch p[4] {
+            case "*": return "Every day at \(time)"
+            case "1-5": return "Weekdays at \(time)"
+            case "0,6", "6,0": return "Weekends at \(time)"
+            default: if let d = days[p[4]] { return "\(d)s at \(time)" }
+            }
+        }
+        if p[2] != "*", p[3] == "*", p[4] == "*" { return "Day \(p[2]) of every month at \(time)" }
+        return s
+    }
+}
+
+/// One job: what it does and when, editable; run it now, pause or delete it.
+struct CronJobDetailView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    var job: CronJob
+    var raw: JSONValue
+    var onChange: () -> Void
+    @State private var name = ""
+    @State private var schedule = ""
+    @State private var prompt = ""
+    @State private var loaded = false
+    @State private var status: String?
+
+    private var rt: GatewayRuntime? { model.runtime }
+    private var dirty: Bool { name != (job.name ?? "") || schedule != (job.schedule ?? "") || prompt != (job.prompt ?? raw["prompt"]?.stringValue ?? "") }
+
+    var body: some View {
+        List {
+            Section {
+                TextField("Name", text: $name)
+                TextField("Schedule (cron: min hour day month weekday)", text: $schedule).font(.body.monospaced()).autocorrectionDisabled().textInputAutocapitalization(.never)
+                Text(CronSchedule.describe(schedule)).font(.caption).foregroundStyle(.secondary)
+            } header: { Text("When") }
+            Section {
+                TextEditor(text: $prompt).frame(minHeight: 120).font(.body)
+            } header: { Text("What it does") } footer: { Text("The prompt the agent runs on schedule.") }
+            Section {
+                LabeledContent("Status", value: job.state ?? (job.enabled == false ? "paused" : "active"))
+                if let d = job.deliver ?? raw["deliver"]?.stringValue { LabeledContent("Delivers to", value: d) }
+                if let p = raw["profile"]?.stringValue { LabeledContent("Profile", value: p) }
+                if let l = job.lastRunAt { LabeledContent("Last run", value: l) }
+                if let s = job.lastStatus { LabeledContent("Last result", value: s) }
+            }
+            Section {
+                Button { Task { await act("trigger") } } label: { Label("Run now", systemImage: "play.circle") }
+                Button { Task { await act(job.enabled == false || job.state == "paused" ? "resume" : "pause") } } label: {
+                    Label(job.enabled == false || job.state == "paused" ? "Resume" : "Pause", systemImage: job.enabled == false || job.state == "paused" ? "play" : "pause")
+                }
+                Button(role: .destructive) { Task { await act("delete") } } label: { Label("Delete job", systemImage: "trash") }
+            }
+            if let status { Section { Text(status).font(.footnote).foregroundStyle(status.hasPrefix("Saved") || status.hasPrefix("Done") ? Color.secondary : Color.red) } }
+        }
+        .navigationTitle(job.name?.isEmpty == false ? job.name! : "Cron job")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save() } }.disabled(!dirty) } }
+        .task {
+            guard !loaded else { return }
+            loaded = true
+            name = job.name ?? ""; schedule = job.schedule ?? ""; prompt = job.prompt ?? raw["prompt"]?.stringValue ?? ""
+        }
+    }
+
+    private func save() async {
+        guard let rt else { return }
+        var updates: [String: JSONValue] = [:]
+        if name != (job.name ?? "") { updates["name"] = .string(name) }
+        if schedule != (job.schedule ?? "") { updates["schedule"] = .string(schedule) }
+        if prompt != (job.prompt ?? raw["prompt"]?.stringValue ?? "") { updates["prompt"] = .string(prompt) }
+        do {
+            let _: JSONValue = try await rt.api.send("PUT", "/api/cron/jobs/\(job.identity)", json: .object(["updates": .object(updates)]))
+            status = "Saved."; onChange()
+        } catch { status = error.localizedDescription }
+    }
+
+    private func act(_ action: String) async {
+        guard let rt else { return }
+        do {
+            if action == "delete" { let _: JSONValue = try await rt.api.send("DELETE", "/api/cron/jobs/\(job.identity)", body: EmptyBody()); onChange(); dismiss(); return }
+            let _: JSONValue = try await rt.api.send("POST", "/api/cron/jobs/\(job.identity)/\(action)", body: EmptyBody())
+            status = "Done: \(action)."; onChange()
+        } catch { status = error.localizedDescription }
+    }
+}
+
+// MARK: Sessions
+
+struct SessionsView: View {
+    @Environment(AppModel.self) private var model
+    @State private var sessions: [StoredSession] = []
+    @State private var search = ""
+    @State private var error: String?
+    @State private var stats: JSONValue?
+    @State private var showAdvanced = false
+    private var rt: GatewayRuntime? { model.runtime }
+
+    var body: some View {
+        List {
+            if let error { Text(error).foregroundStyle(.red).font(.footnote) }
+            Section {
+                ForEach(sessions) { s in
+                    Button { model.pendingRoute = PendingRoute(connectionID: rt?.connection.id, storedSessionID: s.id, profile: rt?.selectedProfile); model.selectedTab = .chats } label: {
+                        VStack(alignment: .leading) { Text(s.displayTitle).lineLimit(1); Text("\(s.messageCount ?? 0) messages · \(s.model ?? "")").font(.caption).foregroundStyle(.secondary) }
+                    }
+                    .tint(.primary)
+                    .swipeActions { Button(role: .destructive) { Task { await delete(s) } } label: { Label("Delete", systemImage: "trash") } }
+                }
+            }
+        }
+        .searchable(text: $search)
+        .onChange(of: search) { _, _ in Task { await load() } }
+        .refreshable { await load() }
+        .task(id: rt?.selectedProfile) { await load() }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button { showAdvanced = true } label: { Label("Advanced", systemImage: "internaldrive") }
+                } label: { Label("Options", systemImage: "gearshape") }
+            }
+        }
+        .sheet(isPresented: $showAdvanced) { SessionStoreSheet(stats: stats) }
+    }
+
+    private func load() async {
+        guard let rt else { return }
+        do {
+            if search.isEmpty {
+                let r: SessionListResponse = try await rt.api.get("/api/sessions", query: [URLQueryItem(name: "archived", value: "include"), URLQueryItem(name: "limit", value: "100")], profile: rt.selectedProfile)
+                sessions = r.sessions
+            } else {
+                let r: JSONValue = try await rt.api.get("/api/sessions/search", query: [URLQueryItem(name: "q", value: search)], profile: rt.selectedProfile)
+                sessions = (r["sessions"]?.arrayValue ?? r["results"]?.arrayValue ?? []).compactMap { try? $0.decode(StoredSession.self) }
+            }
+            stats = try? await rt.api.get("/api/sessions/stats", profile: rt.selectedProfile)
+            error = nil
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func delete(_ s: StoredSession) async {
+        guard let rt else { return }
+        let _: JSONValue? = try? await rt.api.send("DELETE", "/api/sessions/\(s.id)", profile: rt.selectedProfile, body: EmptyBody())
+        await load()
+    }
+}
+
+// MARK: Channels (read-only)
+
+struct ChannelsView: View {
+    @Environment(AppModel.self) private var model
+    @State private var platforms: [JSONValue] = []
+    @State private var error: String?
+
+    var body: some View {
+        List {
+            if let error { Text(error).foregroundStyle(.red).font(.footnote) }
+            ForEach(Array(platforms.enumerated()), id: \.offset) { _, p in
+                HStack {
+                    VStack(alignment: .leading) {
+                        Text(p["label"]?.stringValue ?? p["name"]?.stringValue ?? p["id"]?.stringValue ?? "?")
+                        Text(p["status"]?.stringValue ?? "").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if p["enabled"]?.boolValue == true { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
+                }
+            }
+            Section { Text("Channel setup (bot tokens, allowlists) happens on the gateway machine or its web dashboard.").font(.footnote).foregroundStyle(.secondary) }
+        }
+        .task {
+            guard let rt = model.runtime else { return }
+            do {
+                let raw: JSONValue = try await rt.api.get("/api/messaging/platforms", profile: rt.selectedProfile)
+                let container = raw["platforms"] ?? raw
+                if let arr = container.arrayValue { platforms = arr }
+                else if let obj = container.objectValue { platforms = obj.keys.sorted().map { k in var o = obj[k]?.objectValue ?? [:]; o["id"] = .string(k); return .object(o) } }
+            } catch { self.error = error.localizedDescription }
+        }
+    }
+}

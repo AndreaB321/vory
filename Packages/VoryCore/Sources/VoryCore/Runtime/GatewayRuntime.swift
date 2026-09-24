@@ -1,0 +1,268 @@
+import Foundation
+import Observation
+import OSLog
+
+/// Everything live for the active gateway: REST client, WebSocket, profiles, open chats and pending attention.
+@MainActor
+@Observable
+public final class GatewayRuntime {
+    public let connection: GatewayConnection
+    public private(set) var secrets: GatewaySecrets
+    public let api: HermesAPI
+    public private(set) var socket: GatewaySocket!
+    private let store: ConnectionStore
+    private let log = Logger(subsystem: "Vory", category: "runtime")
+
+    public var socketState: SocketState = .idle
+    public var profiles: [ProfileInfo] = []
+    public var selectedProfile: String? {
+        didSet {
+            var c = connection; c.lastProfile = selectedProfile; store.updateMetadata(c)
+            if oldValue != selectedProfile { Task { await refreshCapabilities() } }
+        }
+    }
+    public var hasBotMode = false
+    public var profileHome: String?
+    public var lastError: String?
+    /// Stored session ids that have a card waiting for the user.
+    public var needsAttention: Set<String> = []
+    private var registry = ChatRegistry<ChatSession>()
+    /// Every open chat, in the order it was opened.
+    public var chats: [ChatSession] { registry.all }
+    private var globalEventTask: Task<Void, Never>?
+    /// Platform hooks, set by the app that owns this runtime.
+    public var pushRegistrar: (any PushRegistrationSyncing)?
+    public var cardNotifier: (any CardNotifying)?
+    public var activityReporterFactory: @MainActor () -> any TurnActivityReporting = { NoTurnActivity() }
+    /// Restart / update runs for this gateway; shared by the System screen and the "restart required" callout.
+    public let maintenance = MaintenanceModel()
+    /// The dashboard's "Restart required" message when it is serving stale code, else nil. Hermes only
+    /// reports this from /api/model/options, so it is probed on connect, profile change and reconnect
+    /// rather than discovered by surprise when the model picker opens.
+    public var restartRequired: String?
+
+    public init(connection: GatewayConnection, store: ConnectionStore) {
+        self.connection = connection
+        self.store = store
+        let loadedSecrets = store.secrets(for: connection.id)
+        self.secrets = loadedSecrets
+        self.selectedProfile = connection.lastProfile
+        self.api = HermesAPI(gateway: connection.gateway, signer: RequestSigner(authMode: connection.authMode, secrets: loadedSecrets))
+        self.socket = GatewaySocket(
+            urlProvider: { [weak self] in
+                guard let self else { throw SocketError.cancelled }
+                return try await self.websocketURL()
+            },
+            onEvent: { [weak self] ev in Task { @MainActor in self?.handle(event: ev) } },
+            onState: { [weak self] s in Task { @MainActor in self?.socketState = s } },
+            onServerRequest: { [weak self] req in
+                guard let self else { return nil }
+                return await self.answer(serverRequest: req)
+            },
+            onReconnected: { [weak self] in await self?.didReconnect() })
+        Task { await api.setRefresher { [weak self] in
+            guard let self else { throw HermesAPIError.sessionExpired }
+            return try await self.refreshSigner()
+        } }
+    }
+
+    // MARK: Auth plumbing
+
+    private func refreshSigner() async throws -> RequestSigner {
+        guard connection.authMode.usesBearer else { throw HermesAPIError.unauthorized("") }
+        let refreshed = try await NativeAuthClient.refresh(gateway: connection.gateway, secrets: secrets)
+        secrets = refreshed
+        store.saveSecrets(refreshed, for: connection.id)
+        return RequestSigner(authMode: connection.authMode, secrets: refreshed)
+    }
+
+    public func replaceSecrets(_ s: GatewaySecrets) async {
+        secrets = s
+        store.saveSecrets(s, for: connection.id)
+        await api.updateSigner(RequestSigner(authMode: connection.authMode, secrets: s))
+        await socket.connect()
+    }
+
+    private nonisolated func websocketURL() async throws -> (URL, [String: String]) {
+        let (gateway, authMode, secrets) = await (connection.gateway, connection.authMode, self.secrets)
+        var ticket: String?
+        if authMode.usesBearer {
+            let r: [String: JSONValue] = try await api.send("POST", "/api/auth/ws-ticket", body: EmptyBody())
+            ticket = r["ticket"]?.stringValue
+        }
+        let url = RequestSigner.websocketURL(gateway: gateway, token: secrets.sessionToken, ticket: ticket)
+        return (url, secrets.access.headers)
+    }
+
+    // MARK: Lifecycle
+
+    public func start() async {
+        await socket.connect()
+        await loadProfiles()
+        await refreshCapabilities()
+        publishSnapshot(refreshSessions: true)
+    }
+
+    public func stop() async {
+        globalEventTask?.cancel()
+        await socket.disconnect()
+    }
+
+    public func reconnectNow() async { await socket.disconnect(); await socket.connect() }
+
+    private func didReconnect() async {
+        _ = try? await socket.call("client.capabilities", params: ["server_requests": true])
+        for chat in registry.all { await chat.reattachAfterReconnect() }
+        await probeCodeSkew()
+    }
+
+    /// One cheap GET; only the 503 skew refusal sets the flag, every other outcome clears it.
+    public func probeCodeSkew() async {
+        do {
+            let _: JSONValue = try await api.get("/api/model/options", profile: selectedProfile)
+            restartRequired = nil
+        } catch let e as HermesAPIError {
+            if case .http(let status, let detail) = e, status == 503, MaintenanceModel.isRestartRequired(detail) { restartRequired = detail }
+            else { restartRequired = nil }
+        } catch { restartRequired = nil }
+    }
+
+    public func loadProfiles() async {
+        do {
+            let r: ProfilesResponse = try await api.get("/api/profiles")
+            profiles = r.profiles
+            if selectedProfile == nil || !profiles.contains(where: { $0.name == selectedProfile }) {
+                let active: ActiveProfileResponse? = try? await api.get("/api/profiles/active")
+                selectedProfile = active?.current ?? profiles.first(where: { $0.isDefault == true })?.name ?? profiles.first?.name
+            }
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    public func refreshCapabilities() async {
+        do {
+            try await socket.waitUntilReady()
+            _ = try? await socket.call("client.capabilities", params: ["server_requests": true])
+            if let caps: GroupsCapabilities = try? (await socket.call("groups.capabilities", params: profileParams())).decode() {
+                hasBotMode = caps.driver ?? false || !(caps.methods ?? []).isEmpty
+            } else {
+                hasBotMode = false
+            }
+            if let cfg = try? await socket.call("config.get", params: profileParams(["key": "profile"])) {
+                profileHome = cfg["home"]?.stringValue
+            }
+            await pushRegistrar?.syncRegistration(runtime: self)
+            await probeCodeSkew()
+        } catch {
+            log.warning("capabilities: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Adds `profile` to RPC params when a non-default profile is selected.
+    public func profileParams(_ base: [String: JSONValue] = [:]) -> JSONValue {
+        var p = base
+        if let sp = selectedProfile, !sp.isEmpty { p["profile"] = .string(sp) }
+        return .object(p.compactingNulls)
+    }
+
+    public func rpc(_ method: String, _ params: [String: JSONValue] = [:], timeout: Double = 120) async throws -> JSONValue {
+        try await socket.waitUntilReady()
+        return try await socket.call(method, params: profileParams(params), timeout: timeout)
+    }
+
+    // MARK: Chats
+
+    public func chat(runtimeID: String) -> ChatSession? { registry.byRuntime(runtimeID) }
+    public func chatForStored(_ storedID: String) -> ChatSession? { registry.byStored(storedID) }
+
+    /// Opens (or returns) the live chat for a stored session id.
+    /// Returns immediately with the cached transcript; the live attach runs behind it
+    /// (`ChatSession.isResuming` / `resumeError`). Pass `waitForResume` to keep the old blocking contract.
+    public func openChat(storedID: String, title: String?, waitForResume: Bool = false) async throws -> ChatSession {
+        if let c = registry.byStored(storedID) { if waitForResume { await c.awaitResume() }; return c }
+        let session = ChatSession(runtime: self, storedID: storedID, title: title)
+        registry.add(session)
+        session.beginResume()
+        if waitForResume {
+            await session.awaitResume()
+            if let e = session.resumeError { registry.remove(session); throw HermesAPIError.transport(e) }
+        }
+        return session
+    }
+
+    public func newChat() async throws -> ChatSession {
+        let session = ChatSession(runtime: self, storedID: nil, title: nil)
+        try await session.create()
+        registry.add(session)
+        return session
+    }
+
+    public func closeChat(_ chat: ChatSession) {
+        registry.remove(chat)
+        Task { _ = try? await socket.call("session.close", params: profileParams(["session_id": .string(chat.runtimeID)])) }
+    }
+
+    // MARK: Events
+
+    private func handle(event: GatewayEvent) {
+        if let chat = registry.byRuntime(event.sessionID) {
+            chat.handle(event: event)
+            return
+        }
+        switch event.type {
+        case "session.reclaimed":
+            if let sid = event.payload["session_id"]?.stringValue, let chat = registry.byRuntime(sid) { chat.handle(event: event) }
+        case "sessions.changed":
+            NotificationCenter.default.post(name: .hermesSessionsChanged, object: nil)
+            publishSnapshot(refreshSessions: true)
+        case "cron.changed":
+            NotificationCenter.default.post(name: .hermesCronChanged, object: nil)
+        default:
+            break
+        }
+    }
+
+    private func answer(serverRequest req: ServerRequest) async -> JSONValue? {
+        guard let chat = registry.byRuntime(req.sessionID) else {
+            log.warning("server request for unknown session \(req.sessionID, privacy: .public)")
+            return nil
+        }
+        return await chat.answer(serverRequest: req)
+    }
+
+    public func setAttention(storedID: String, needed: Bool) {
+        if needed { needsAttention.insert(storedID) } else { needsAttention.remove(storedID) }
+        publishSnapshot()
+    }
+
+    /// Called by whoever wants widgets refreshed (`WidgetCenter.reloadAllTimelines` lives in the app).
+    public var onSnapshotPublished: (@MainActor (WidgetSnapshot) -> Void)?
+    private var recentSessions: [StoredSession] = []
+
+    /// Refreshes the recent-sessions list and writes the widget snapshot. Cheap; safe to call often.
+    public func publishSnapshot(refreshSessions: Bool = false) {
+        Task {
+            if refreshSessions || recentSessions.isEmpty {
+                if let r: SessionListResponse = try? await api.get("/api/sessions", query: [URLQueryItem(name: "order", value: "recent"), URLQueryItem(name: "limit", value: "8")], profile: selectedProfile) {
+                    recentSessions = r.sessions
+                }
+            }
+            let chats = recentSessions.map { s in
+                WidgetSnapshot.Chat(id: s.id, title: s.displayTitle, profile: s.profile ?? selectedProfile ?? "default", lastActive: s.lastActive,
+                                    running: chatForStored(s.id)?.isRunning ?? false, needsYou: needsAttention.contains(s.id))
+            }
+            let ctx = registry.all.first { $0.isRunning }?.usage?.computedContextPercent ?? registry.all.last?.usage?.computedContextPercent
+            let snap = WidgetSnapshot(gatewayName: connection.name, connectionID: connection.id.uuidString, profile: selectedProfile ?? "default",
+                                      needsAttention: needsAttention.count, chats: chats, contextPercent: ctx)
+            snap.save()
+            onSnapshotPublished?(snap)
+        }
+    }
+}
+
+public extension Notification.Name {
+    public static let hermesSessionsChanged = Notification.Name("hermesSessionsChanged")
+    public static let hermesCronChanged = Notification.Name("hermesCronChanged")
+    public static let hermesOpenSession = Notification.Name("hermesOpenSession")
+}

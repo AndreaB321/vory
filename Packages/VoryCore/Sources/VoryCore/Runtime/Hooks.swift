@@ -1,0 +1,36 @@
+import Foundation
+
+/// Drives a platform's "turn in progress" surface (a Live Activity on iOS, a menu-bar item on
+/// macOS, nothing on the watch). The core calls these; it never imports ActivityKit.
+@MainActor
+public protocol TurnActivityReporting: AnyObject {
+    func start(for chat: ChatSession)
+    func update(for chat: ChatSession, attention: Bool, detail: String?)
+    func end(for chat: ChatSession, phase: String)
+}
+
+public extension TurnActivityReporting {
+    func update(for chat: ChatSession, attention: Bool) { update(for: chat, attention: attention, detail: nil) }
+}
+
+/// Local (foreground-only) notifications for cards and finished turns.
+@MainActor
+public protocol CardNotifying: AnyObject {
+    func cardArrived(_ card: PendingCard, chat: ChatSession)
+    func turnFinished(chat: ChatSession, error: String?)
+}
+
+/// Publishes the device's push registration to the gateway after capabilities are known.
+@MainActor
+public protocol PushRegistrationSyncing: AnyObject {
+    func syncRegistration(runtime: GatewayRuntime) async
+}
+
+/// Default when a platform has no turn surface.
+@MainActor
+public final class NoTurnActivity: TurnActivityReporting {
+    public init() {}
+    public func start(for chat: ChatSession) {}
+    public func update(for chat: ChatSession, attention: Bool, detail: String?) {}
+    public func end(for chat: ChatSession, phase: String) {}
+}

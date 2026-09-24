@@ -1,0 +1,10 @@
+xcuserdata/
+DerivedData/
+*.xcuserstate
+.DS_Store
+build/
+__pycache__/
+*.pyc
+Tools/release/.env
+.dev.vars
+server/push-relay/node_modules/

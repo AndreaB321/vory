@@ -1,0 +1,60 @@
+{
+  "fill": {
+    "solid": "srgb:1.0000,1.0000,1.0000,1"
+  },
+  "fill-specializations": [
+    {
+      "appearance": "dark",
+      "value": {
+        "solid": "srgb:0.1060,0.1060,0.1180,1"
+      }
+    }
+  ],
+  "groups": [
+    {
+      "name": "Ring",
+      "layers": [
+        {
+          "name": "Ring",
+          "image-name": "Ring.svg",
+          "glass": true,
+          "position": {
+            "scale": 0.94,
+            "translation-in-points": [0, 0]
+          }
+        }
+      ],
+      "shadow": { "kind": "neutral", "opacity": 0.45 },
+      "translucency": { "enabled": false, "value": 0.0 },
+      "specular": true,
+      "blur-material": 0.5,
+      "refractivity-strength": 0.6,
+      "refractivity-depth": 0.5
+    },
+    {
+      "name": "V",
+      "layers": [
+        {
+          "name": "V",
+          "image-name": "V.svg",
+          "glass": true,
+          "position": {
+            "scale": 0.94,
+            "translation-in-points": [0, 0]
+          }
+        }
+      ],
+      "shadow": { "kind": "neutral", "opacity": 0.75 },
+      "translucency": { "enabled": false, "value": 0.0 },
+      "specular": true,
+      "specular-highlight-placement": "inside",
+      "blur-material": 0.25,
+      "refractivity-strength": 0.9,
+      "refractivity-depth": 0.8
+    }
+  ],
+  "supported-platforms": {
+    "circles": ["watchOS"],
+    "squares": "shared"
+  }
+}
