@@ -32,11 +32,28 @@ for var in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_PATH; do
 done
 [ -f "$ASC_KEY_PATH" ] || fail "API key not found at $ASC_KEY_PATH"
 
-# App Store Connect rejects a build number it has already seen for this version, so derive a
-# monotonic one from the clock rather than relying on anyone remembering to bump it.
-BUILD_NUMBER="${BUILD_NUMBER:-$(date +%y%m%d%H%M)}"
 # Info.plist holds the $(MARKETING_VERSION) macro, so read the real value from the project.
 MARKETING_VERSION="${MARKETING_VERSION:-$(grep -m1 'MARKETING_VERSION = ' "$PROJECT/project.pbxproj" | sed 's/.*= *//; s/;//')}"
+
+# The build number is the iteration count: one more than the highest small build number App Store
+# Connect already holds for this app (App Store Connect refuses a number it has seen, or a lower one
+# within the same version). Builds before 1.0.1 used date-style numbers (2609240140); those are
+# ignored, which is why the version moved to 1.0.1 when the scheme changed. Override with BUILD_NUMBER=.
+next_build_number() {
+    local token
+    token="$(ASC_KEY_ID="$ASC_KEY_ID" ASC_ISSUER_ID="$ASC_ISSUER_ID" ASC_KEY_PATH="$ASC_KEY_PATH" swift Tools/release/asc-jwt.swift)" || return 1
+    curl -sS --fail -H "Authorization: Bearer $token" \
+        "https://api.appstoreconnect.apple.com/v1/builds?filter%5Bapp%5D=$ASC_APP_ID&limit=200&fields%5Bbuilds%5D=version" \
+    | python3 -c '
+import json, sys
+versions = [b["attributes"]["version"] for b in json.load(sys.stdin)["data"]]
+small = [int(v) for v in versions if v.isdigit() and int(v) < 100000]
+print(max(small) + 1 if small else len(versions) + 1)'
+}
+ASC_APP_ID="${ASC_APP_ID:-6814980297}"
+if [ -z "${BUILD_NUMBER:-}" ]; then
+    BUILD_NUMBER="$(next_build_number)" || fail "Could not read the existing builds from App Store Connect to pick the next build number. Pass BUILD_NUMBER=<n> to override."
+fi
 
 ARCHIVE="$ARCHIVE_DIR/Vory-$BUILD_NUMBER.xcarchive"
 mkdir -p "$ARCHIVE_DIR"
