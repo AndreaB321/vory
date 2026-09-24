@@ -83,7 +83,9 @@ async function push(request, env) {
   if (!dev) return reply(403, { error: "unknown device" });
   const type = b.push_type || "alert";
   let topic = dev.bundle_id, token = dev.device_token, payload;
-  const headers = { "apns-push-type": type, "apns-priority": "10", "apns-expiration": "0" };
+  // Store-and-forward for an hour: with expiration 0 Apple discards a push the instant the phone's
+  // push connection is down, which the sandbox service (Debug builds) does often.
+  const headers = { "apns-push-type": type, "apns-priority": "10", "apns-expiration": String(Math.floor(Date.now() / 1000) + 3600) };
   if (type === "alert") {
     if (typeof b.enc !== "string" || b.enc.length > 8192) return reply(400, { error: "enc required" });
     // Placeholder text: the extension replaces it after decrypting `enc`.
