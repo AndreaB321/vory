@@ -48,7 +48,7 @@ except ImportError as exc:  # pragma: no cover
 log = logging.getLogger("hermes-push")
 
 # Keep in step with plugin/vory-push/plugin.yaml; the app compares the two.
-VERSION = "1.0.12"
+VERSION = "1.0.13"
 USER_AGENT = f"Vory-Push/{VERSION} (Hermes companion)"
 try:
     # Fingerprint of the code actually running: the app compares it with the copy it ships, so a
@@ -526,27 +526,29 @@ class Relay:
         for d in watches:
             self.apns.send(d, {"aps": {"content-available": 1}, "hermes": {"kind": "complication", "gateway": self.gw.public_url}}, push_type="complication")
 
-    def live_activity_devices(self, stored: str) -> list[dict]:
+    def live_activity_devices(self, stored: str, runtime_id: str = "") -> list[dict]:
         """Phones showing a Live Activity for this session right now: they get their news through it
-        (the Island expands and buzzes) instead of a separate banner."""
+        (the Island expands and buzzes) instead of a separate banner. The phone files the token under
+        the STORED session id; the gateway sometimes only tells us the runtime id, so both count."""
+        ids = {i for i in (stored, runtime_id) if i}
         out = []
         for d in load_devices(self.gw.url):
             if not d.get("live_activity_token") or d.get("platform") != "ios":
                 continue
             # Only the activity for this session; a device carries the token of its latest one.
-            if d.get("live_activity_session_id") and d["live_activity_session_id"] != stored:
+            if d.get("live_activity_session_id") and d["live_activity_session_id"] not in ids:
                 continue
             if time.time() - float(d.get("live_activity_started_at") or 0) > 3 * 3600:
                 continue
             out.append(d)
         return out
 
-    def end_live_activities(self, stored: str, phase: str, bot: str = "Hermes") -> set:
+    def end_live_activities(self, stored: str, phase: str, bot: str = "Hermes", runtime_id: str = "") -> set:
         """Finish the activity with an alert (expanded Island, haptic), then dismiss it shortly after.
         Returns the ids of the devices reached."""
         now = int(time.time())
         reached = set()
-        targets = self.live_activity_devices(stored)
+        targets = self.live_activity_devices(stored, runtime_id)
         if not targets:
             self._la_skip(f"finish {phase}", stored)
         for d in targets:
@@ -566,12 +568,12 @@ class Relay:
                 self.apns.send(d, end_payload, push_type="liveactivity", token_override=d["live_activity_token"])
         return reached
 
-    def update_live_activities(self, stored: str, state_patch: dict, alert: dict | None = None) -> set:
+    def update_live_activities(self, stored: str, state_patch: dict, alert: dict | None = None, runtime_id: str = "") -> set:
         """Mid-turn update (tool running, waiting for you): only what the companion can know. With
         ``alert`` the Island expands and buzzes. Returns the ids of the devices reached."""
         now = int(time.time())
         reached = set()
-        targets = self.live_activity_devices(stored)
+        targets = self.live_activity_devices(stored, runtime_id)
         if not targets and alert:
             self._la_skip("alert update", stored)
         for d in targets:
@@ -634,7 +636,7 @@ class Relay:
         if method == "approval":
             body = params.get("description") or params.get("command") or "A command is waiting for your decision"
             via_la = self.update_live_activities(a.get("stored", sid), {"phase": "waiting", "detail": str(body)[:80], "needsAttention": True},
-                                                 alert={"title": bot, "body": "Approval needed — tap to answer"})
+                                                 alert={"title": bot, "body": "Approval needed — tap to answer"}, runtime_id=sid)
             self.push_all("approval", f"{bot} · approval needed", f"{title}: {str(body)[:180]}", {**self.meta(sid), "request_id": params.get("request_id", rid)}, collapse=rid, skip=via_la)
         elif method == "clarify":
             q = params.get("question") or (params.get("questions") or [{}])[0].get("question") or "Hermes has a question"
@@ -735,12 +737,12 @@ class Relay:
             title = a["title"]; bot = a.get("bot") or a.get("profile", "Hermes")
             err = p.get("error")
             if err:
-                via_la = self.end_live_activities(a["stored"], "error", bot=bot)
+                via_la = self.end_live_activities(a["stored"], "error", bot=bot, runtime_id=sid)
                 self.push_all("error", f"{bot} · turn failed", f"{title}: {str(err)[:180]}", self.meta(sid), collapse=f"turn-{sid}", skip=via_la)
             else:
                 text = p.get("text") if isinstance(p.get("text"), str) else ""
                 label = "cron job finished" if a.get("source") == "cron" else title
-                via_la = self.end_live_activities(a["stored"], "done", bot=bot)
+                via_la = self.end_live_activities(a["stored"], "done", bot=bot, runtime_id=sid)
                 self.push_all("cron" if a.get("source") == "cron" else "turn", f"{bot} · {label}" if a.get("source") == "cron" else bot, f"{title}: {(text or 'Done')[:180]}", self.meta(sid), collapse=f"turn-{sid}", skip=via_la)
         elif kind == "error" and a:
             self.push_all("error", f"{a.get('bot') or a.get('profile', 'Hermes')} · error", f"{a['title']}: {str(p.get('message', ''))[:180]}", self.meta(sid), collapse=f"err-{sid}")
