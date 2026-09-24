@@ -52,7 +52,7 @@ except ImportError as exc:  # pragma: no cover
 log = logging.getLogger("hermes-push")
 
 # Keep in step with plugin/vory-push/plugin.yaml; the app compares the two.
-VERSION = "1.0.22"
+VERSION = "1.0.23"
 USER_AGENT = f"Vory-Push/{VERSION} (Hermes companion)"
 try:
     # Fingerprint of the code actually running: the app compares it with the copy it ships, so a
@@ -513,6 +513,18 @@ class Relay:
                     "interruption-level": "time-sensitive" if kind in {"approval", "clarify"} else "active"},
             "hermes": {"kind": kind, "gateway": self.gw.public_url, **meta},
         }
+        # Apple caps a push at 4 KB and the relay encrypts this part: drop thread lines, then
+        # shorten the text, until it fits comfortably.
+        h = payload["hermes"]
+        while len(json.dumps(h, ensure_ascii=False).encode()) > 2300:
+            if h.get("thread"):
+                h["thread"] = h["thread"][1:]
+                if not h["thread"]:
+                    h.pop("thread", None)
+            elif len(h.get("text") or "") > 400:
+                h["text"] = h["text"][:max(400, len(h["text"]) - 300)]
+            else:
+                break
         sent = 0
         for d in load_devices(self.gw.url):
             if d.get("platform") == "watchos" or d.get("device_id") in skip:
@@ -652,7 +664,9 @@ class Relay:
                 # the activate snapshot does not always carry it, but the live list always does.
                 stored = snap.get("stored_session_id") or s.get("session_key") or sid
                 info = snap.get("info") or {}
-                pname = profile or info.get("profile_name") or "default"
+                # The listing for one profile can include other profiles' sessions, so the session's
+                # own profile (from its snapshot) decides which bot it belongs to.
+                pname = info.get("profile_name") or s.get("profile_name") or s.get("profile") or profile or "default"
                 self.attached[sid] = {"stored": stored, "title": s.get("title") or info.get("title") or "Hermes", "profile": pname,
                                       "bot": self.labels.get(pname, pname), "source": s.get("source") or ""}
                 log.info("attached %s (%s, profile %s)", self.attached[sid]["title"], stored[:12], self.attached[sid]["profile"])
@@ -757,6 +771,48 @@ class Relay:
                 _CONF.clear()
                 _load_conf()
 
+    async def _finish_turn(self, sid: str, a: dict, p: dict) -> None:
+        """The turn's end: finish the Live Activity and send the reply as a notification. The reply
+        window (long-press) shows `text` in full, the chat under `title`, and the exchanges that led
+        up to it (`thread`, fetched here with a short timeout)."""
+        title = a["title"]; bot = a.get("bot") or a.get("profile", "Hermes")
+        err = p.get("error")
+        thread = await self._recent_thread(sid, a)
+        if err:
+            self.end_live_activities(a["stored"], "error", bot=bot, runtime_id=sid, usage=p.get("usage"))
+            self.push_all("error", f"{bot} · turn failed", f"{title}: {str(err)[:300]}",
+                          {**self.meta(sid), "title": title, "text": str(err)[:1200], "thread": thread}, collapse=f"turn-{sid}")
+        else:
+            text = p.get("text") if isinstance(p.get("text"), str) else ""
+            label = "cron job finished" if a.get("source") == "cron" else title
+            self.end_live_activities(a["stored"], "done", bot=bot, runtime_id=sid, usage=p.get("usage"))
+            self.push_all("cron" if a.get("source") == "cron" else "turn", f"{bot} · {label}" if a.get("source") == "cron" else bot,
+                          f"{title}: {(text or 'Done')[:300]}",
+                          {**self.meta(sid), "title": title, "text": (text or "Done")[:1200], "thread": thread}, collapse=f"turn-{sid}")
+
+    async def _recent_thread(self, sid: str, a: dict) -> list:
+        """Up to three earlier messages of the session (user and assistant text only, shortened) for
+        the notification's reply window. Empty when the gateway is slow or has none."""
+        try:
+            params = {"session_id": sid, "omit_messages": False}
+            if a.get("profile"):
+                params["profile"] = a["profile"]
+            snap = await asyncio.wait_for(self.gw.call("session.activate", params), timeout=4)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("thread fetch failed for %s: %s", sid[:12], exc)
+            return []
+        out = []
+        for m in snap.get("messages") or []:
+            if not isinstance(m, dict):
+                continue
+            role, text = m.get("role"), m.get("text") or m.get("content")
+            if role in {"user", "assistant"} and isinstance(text, str) and text.strip():
+                out.append({"role": role, "text": text.strip()[:200]})
+        # The final assistant reply is the notification itself; show what led up to it.
+        if out and out[-1]["role"] == "assistant":
+            out = out[:-1]
+        return out[-3:]
+
     async def _attach_then_handle(self, sid: str, ev: dict) -> None:
         await self.discover()
         if sid in self.attached:
@@ -792,18 +848,7 @@ class Relay:
             a["title"] = p.get("title") or a["title"]
         elif kind == "message.complete" and a:
             self.la_phase.pop(sid, None)
-            title = a["title"]; bot = a.get("bot") or a.get("profile", "Hermes")
-            err = p.get("error")
-            if err:
-                self.end_live_activities(a["stored"], "error", bot=bot, runtime_id=sid, usage=p.get("usage"))
-                self.push_all("error", f"{bot} · turn failed", f"{title}: {str(err)[:400]}", {**self.meta(sid), "title": title, "text": str(err)[:1500]}, collapse=f"turn-{sid}")
-            else:
-                text = p.get("text") if isinstance(p.get("text"), str) else ""
-                label = "cron job finished" if a.get("source") == "cron" else title
-                self.end_live_activities(a["stored"], "done", bot=bot, runtime_id=sid, usage=p.get("usage"))
-                # The reply window (long-press) shows `text` in full and the chat under `title`.
-                self.push_all("cron" if a.get("source") == "cron" else "turn", f"{bot} · {label}" if a.get("source") == "cron" else bot, f"{title}: {(text or 'Done')[:400]}",
-                              {**self.meta(sid), "title": title, "text": (text or "Done")[:1500]}, collapse=f"turn-{sid}")
+            asyncio.create_task(self._finish_turn(sid, a, p))
         elif kind == "error" and a:
             self.push_all("error", f"{a.get('bot') or a.get('profile', 'Hermes')} · error", f"{a['title']}: {str(p.get('message', ''))[:180]}", self.meta(sid), collapse=f"err-{sid}")
         elif kind == "request.cancel":

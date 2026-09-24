@@ -67,6 +67,7 @@ struct SettingsView: View {
                 Section("App") {
                     ForEach(filtered(appRows)) { row in
                         NavigationLink { row.destination.navigationTitle(row.title) } label: { SettingsLabel(row.title, row.symbol, row.color) }
+                            .badge(row.id == "notifications" && model.companionUpdateAvailable ? 1 : 0)
                     }
                 }
             }
@@ -219,6 +220,7 @@ struct NotificationsView: View {
             }
             Section {
                 NavigationLink { BackgroundNotificationsView() } label: { Label("Background Notifications", systemImage: "server.rack") }
+                    .badge(model.companionUpdateAvailable ? 1 : 0)
                     .disabled(model.runtime == nil)
             } footer: {
                 Text("Approvals, questions, finished turns and errors while Vory is closed — delivered by the companion plugin on your gateway. Foreground and just-backgrounded events are delivered locally without it.")

@@ -61,14 +61,16 @@ struct MainTabView: View {
         }
     }
 
-    /// Chats counts waiting cards; Settings flags a gateway that needs a restart.
+    /// Chats counts waiting cards; Settings flags a gateway that needs a restart, or a companion
+    /// update waiting under Notifications › Background Notifications.
     private func badge(for tab: AppModel.AppTab) -> Text? {
         switch tab {
         case .chats:
             let n = model.runtime?.needsAttention.count ?? 0
             return n > 0 ? Text("\(n)") : nil
         case .settings:
-            return model.runtime?.restartRequired != nil ? Text("!") : nil
+            if model.runtime?.restartRequired != nil { return Text("!") }
+            return model.companionUpdateAvailable ? Text("1") : nil
         default:
             return nil
         }

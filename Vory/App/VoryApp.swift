@@ -25,6 +25,7 @@ struct VoryApp: App {
                 .task {
                     AppDelegate.model = model
                     await model.activateSavedConnection()
+                    await model.refreshCompanionUpdateFlag()
                 }
                 .onChange(of: scenePhase) { _, phase in
                     switch phase {
@@ -32,6 +33,7 @@ struct VoryApp: App {
                         LocalNotifier.isForeground = true
                         model.lock.willEnterForeground()
                         Task { await model.push.refreshAuthorization() }
+                        Task { await model.refreshCompanionUpdateFlag() }
                         // Live Activities whose turn ended while the app was away must not linger.
                         let chats = model.runtime?.chats ?? []
                         LiveActivityController.endOrphans(runningStoredIDs: Set(chats.filter(\.isRunning).map(\.storedID)), knownStoredIDs: Set(chats.map(\.storedID)))

@@ -8,7 +8,7 @@ import VoryCore
 /// thread: the bot's avatar and name, the chat it came from, and the reply as a bubble. The
 /// "Reply" text field underneath is the system's, from the notification category's text action.
 final class NotificationViewController: UIViewController, UNNotificationContentExtension {
-    private var host: UIHostingController<ReplyCard>?
+    private var host: UIHostingController<ReplyPane>?
 
     func didReceive(_ notification: UNNotification) {
         let content = notification.request.content
@@ -16,14 +16,21 @@ final class NotificationViewController: UIViewController, UNNotificationContentE
         Keychain.accessGroup = Keychain.sharedGroupFromBundle()
         let looks = BotLooks.load()
         let profile = hermes["profile"] as? String ?? ""
+        // Earlier exchanges the companion sent along (user and bot, shortened), oldest first.
+        let thread = (hermes["thread"] as? [[String: Any]] ?? []).compactMap { m -> ReplyCard.Line? in
+            guard let role = m["role"] as? String, let text = m["text"] as? String, !text.isEmpty else { return nil }
+            return ReplyCard.Line(fromUser: role == "user", text: text)
+        }
         let model = ReplyCard.Model(
             bot: content.title.isEmpty ? (profile.isEmpty ? "Hermes" : profile) : content.title,
             chatTitle: (hermes["title"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? content.subtitle,
             text: (hermes["text"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? Self.stripTitle(content.body),
+            thread: thread,
             tintHex: looks.colors[profile] ?? "",
             avatar: looks.avatars[profile] ?? "initial",
             failed: content.categoryIdentifier == "HERMES_ERROR")
-        let card = ReplyCard(model: model)
+        measured = UIHostingController(rootView: ReplyCard(model: model))
+        let card = ReplyPane(model: model)
         if let host {
             host.rootView = card
         } else {
@@ -44,16 +51,24 @@ final class NotificationViewController: UIViewController, UNNotificationContentE
             host = h
         }
         let width = view.bounds.width > 0 ? view.bounds.width : UIScreen.main.bounds.width - 16
-        let height = host?.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height ?? 120
-        preferredContentSize = CGSize(width: width, height: min(max(height, 96), 520))
+        preferredContentSize = CGSize(width: width, height: Self.fittedHeight(measured, width: width))
+    }
+
+    /// The card's natural height, measured on the plain card (a scroll view would claim any height),
+    /// capped at what fits above the keyboard and the reply field: the system clips a taller view
+    /// rather than shrinking it, so the cap is what makes the pane scroll instead of being cut off.
+    private var measured: UIHostingController<ReplyCard>?
+    private static func fittedHeight(_ card: UIHostingController<ReplyCard>?, width: CGFloat) -> CGFloat {
+        let h = card?.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height ?? 120
+        let cap = max(220, UIScreen.main.bounds.height * 0.34)
+        return min(max(h, 96), cap)
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        // Re-measure once the real width is known so the bubble never gets clipped.
-        guard let host, view.bounds.width > 0 else { return }
-        let height = host.sizeThatFits(in: CGSize(width: view.bounds.width, height: .greatestFiniteMagnitude)).height
-        let size = CGSize(width: view.bounds.width, height: min(max(height, 96), 520))
+        // Re-measure once the real width is known so the bubbles never get clipped.
+        guard view.bounds.width > 0 else { return }
+        let size = CGSize(width: view.bounds.width, height: Self.fittedHeight(measured, width: view.bounds.width))
         if abs(size.height - preferredContentSize.height) > 1 { preferredContentSize = size }
     }
 
@@ -64,11 +79,39 @@ final class NotificationViewController: UIViewController, UNNotificationContentE
     }
 }
 
+/// The card in a scroll view, so a long reply or thread can be read in place (the window is
+/// capped at a screen's worth); the newest message is what shows first.
+struct ReplyPane: View {
+    var model: ReplyCard.Model
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                ReplyCard(model: model)
+                Color.clear.frame(height: 0).id("end")
+            }
+            .defaultScrollAnchor(.bottom)
+            .scrollBounceBehavior(.basedOnSize)
+            // The system sizes the window after the first layout (the keyboard takes its share), so
+            // the end is re-shown whenever the visible height changes.
+            .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height } action: { _, _ in
+                proxy.scrollTo("end", anchor: .bottom)
+            }
+            .onAppear { proxy.scrollTo("end", anchor: .bottom) }
+        }
+    }
+}
+
 struct ReplyCard: View {
+    struct Line: Identifiable {
+        var fromUser: Bool
+        var text: String
+        var id: String { (fromUser ? "u:" : "a:") + text }
+    }
     struct Model {
         var bot: String
         var chatTitle: String
         var text: String
+        var thread: [Line] = []
         var tintHex: String
         var avatar: String
         var failed: Bool
@@ -90,6 +133,28 @@ struct ReplyCard: View {
                     Label("Failed", systemImage: "xmark.circle.fill").font(.caption.weight(.semibold)).foregroundStyle(.red)
                 }
             }
+            ForEach(model.thread) { line in
+                if line.fromUser {
+                    HStack(alignment: .bottom, spacing: 0) {
+                        Spacer(minLength: 48)
+                        Text(line.text)
+                            .font(.subheadline)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 13).padding(.vertical, 8)
+                            .background(Color.accentColor, in: BubbleShape(tailOnRight: true))
+                            .frame(maxWidth: 300, alignment: .trailing)
+                    }
+                } else {
+                    HStack(alignment: .bottom, spacing: 0) {
+                        Text(line.text)
+                            .font(.subheadline)
+                            .padding(.horizontal, 13).padding(.vertical, 8)
+                            .background(Color(uiColor: .secondarySystemFill), in: BubbleShape())
+                            .frame(maxWidth: 300, alignment: .leading)
+                        Spacer(minLength: 48)
+                    }
+                }
+            }
             HStack(alignment: .bottom, spacing: 0) {
                 Text(model.text)
                     .font(.body)
@@ -105,14 +170,23 @@ struct ReplyCard: View {
     }
 }
 
-/// A received-message bubble: rounded, with a small tail at the bottom-left like Messages.
+/// A message bubble: rounded, with a small tail at the bottom like Messages (left for received,
+/// right for the user's own).
 struct BubbleShape: Shape {
+    var tailOnRight = false
     func path(in r: CGRect) -> Path {
         var p = Path(roundedRect: r, cornerRadius: 18)
-        let tail = CGRect(x: r.minX - 5, y: r.maxY - 16, width: 12, height: 16)
-        p.move(to: CGPoint(x: tail.minX, y: tail.maxY))
-        p.addQuadCurve(to: CGPoint(x: tail.maxX + 2, y: tail.minY), control: CGPoint(x: tail.minX + 3, y: tail.maxY - 6))
-        p.addLine(to: CGPoint(x: tail.maxX + 2, y: tail.maxY))
+        if tailOnRight {
+            let tail = CGRect(x: r.maxX - 7, y: r.maxY - 16, width: 12, height: 16)
+            p.move(to: CGPoint(x: tail.maxX, y: tail.maxY))
+            p.addQuadCurve(to: CGPoint(x: tail.minX - 2, y: tail.minY), control: CGPoint(x: tail.maxX - 3, y: tail.maxY - 6))
+            p.addLine(to: CGPoint(x: tail.minX - 2, y: tail.maxY))
+        } else {
+            let tail = CGRect(x: r.minX - 5, y: r.maxY - 16, width: 12, height: 16)
+            p.move(to: CGPoint(x: tail.minX, y: tail.maxY))
+            p.addQuadCurve(to: CGPoint(x: tail.maxX + 2, y: tail.minY), control: CGPoint(x: tail.minX + 3, y: tail.maxY - 6))
+            p.addLine(to: CGPoint(x: tail.maxX + 2, y: tail.maxY))
+        }
         p.closeSubpath()
         return p
     }

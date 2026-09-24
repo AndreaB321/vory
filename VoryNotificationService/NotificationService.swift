@@ -50,18 +50,26 @@ final class NotificationService: UNNotificationServiceExtension {
     private static func deliverAsMessage(_ content: UNMutableNotificationContent, profile: String, handler: @escaping (UNNotificationContent) -> Void) {
         let botCategories: Set<String> = ["HERMES_TURN", "HERMES_ERROR", "HERMES_APPROVAL", "HERMES_CLARIFY"]
         guard botCategories.contains(content.categoryIdentifier), !content.title.isEmpty else { handler(content); return }
+        let kind = (content.userInfo["hermes"] as? [String: Any])?["kind"] as? String ?? ""
         // The avatar is rendered with SwiftUI's ImageRenderer, which needs the main actor. Neither the
         // content nor the system's handler is Sendable; nothing else touches them after this point.
         nonisolated(unsafe) let content = content
         nonisolated(unsafe) let handler = handler
         Task { @MainActor in
-            handler(asMessage(content, profile: profile))
+            handler(asMessage(content, profile: profile, kind: kind))
         }
     }
 
     @MainActor
-    private static func asMessage(_ content: UNMutableNotificationContent, profile: String) -> UNNotificationContent {
-        let looks = BotLooks.load()
+    private static func asMessage(_ content: UNMutableNotificationContent, profile: String, kind: String) -> UNNotificationContent {
+        var looks = BotLooks.load()
+        var profile = profile
+        if kind == "test" {
+            // The test notification comes from no bot in particular: Vory's own little cloud.
+            profile = "vory"
+            looks.avatars["vory"] = "animated:nimbus"
+            looks.colors["vory"] = "#3B7BFF"
+        }
         // The title is "<bot>" or "<bot> · approval needed": the sender is the part before the dot.
         let bot = content.title.components(separatedBy: " · ").first ?? content.title
         let png = AvatarRender.image(profile: profile, name: bot, looks: looks)

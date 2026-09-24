@@ -894,6 +894,8 @@ struct BackgroundNotificationsView: View {
             await setup.prepare(runtime: rt)
         }
         .refreshable { if let rt { await setup.checkCompanion(runtime: rt) } }
+        // The badge on Settings › Notifications follows what this page finds.
+        .onChange(of: setup.companionCheckedAt) { _, _ in model.companionUpdateAvailable = setup.updateAvailable }
     }
 }
 
@@ -919,7 +921,9 @@ struct CompanionStatusRows: View {
                 }
             }
             statusRow("Running") { runningLabel }
-            if let hb = setup.heartbeat, hb.connected == false, let e = hb.error, e != "connecting…" {
+            if let hb = setup.heartbeat, hb.connected == false, let e = hb.error, e != "connecting…",
+               !e.hasPrefix("reloading"), !setup.updating, !setup.showUpdateConsole {
+                // (the update card narrates a reload itself)
                 Text(e).font(.footnote).foregroundStyle(.orange)
             }
             if let t = setup.heartbeat?.transport, !t.isEmpty {

@@ -1,3 +1,4 @@
+import Combine
 import QuickLook
 import SwiftUI
 import VoryCore
@@ -12,6 +13,9 @@ struct TranscriptView: View {
     var topInset: CGFloat = 96
     @State private var stickToBottom = true
     @State private var awayFromBottom = false
+    /// How much of the scroll view the keyboard covers (beyond the home-indicator safe area). The
+    /// thread moves up with the keyboard and, when it was at the bottom, stays there.
+    @State private var keyboardInset: CGFloat = 0
     /// Reasoning disclosures that are open, keyed by item id — kept here so a re-rendered row
     /// does not forget it (the earlier "can't collapse again" bug).
     @State private var openReasoning: Set<String> = []
@@ -77,8 +81,22 @@ struct TranscriptView: View {
                 .padding(.top, 8)
                 .animation(.snappy(duration: 0.28), value: chat.items.count)
             }
-            .contentMargins(.bottom, bottomInset + 8, for: .scrollContent)
+            .contentMargins(.bottom, bottomInset + 8 + keyboardInset, for: .scrollContent)
             .contentMargins(.top, topInset + 8, for: .scrollContent)
+            // The keyboard is handled by hand (below) so the last message rides up with it instead
+            // of vanishing under the composer; SwiftUI's own avoidance would then double the inset.
+            .ignoresSafeArea(.keyboard, edges: .bottom)
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { n in
+                guard let end = (n.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue else { return }
+                let covered = max(0, UIScreen.main.bounds.maxY - end.minY)
+                let safeBottom = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow?.safeAreaInsets.bottom }.first ?? 0
+                let inset = max(0, covered - safeBottom)
+                let duration = n.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
+                withAnimation(.easeOut(duration: duration)) {
+                    keyboardInset = inset
+                    if stickToBottom { proxy.scrollTo("bottom", anchor: .bottom) }
+                }
+            }
             .onScrollGeometryChange(for: Bool.self) { g in
                 g.contentSize.height - (g.contentOffset.y + g.containerSize.height) > 120
             } action: { _, away in
@@ -90,10 +108,10 @@ struct TranscriptView: View {
                     withAnimation(.snappy) { proxy.scrollTo("bottom", anchor: .bottom) }
                     stickToBottom = true
                 }
-                .padding(.trailing, 16).padding(.bottom, bottomInset + 12)
+                .padding(.trailing, 16).padding(.bottom, bottomInset + 12 + keyboardInset)
             }
             .sheet(item: Binding(get: { selectText.map { SelectTextItem(text: $0) } }, set: { selectText = $0?.text })) { SelectTextSheet(text: $0.text) }
-            .ignoresSafeArea(edges: .top)
+            .ignoresSafeArea(.container, edges: .top)
             // Drag from the right edge inward to peek at message times, then it springs back.
             .simultaneousGesture(
                 DragGesture(minimumDistance: 24)

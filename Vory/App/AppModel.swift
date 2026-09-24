@@ -27,6 +27,18 @@ final class AppModel {
     var pendingRoute: PendingRoute?
     var activationError: String?
     var selectedTab: AppTab = .chats
+    /// The gateway's companion plugin is older than the one this build ships: Settings › Notifications ›
+    /// Background Notifications carry a badge until it is updated.
+    var companionUpdateAvailable = false
+
+    /// Re-reads the companion's manifest on the gateway (cheap: two small file reads) and sets
+    /// `companionUpdateAvailable`. Called when the app comes to the foreground.
+    func refreshCompanionUpdateFlag() async {
+        guard let rt = runtime, push.registeredAt != nil else { companionUpdateAvailable = false; return }
+        let probe = PushSetupModel()
+        await probe.checkCompanion(runtime: rt)
+        companionUpdateAvailable = probe.updateAvailable
+    }
 
     enum AppTab: String, Hashable, CaseIterable, Sendable {
         case chats, bots, files, sessions, cron, approvals, system, settings
