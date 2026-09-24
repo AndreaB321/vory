@@ -21,8 +21,9 @@ Configuration (environment variables, all HERMES_PUSH_*):
   HERMES_PUSH_APNS_SANDBOX         1 for development builds (default: follow each device's apns_environment)
   HERMES_PUSH_DEVICES_DIR          default <HERMES_HOME>/push/devices
   HERMES_PUSH_POLL_SECONDS         session discovery / test-request interval (default 3)
-  HERMES_PUSH_FINISH_EXPAND        1 to make the finish alert expand the Dynamic Island (default: buzz only,
-                                   the Live Activity stays collapsed and just changes to "Finished")
+  HERMES_PUSH_FINISH_EXPAND        1 to make the finish expand the Dynamic Island with an alert (default: the
+                                   card just switches to "Finished" and the reply arrives as a notification)
+  HERMES_PUSH_FINISH_LINGER        seconds the finished card stays before iOS removes it (default 30)
 
 Dependencies: websockets, PyJWT, cryptography (all present in the Hermes venv).
 """
@@ -50,7 +51,7 @@ except ImportError as exc:  # pragma: no cover
 log = logging.getLogger("hermes-push")
 
 # Keep in step with plugin/vory-push/plugin.yaml; the app compares the two.
-VERSION = "1.0.18"
+VERSION = "1.0.19"
 USER_AGENT = f"Vory-Push/{VERSION} (Hermes companion)"
 try:
     # Fingerprint of the code actually running: the app compares it with the copy it ships, so a
@@ -551,34 +552,34 @@ class Relay:
         return out
 
     def end_live_activities(self, stored: str, phase: str, bot: str = "Hermes", runtime_id: str = "", usage: dict | None = None) -> set:
-        """Finish the activity with an alert (expanded Island, haptic). The finished card stays until the
-        app is opened. Returns the ids of the devices reached."""
+        """End the activity: the card switches to "Finished"/"Failed" without expanding the Island and
+        iOS removes it after HERMES_PUSH_FINISH_LINGER seconds. The reply itself follows as a normal
+        notification (sound, Reply action). Returns the ids of the devices reached."""
         now = int(time.time())
         reached = set()
         targets = self.live_activity_devices(stored, runtime_id)
         if not targets:
             self._la_skip(f"finish {phase}", stored)
         usage = usage if isinstance(usage, dict) else {}
-        tokens = usage.get("output") or 0
-        pct = usage.get("context_percent", usage.get("contextPercent"))
+        num = lambda v: int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None  # noqa: E731
+        try:
+            linger = max(5, int(float(env("HERMES_PUSH_FINISH_LINGER", "30"))))
+        except ValueError:
+            linger = 30
         for d in targets:
             state = {"phase": phase, "detail": "Turn finished" if phase == "done" else "The turn failed",
-                     "outputTokens": int(tokens) if isinstance(tokens, (int, float)) else 0,
-                     "contextPercent": int(pct) if isinstance(pct, (int, float)) else None, "needsAttention": False,
+                     "outputTokens": num(usage.get("output")) or 0,
+                     "contextPercent": num(usage.get("context_percent", usage.get("contextPercent"))),
+                     "contextUsed": num(usage.get("context_used", usage.get("contextUsed"))),
+                     "contextMax": num(usage.get("context_max", usage.get("contextMax"))), "needsAttention": False,
                      "startedAtUnix": float(d.get("live_activity_started_at") or now), "endedAtUnix": float(now)}
-            aps = {"timestamp": now, "event": "update", "content-state": state}
-            expand = env("HERMES_PUSH_FINISH_EXPAND") in {"1", "true", "yes"}
-            if expand:
+            aps = {"timestamp": now, "event": "end", "content-state": state, "dismissal-date": now + linger}
+            if env("HERMES_PUSH_FINISH_EXPAND") in {"1", "true", "yes"}:
                 aps["alert"] = {"title": bot, "body": "Finished — tap to read the reply" if phase == "done" else "The turn failed — tap to see why", "sound": "default"}
             ok = self.apns.send(d, {"aps": aps}, push_type="liveactivity", token_override=d["live_activity_token"])
-            self._note_la(f"finish {'alert' if expand else 'update'} ({phase})", ok)
+            self._note_la(f"finish end ({phase}, {linger}s)", ok)
             if ok:
                 reached.add(d.get("device_id"))
-                if not expand:
-                    # The Island stays collapsed (an alerting update always expands it); a sound-only
-                    # push gives the buzz. It carries no words, so nothing needs encrypting.
-                    buzz = self.apns.send(d, {"aps": {"sound": "default", "thread-id": stored}}, push_type="sound", collapse_id=f"buzz-{stored[:50]}")
-                    self._note_la("finish buzz", buzz)
             # No separate "end" push: when the phone holds pushes (idle, sandbox), only the latest state
             # gets applied and an end would swallow the alert. The finished card stays until the app is
             # opened, and the app ends it then.
@@ -755,13 +756,13 @@ class Relay:
             title = a["title"]; bot = a.get("bot") or a.get("profile", "Hermes")
             err = p.get("error")
             if err:
-                via_la = self.end_live_activities(a["stored"], "error", bot=bot, runtime_id=sid, usage=p.get("usage"))
-                self.push_all("error", f"{bot} · turn failed", f"{title}: {str(err)[:180]}", self.meta(sid), collapse=f"turn-{sid}", skip=via_la)
+                self.end_live_activities(a["stored"], "error", bot=bot, runtime_id=sid, usage=p.get("usage"))
+                self.push_all("error", f"{bot} · turn failed", f"{title}: {str(err)[:400]}", self.meta(sid), collapse=f"turn-{sid}")
             else:
                 text = p.get("text") if isinstance(p.get("text"), str) else ""
                 label = "cron job finished" if a.get("source") == "cron" else title
-                via_la = self.end_live_activities(a["stored"], "done", bot=bot, runtime_id=sid, usage=p.get("usage"))
-                self.push_all("cron" if a.get("source") == "cron" else "turn", f"{bot} · {label}" if a.get("source") == "cron" else bot, f"{title}: {(text or 'Done')[:180]}", self.meta(sid), collapse=f"turn-{sid}", skip=via_la)
+                self.end_live_activities(a["stored"], "done", bot=bot, runtime_id=sid, usage=p.get("usage"))
+                self.push_all("cron" if a.get("source") == "cron" else "turn", f"{bot} · {label}" if a.get("source") == "cron" else bot, f"{title}: {(text or 'Done')[:400]}", self.meta(sid), collapse=f"turn-{sid}")
         elif kind == "error" and a:
             self.push_all("error", f"{a.get('bot') or a.get('profile', 'Hermes')} · error", f"{a['title']}: {str(p.get('message', ''))[:180]}", self.meta(sid), collapse=f"err-{sid}")
         elif kind == "request.cancel":

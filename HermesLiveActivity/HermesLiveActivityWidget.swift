@@ -128,7 +128,12 @@ enum PhaseText {
 
 enum Format {
     static func tokens(_ n: Int) -> String {
-        n >= 1_000_000 ? String(format: "%.1fM", Double(n) / 1e6) : n >= 1000 ? String(format: "%.1fk", Double(n) / 1000) : "\(n)"
+        // 128000 → "128k", 12345 → "12.3k", 1500000 → "1.5M"
+        func short(_ v: Double, _ unit: String) -> String {
+            let s = v >= 100 || v == v.rounded() ? String(format: "%.0f", v) : String(format: "%.1f", v)
+            return s + unit
+        }
+        return n >= 1_000_000 ? short(Double(n) / 1e6, "M") : n >= 1000 ? short(Double(n) / 1000, "k") : "\(n)"
     }
 }
 
@@ -236,14 +241,21 @@ struct StatsRow: View {
                 Text("\(Format.tokens(state.outputTokens)) tokens").monospacedDigit()
             }
             .font(.caption)
-            if let pct = state.contextPercent {
+            // Percent when that is all we know; "12.3k/128k" once the companion or the app has the
+            // real window figures.
+            let pct = state.contextPercent ?? state.contextUsed.flatMap { u in state.contextMax.map { m in m > 0 ? Int(Double(u) * 100 / Double(m)) : 0 } }
+            if let pct {
                 HStack(spacing: 5) {
                     Text("Context").font(.caption)
                     ProgressView(value: Double(min(max(pct, 0), 100)), total: 100)
                         .progressViewStyle(.linear)
                         .tint(pct >= 85 ? .red : pct >= 60 ? .orange : PhaseStyle.tint(state.phase, bot: attributes.tintHex))
                         .frame(width: 48)
-                    Text("\(pct)%").font(.caption.monospacedDigit())
+                    if let used = state.contextUsed, let max = state.contextMax, max > 0 {
+                        Text("\(Format.tokens(used))/\(Format.tokens(max))").font(.caption.monospacedDigit())
+                    } else {
+                        Text("\(pct)%").font(.caption.monospacedDigit())
+                    }
                 }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Context \(pct) percent full")

@@ -11,6 +11,9 @@ public struct HermesTurnAttributes: ActivityAttributes, Sendable {
         public var detail: String
         public var outputTokens: Int
         public var contextPercent: Int?
+        /// Context window in tokens (used / size), shown as "12.3k/128k" when both are known.
+        public var contextUsed: Int?
+        public var contextMax: Int?
         public var needsAttention: Bool
         /// When the turn started, as Unix seconds; the widget renders a live elapsed timer from it.
         /// Plain numbers so the `hermes-push` companion can set them in a `liveactivity` push.
@@ -22,11 +25,13 @@ public struct HermesTurnAttributes: ActivityAttributes, Sendable {
         public var endedAt: Date? { endedAtUnix.map { Date(timeIntervalSince1970: $0) } }
 
         public init(phase: String, detail: String, outputTokens: Int, contextPercent: Int?, needsAttention: Bool,
-                    startedAt: Date = Date(), endedAt: Date? = nil) {
+                    startedAt: Date = Date(), endedAt: Date? = nil, contextUsed: Int? = nil, contextMax: Int? = nil) {
             self.phase = phase
             self.detail = detail
             self.outputTokens = outputTokens
             self.contextPercent = contextPercent
+            self.contextUsed = contextUsed
+            self.contextMax = contextMax
             self.needsAttention = needsAttention
             self.startedAtUnix = startedAt.timeIntervalSince1970
             self.endedAtUnix = endedAt?.timeIntervalSince1970
