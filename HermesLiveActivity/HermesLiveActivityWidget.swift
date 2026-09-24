@@ -55,11 +55,10 @@ struct HermesTurnLiveActivity: Widget {
             } compactTrailing: {
                 if context.state.needsAttention {
                     Text("Reply").font(.caption2.weight(.semibold)).foregroundStyle(.orange)
-                } else if context.state.endedAt == nil {
+                } else {
+                    // Ticks while the turn runs; once it ends this is the total time it took.
                     ElapsedTimer(state: context.state).font(.caption2.monospacedDigit())
                         .multilineTextAlignment(.trailing).frame(width: 40).minimumScaleFactor(0.7)
-                } else {
-                    Text(Format.tokens(context.state.outputTokens)).font(.caption2.monospacedDigit())
                 }
             } minimal: {
                 PhaseGlyph(phase: context.state.phase, attention: context.state.needsAttention, botHex: context.attributes.tintHex)
@@ -180,11 +179,21 @@ struct StatsRow: View {
     var state: HermesTurnAttributes.ContentState
     var body: some View {
         HStack(spacing: 12) {
-            HStack(spacing: 4) {
-                Image(systemName: "text.word.spacing")
-                Text("\(Format.tokens(state.outputTokens)) tokens").monospacedDigit()
+            if let end = state.endedAt {
+                // Once the turn is over the total time is the figure that matters; the token count
+                // the companion knows at that point is often nothing.
+                HStack(spacing: 4) {
+                    Image(systemName: "clock")
+                    Text(Duration.seconds(max(0, end.timeIntervalSince(state.startedAt))).formatted(.time(pattern: .minuteSecond)) + " total").monospacedDigit()
+                }
+                .font(.caption)
+            } else {
+                HStack(spacing: 4) {
+                    Image(systemName: "text.word.spacing")
+                    Text("\(Format.tokens(state.outputTokens)) tokens").monospacedDigit()
+                }
+                .font(.caption)
             }
-            .font(.caption)
             if let pct = state.contextPercent {
                 HStack(spacing: 5) {
                     Text("Context").font(.caption)

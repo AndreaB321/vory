@@ -48,7 +48,7 @@ except ImportError as exc:  # pragma: no cover
 log = logging.getLogger("hermes-push")
 
 # Keep in step with plugin/vory-push/plugin.yaml; the app compares the two.
-VERSION = "1.0.16"
+VERSION = "1.0.17"
 USER_AGENT = f"Vory-Push/{VERSION} (Hermes companion)"
 try:
     # Fingerprint of the code actually running: the app compares it with the copy it ships, so a
@@ -543,17 +543,21 @@ class Relay:
             out.append(d)
         return out
 
-    def end_live_activities(self, stored: str, phase: str, bot: str = "Hermes", runtime_id: str = "") -> set:
-        """Finish the activity with an alert (expanded Island, haptic), then dismiss it shortly after.
-        Returns the ids of the devices reached."""
+    def end_live_activities(self, stored: str, phase: str, bot: str = "Hermes", runtime_id: str = "", usage: dict | None = None) -> set:
+        """Finish the activity with an alert (expanded Island, haptic). The finished card stays until the
+        app is opened. Returns the ids of the devices reached."""
         now = int(time.time())
         reached = set()
         targets = self.live_activity_devices(stored, runtime_id)
         if not targets:
             self._la_skip(f"finish {phase}", stored)
+        usage = usage if isinstance(usage, dict) else {}
+        tokens = usage.get("output") or 0
+        pct = usage.get("context_percent", usage.get("contextPercent"))
         for d in targets:
-            state = {"phase": phase, "detail": "Turn finished" if phase == "done" else "The turn failed", "outputTokens": 0,
-                     "contextPercent": None, "needsAttention": False,
+            state = {"phase": phase, "detail": "Turn finished" if phase == "done" else "The turn failed",
+                     "outputTokens": int(tokens) if isinstance(tokens, (int, float)) else 0,
+                     "contextPercent": int(pct) if isinstance(pct, (int, float)) else None, "needsAttention": False,
                      "startedAtUnix": float(d.get("live_activity_started_at") or now), "endedAtUnix": float(now)}
             alert = {"title": bot, "body": "Finished — tap to read the reply" if phase == "done" else "The turn failed — tap to see why", "sound": "default"}
             ok = self.apns.send(d, {"aps": {"timestamp": now, "event": "update", "content-state": state, "alert": alert}},
@@ -737,12 +741,12 @@ class Relay:
             title = a["title"]; bot = a.get("bot") or a.get("profile", "Hermes")
             err = p.get("error")
             if err:
-                via_la = self.end_live_activities(a["stored"], "error", bot=bot, runtime_id=sid)
+                via_la = self.end_live_activities(a["stored"], "error", bot=bot, runtime_id=sid, usage=p.get("usage"))
                 self.push_all("error", f"{bot} · turn failed", f"{title}: {str(err)[:180]}", self.meta(sid), collapse=f"turn-{sid}", skip=via_la)
             else:
                 text = p.get("text") if isinstance(p.get("text"), str) else ""
                 label = "cron job finished" if a.get("source") == "cron" else title
-                via_la = self.end_live_activities(a["stored"], "done", bot=bot, runtime_id=sid)
+                via_la = self.end_live_activities(a["stored"], "done", bot=bot, runtime_id=sid, usage=p.get("usage"))
                 self.push_all("cron" if a.get("source") == "cron" else "turn", f"{bot} · {label}" if a.get("source") == "cron" else bot, f"{title}: {(text or 'Done')[:180]}", self.meta(sid), collapse=f"turn-{sid}", skip=via_la)
         elif kind == "error" and a:
             self.push_all("error", f"{a.get('bot') or a.get('profile', 'Hermes')} · error", f"{a['title']}: {str(p.get('message', ''))[:180]}", self.meta(sid), collapse=f"err-{sid}")
