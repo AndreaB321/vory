@@ -125,7 +125,7 @@ final class LiveActivityController: TurnActivityReporting {
                                               connectionID: chat.runtime.connection.id.uuidString, profile: chat.profileName,
                                               model: shortModel, tintHex: BotColors.hex(for: chat.profileName), botName: botName,
                                               avatar: BotAvatarStore.choice(for: chat.profileName).raw)
-        let state = HermesTurnAttributes.ContentState(phase: "streaming", detail: "Thinking…", outputTokens: chat.usage?.output ?? 0,
+        let state = HermesTurnAttributes.ContentState(phase: "thinking", detail: "Thinking…", outputTokens: chat.usage?.output ?? 0,
                                                        contextPercent: chat.usage?.contextPercent, needsAttention: false, startedAt: startedAt,
                                                        contextUsed: chat.usage?.contextUsed, contextMax: chat.usage?.contextMax)
         do {
@@ -147,8 +147,12 @@ final class LiveActivityController: TurnActivityReporting {
 
     func update(for chat: ChatSession, attention: Bool, detail: String?) {
         guard let handle else { return }
-        let phase = attention ? "waiting" : (detail?.hasPrefix("Running") == true ? "tool" : "streaming")
         let text = detail ?? (attention ? (chat.firstCard?.approval?.description ?? "Needs your answer") : (chat.statusLine ?? "Thinking…"))
+        // brain while it reasons, speech bubble while it writes, wrench while a tool runs
+        let phase = attention ? "waiting"
+            : (detail ?? chat.statusLine ?? "").hasPrefix("Running") || (chat.statusLine ?? "").hasPrefix("Preparing") ? "tool"
+            : (chat.statusLine ?? "Thinking…").hasPrefix("Thinking") || (chat.statusLine ?? "").hasPrefix("Sending") || (chat.statusLine ?? "").hasPrefix("Queued") ? "thinking"
+            : "streaming"
         let state = HermesTurnAttributes.ContentState(phase: phase, detail: text, outputTokens: chat.usage?.output ?? 0,
                                                        contextPercent: chat.usage?.contextPercent, needsAttention: attention, startedAt: startedAt,
                                                        contextUsed: chat.usage?.contextUsed, contextMax: chat.usage?.contextMax)

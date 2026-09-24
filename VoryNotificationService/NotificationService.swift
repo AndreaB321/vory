@@ -1,8 +1,13 @@
+import Intents
+import SwiftUI
+import UIKit
 import UserNotifications
 import VoryCore
 
 /// Decrypts relay-delivered notifications. The relay only carries `enc`; this rewrites the
-/// placeholder title/body with the real ones using the key the app minted for this install.
+/// placeholder title/body with the real ones using the key the app minted for this install, then
+/// presents the result like a message from the bot (its avatar as the large icon, the app icon
+/// small on it), the way Messages notifications look.
 final class NotificationService: UNNotificationServiceExtension {
     private var handler: ((UNNotificationContent) -> Void)?
     private var content: UNMutableNotificationContent?
@@ -12,7 +17,11 @@ final class NotificationService: UNNotificationServiceExtension {
         let mutable = (request.content.mutableCopy() as? UNMutableNotificationContent) ?? UNMutableNotificationContent()
         content = mutable
         Keychain.accessGroup = Keychain.sharedGroupFromBundle()
-        guard let enc = request.content.userInfo["enc"] as? String else { Self.breadcrumb("plain notification (no enc)"); contentHandler(mutable); return }
+        guard let enc = request.content.userInfo["enc"] as? String else {
+            Self.breadcrumb("plain notification (no enc)")
+            Self.deliverAsMessage(mutable, profile: (request.content.userInfo["hermes"] as? [String: Any])?["profile"] as? String ?? "", handler: contentHandler)
+            return
+        }
         guard let creds = Keychain.getCodable(PushRelay.Credentials.self, account: PushRelay.credentialsAccount) else {
             Self.breadcrumb("no relay credentials readable (group \(Keychain.accessGroup ?? "none"))"); contentHandler(mutable); return
         }
@@ -26,12 +35,55 @@ final class NotificationService: UNNotificationServiceExtension {
         if let c = payload["category"]?.stringValue { mutable.categoryIdentifier = c }
         if let th = payload["thread_id"]?.stringValue, !th.isEmpty { mutable.threadIdentifier = th }
         if payload["interruption"]?.stringValue == "time-sensitive" { mutable.interruptionLevel = .timeSensitive }
+        var profile = ""
         if let hermes = payload["hermes"]?.objectValue {
             var info = mutable.userInfo
             info["hermes"] = hermes.mapValues { $0.foundationValue }
             mutable.userInfo = info
+            profile = hermes["profile"]?.stringValue ?? ""
         }
-        contentHandler(mutable)
+        Self.deliverAsMessage(mutable, profile: profile, handler: contentHandler)
+    }
+
+    /// Turn/approval/question notifications come from a bot, so they are presented as a message
+    /// from it. Anything else (the test notification) keeps the plain app look.
+    private static func deliverAsMessage(_ content: UNMutableNotificationContent, profile: String, handler: @escaping (UNNotificationContent) -> Void) {
+        let botCategories: Set<String> = ["HERMES_TURN", "HERMES_ERROR", "HERMES_APPROVAL", "HERMES_CLARIFY"]
+        guard botCategories.contains(content.categoryIdentifier), !content.title.isEmpty else { handler(content); return }
+        // The avatar is rendered with SwiftUI's ImageRenderer, which needs the main actor. Neither the
+        // content nor the system's handler is Sendable; nothing else touches them after this point.
+        nonisolated(unsafe) let content = content
+        nonisolated(unsafe) let handler = handler
+        Task { @MainActor in
+            handler(asMessage(content, profile: profile))
+        }
+    }
+
+    @MainActor
+    private static func asMessage(_ content: UNMutableNotificationContent, profile: String) -> UNNotificationContent {
+        let looks = BotLooks.load()
+        // The title is "<bot>" or "<bot> · approval needed": the sender is the part before the dot.
+        let bot = content.title.components(separatedBy: " · ").first ?? content.title
+        let png = AvatarRender.image(profile: profile, name: bot, looks: looks)
+        let handle = INPersonHandle(value: profile.isEmpty ? bot : profile, type: .unknown)
+        let sender = INPerson(personHandle: handle, nameComponents: nil, displayName: bot, image: png.map { INImage(imageData: $0) },
+                              contactIdentifier: nil, customIdentifier: profile.isEmpty ? bot : profile, isMe: false, suggestionType: .none)
+        let conversation = content.threadIdentifier.isEmpty ? (profile.isEmpty ? bot : profile) : content.threadIdentifier
+        let intent = INSendMessageIntent(recipients: nil, outgoingMessageType: .outgoingMessageText, content: content.body,
+                                         speakableGroupName: nil, conversationIdentifier: conversation, serviceName: nil,
+                                         sender: sender, attachments: nil)
+        if let png { intent.setImage(INImage(imageData: png), forParameterNamed: \.sender) }
+        let interaction = INInteraction(intent: intent, response: nil)
+        interaction.direction = .incoming
+        interaction.donate(completion: nil)
+        do {
+            let styled = try content.updating(from: intent)
+            breadcrumb("presented as a message from \(bot)")
+            return styled
+        } catch {
+            breadcrumb("message style failed: \(error.localizedDescription)")
+            return content
+        }
     }
 
     /// One line the app reads back (Background Notifications page) to show what happened last time.
@@ -42,5 +94,66 @@ final class NotificationService: UNNotificationServiceExtension {
 
     override func serviceExtensionTimeWillExpire() {
         if let handler, let content { handler(content) }
+    }
+}
+
+/// Renders the bot's avatar (photo thumbnail, animated character as a still frame, or its initial
+/// on the bot colour) to PNG for the notification's sender image.
+enum AvatarRender {
+    @MainActor
+    static func image(profile: String, name: String, looks: BotLooks) -> Data? {
+        let choice = looks.avatars[profile] ?? "initial"
+        if choice == "photo", let data = looks.photos[profile], let ui = UIImage(data: data) {
+            // Round it like a contact photo.
+            let side: CGFloat = 256
+            let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
+            let img = renderer.image { ctx in
+                ctx.cgContext.addEllipse(in: CGRect(x: 0, y: 0, width: side, height: side)); ctx.cgContext.clip()
+                let scale = side / min(ui.size.width, ui.size.height)
+                let w = ui.size.width * scale, h = ui.size.height * scale
+                ui.draw(in: CGRect(x: (side - w) / 2, y: (side - h) / 2, width: w, height: h))
+            }
+            return img.pngData()
+        }
+        let tint = Color(hexString: looks.colors[profile] ?? "") ?? .purple
+        let style = choice.hasPrefix("animated:") ? String(choice.dropFirst("animated:".count)) : nil
+        let view = AvatarView(style: style, initial: String(name.prefix(1)).uppercased(), tint: tint).frame(width: 128, height: 128)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 2
+        renderer.isOpaque = false
+        return renderer.uiImage?.pngData()
+    }
+
+    struct AvatarView: View {
+        var style: String?
+        var initial: String
+        var tint: Color
+        var body: some View {
+            if let style {
+                Canvas(opaque: false, rendersAsynchronously: false) { ctx, sz in
+                    let r = CGRect(origin: .zero, size: sz)
+                    ctx.clip(to: Path(ellipseIn: r))
+                    ctx.fill(Path(ellipseIn: r), with: .linearGradient(Gradient(colors: [tint.opacity(0.95), tint.opacity(0.65)]), startPoint: .zero, endPoint: CGPoint(x: 0, y: sz.height)))
+                    let z = AvatarArt.zoom(style)
+                    ctx.translateBy(x: sz.width / 2, y: sz.height / 2)
+                    ctx.scaleBy(x: z, y: z)
+                    ctx.translateBy(x: -sz.width / 2, y: -sz.height / 2)
+                    AvatarArt.draw(style, in: &ctx, size: sz, time: 0, active: false)
+                }
+            } else {
+                ZStack {
+                    Circle().fill(tint.gradient)
+                    Text(initial).font(.system(size: 60, weight: .semibold, design: .rounded)).foregroundStyle(.white)
+                }
+            }
+        }
+    }
+}
+
+extension Color {
+    init?(hexString: String) {
+        var s = hexString; if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6, let v = UInt32(s, radix: 16) else { return nil }
+        self.init(red: Double((v >> 16) & 0xFF) / 255, green: Double((v >> 8) & 0xFF) / 255, blue: Double(v & 0xFF) / 255)
     }
 }

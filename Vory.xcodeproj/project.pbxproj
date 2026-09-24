@@ -144,6 +144,20 @@
 			);
 			target = AA00000000000000000041 /* HermesLiveActivity */;
 		};
+		AA0000000000000000012F /* Exceptions for "Shared" folder in "VoryNotificationService" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				AppIcon.icon,
+			);
+			target = AA00000000000000000110 /* VoryNotificationService */;
+		};
+		AA00000000000000000130 /* Exceptions for "Shared" folder in "VoryNotificationContent" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				AppIcon.icon,
+			);
+			target = AA00000000000000000125 /* VoryNotificationContent */;
+		};
 		AA000000000000000000F6 /* Exceptions for "VoryWatch" folder in "VoryWatch" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -200,6 +214,8 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				AA000000000000000000DE /* Exceptions for "Shared" folder in "HermesLiveActivity" target */,
+				AA0000000000000000012F /* Exceptions for "Shared" folder in "VoryNotificationService" target */,
+				AA00000000000000000130 /* Exceptions for "Shared" folder in "VoryNotificationContent" target */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -516,6 +532,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				AA00000000000000000106 /* VoryNotificationService */,
+				AA00000000000000000063 /* Shared */,
 			);
 			name = VoryNotificationService;
 			packageProductDependencies = (
@@ -1218,6 +1235,13 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.0.1;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					UserNotifications,
+					"-framework",
+					UserNotificationsUI,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.vorantx.vory.notificationcontent;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1266,6 +1290,13 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.0.1;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					UserNotifications,
+					"-framework",
+					UserNotificationsUI,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.vorantx.vory.notificationcontent;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;

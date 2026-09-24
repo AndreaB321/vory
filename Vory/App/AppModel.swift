@@ -161,7 +161,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
         LocalNotifier.registerCategories()
-        BotLooks.mirror()   // so the reply window shows the right bot even before a colour is changed
+        BotLooksMirror.mirror()   // so the notification extensions show the right bot from the start
+        #if DEBUG
+        // Simulator testing: `simctl push` only works once the app has asked for notification permission.
+        if ProcessInfo.processInfo.arguments.contains("-vory-request-notifications") {
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+        }
+        #endif
         return true
     }
 

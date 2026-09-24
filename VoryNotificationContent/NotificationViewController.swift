@@ -64,15 +64,6 @@ final class NotificationViewController: UIViewController, UNNotificationContentE
     }
 }
 
-/// Bot colours and avatar choices, mirrored by the app into the shared keychain so the
-/// extension can draw the same bot the app shows.
-struct BotLooks: Codable {
-    var colors: [String: String] = [:]
-    var avatars: [String: String] = [:]
-    static let account = "botLooks"
-    static func load() -> BotLooks { Keychain.getCodable(BotLooks.self, account: account) ?? BotLooks() }
-}
-
 struct ReplyCard: View {
     struct Model {
         var bot: String

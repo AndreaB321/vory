@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import VoryCore
 
 /// One accent colour per bot (profile). Stored in UserDefaults as `{profile: "#RRGGBB"}` under
@@ -19,7 +20,7 @@ enum BotColors {
         if let data = try? JSONEncoder().encode(map), let s = String(data: data, encoding: .utf8) {
             UserDefaults.standard.set(s, forKey: storageKey)
         }
-        BotLooks.mirror()
+        BotLooksMirror.mirror()
     }
 
     static func hex(for profile: String, overrides: [String: String]? = nil) -> String {
@@ -111,17 +112,25 @@ struct BotAvatar: View {
 }
 
 
-/// Bot colours and avatar choices, copied into the shared keychain so the notification
-/// extensions (which cannot read the app's UserDefaults) draw the same bot the app shows.
-enum BotLooks {
-    struct Payload: Codable {
-        var colors: [String: String]
-        var avatars: [String: String]
-    }
-    static let account = "botLooks"
-
+/// Copies the bot colours, avatar choices and photo thumbnails into the shared keychain
+/// (`BotLooks`) for the notification extensions.
+enum BotLooksMirror {
     static func mirror() {
-        let payload = Payload(colors: BotColors.stored(), avatars: BotAvatarStore.stored())
-        try? Keychain.setCodable(payload, account: account)
+        let avatars = BotAvatarStore.stored()
+        var photos: [String: Data] = [:]
+        for (profile, choice) in avatars where choice == "photo" {
+            if let image = BotAvatarStore.photo(for: profile), let data = thumbnail(image) { photos[profile] = data }
+        }
+        BotLooks(colors: BotColors.stored(), avatars: avatars, photos: photos).save()
+    }
+
+    private static func thumbnail(_ image: UIImage) -> Data? {
+        let side: CGFloat = 128
+        let scale = side / max(image.size.width, image.size.height)
+        let size = CGSize(width: max(1, image.size.width * scale), height: max(1, image.size.height * scale))
+        let small = UIGraphicsImageRenderer(size: size, format: { let f = UIGraphicsImageRendererFormat(); f.scale = 1; return f }()).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+        return small.jpegData(compressionQuality: 0.75)
     }
 }

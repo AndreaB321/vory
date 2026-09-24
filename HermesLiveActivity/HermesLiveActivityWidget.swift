@@ -85,9 +85,10 @@ extension HermesTurnAttributes {
 enum PhaseStyle {
     /// The bot's own colour while it works; phase colours take over for done / error / waiting.
     static func tint(_ phase: String, bot hex: String = "") -> Color {
-        if !hex.isEmpty, phase == "streaming" || phase == "tool", let c = Color(hexString: hex) { return c }
+        if !hex.isEmpty, phase == "streaming" || phase == "tool" || phase == "thinking", let c = Color(hexString: hex) { return c }
         switch phase {
         case "tool": return .blue
+        case "thinking": return .indigo
         case "done": return .green
         case "error": return .red
         case "waiting": return .orange
@@ -99,6 +100,7 @@ enum PhaseStyle {
         if attention { return "exclamationmark.bubble.fill" }
         switch phase {
         case "tool": return "wrench.and.screwdriver.fill"
+        case "thinking": return "brain.fill"
         case "done": return "checkmark"
         case "error": return "xmark"
         default: return "ellipsis.message.fill"
@@ -119,6 +121,7 @@ enum PhaseText {
         if s.needsAttention { return "Waiting for you" }
         switch s.phase {
         case "tool": return "Running a tool"
+        case "thinking": return "Thinking"
         case "done": return "Finished"
         case "error": return "Failed"
         default: return "Writing"
@@ -157,7 +160,7 @@ struct PhaseGlyph: View {
     var body: some View {
         Image(systemName: PhaseStyle.symbol(phase, attention: attention))
             .foregroundStyle(attention ? .orange : PhaseStyle.tint(phase, bot: botHex))
-            .symbolEffect(.pulse, isActive: !attention && (phase == "streaming" || phase == "tool"))
+            .symbolEffect(.pulse, isActive: !attention && (phase == "streaming" || phase == "tool" || phase == "thinking"))
     }
 }
 
@@ -220,7 +223,7 @@ struct PhaseBadge: View {
             Image(systemName: PhaseStyle.symbol(phase, attention: attention))
                 .font(.system(size: size * 0.45, weight: .semibold))
                 .foregroundStyle(.white)
-                .symbolEffect(.pulse, isActive: !attention && (phase == "streaming" || phase == "tool"))
+                .symbolEffect(.pulse, isActive: !attention && (phase == "streaming" || phase == "tool" || phase == "thinking"))
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)

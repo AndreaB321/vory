@@ -488,12 +488,14 @@ public final class ChatSession: @MainActor Identifiable, ChatIdentity {
             beginStreaming()
         case "message.delta":
             if streamingItemID == nil { beginStreaming() }
+            if statusLine != "Writing…" { statusLine = "Writing…" }   // the Live Activity follows this
             let delta = p["text"]?.stringValue ?? ""
             streamedCharactersThisTurn += delta.count
             assembler.appendDelta(delta)
             updateStreamingItem()
         case "reasoning.delta", "thinking.delta":
             if streamingItemID == nil { beginStreaming() }
+            if statusLine != "Thinking…" { statusLine = "Thinking…" }
             assembler.appendReasoning(p["text"]?.stringValue ?? "")
             updateStreamingItem()
         case "reasoning.available":

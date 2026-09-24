@@ -42,7 +42,7 @@ enum BotAvatarStore {
         if let data = try? JSONEncoder().encode(map), let s = String(data: data, encoding: .utf8) {
             UserDefaults.standard.set(s, forKey: storageKey)
         }
-        BotLooks.mirror()
+        BotLooksMirror.mirror()
     }
 
     static func choice(for profile: String, overrides: [String: String]? = nil) -> BotAvatarChoice {

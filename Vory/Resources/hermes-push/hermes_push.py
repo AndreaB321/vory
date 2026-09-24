@@ -52,7 +52,7 @@ except ImportError as exc:  # pragma: no cover
 log = logging.getLogger("hermes-push")
 
 # Keep in step with plugin/vory-push/plugin.yaml; the app compares the two.
-VERSION = "1.0.21"
+VERSION = "1.0.22"
 USER_AGENT = f"Vory-Push/{VERSION} (Hermes companion)"
 try:
     # Fingerprint of the code actually running: the app compares it with the copy it ships, so a
@@ -206,7 +206,8 @@ class APNs:
             if push_type == "liveactivity":
                 # No extension can decrypt a Live Activity update, so only generic words travel.
                 state = dict(aps.get("content-state") or {})
-                state["detail"] = {"waiting": "Waiting for you", "done": "Turn finished", "error": "The turn failed"}.get(state.get("phase"), "Working…")
+                state["detail"] = {"waiting": "Waiting for you", "done": "Turn finished", "error": "The turn failed", "thinking": "Thinking…",
+                                   "streaming": "Writing…", "tool": "Running a tool…"}.get(state.get("phase"), "Working…")
                 return self.send_via_relay(device, push_type="liveactivity", token_override=token_override, content_state=state, event=aps.get("event"),
                                            la_alert=aps.get("alert"), dismissal_date=aps.get("dismissal-date"))
             return self.send_via_relay(device, push_type=push_type)
@@ -761,9 +762,27 @@ class Relay:
         if sid in self.attached:
             self.on_event(ev)
 
+    #: Live Activity phase last pushed per session, with when: (phase, time).
+    la_phase: dict[str, tuple[str, float]] = {}
+    _PHASE_EVENTS = {"message.start": "thinking", "reasoning.delta": "thinking", "thinking.delta": "thinking",
+                     "message.delta": "streaming", "tool.start": "tool", "tool.generating": "tool", "tool.complete": "thinking"}
+
+    def _la_phase_event(self, sid: str, a: dict, phase: str) -> None:
+        """Mirror the turn's phase into the phone's Live Activity (brain / speech bubble / wrench),
+        only when it changes, so the stream of deltas costs one push per switch."""
+        prev = self.la_phase.get(sid)
+        if prev and prev[0] == phase:
+            return
+        self.la_phase[sid] = (phase, time.time())
+        detail = {"thinking": "Thinking…", "streaming": "Writing…", "tool": "Running a tool…"}[phase]
+        self.update_live_activities(a["stored"], {"phase": phase, "detail": detail}, runtime_id=sid)
+
     def on_event(self, ev: dict) -> None:
         kind, sid, p = ev.get("type", ""), ev.get("session_id", ""), ev.get("payload") or {}
         a = self.attached.get(sid)
+        if kind in self._PHASE_EVENTS and a:
+            self._la_phase_event(sid, a, self._PHASE_EVENTS[kind])
+            return
         if kind == "message.complete" and not a and sid:
             # A chat that started since the last discovery poll: attach now so its finish still
             # ends the phone's Live Activity and sends the alert.
@@ -772,6 +791,7 @@ class Relay:
         if kind == "session.title" and a:
             a["title"] = p.get("title") or a["title"]
         elif kind == "message.complete" and a:
+            self.la_phase.pop(sid, None)
             title = a["title"]; bot = a.get("bot") or a.get("profile", "Hermes")
             err = p.get("error")
             if err:
