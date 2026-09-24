@@ -641,15 +641,10 @@ struct StepPage<Content: View>: View {
                     .rotationEffect(.degrees(hop ? -8 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.45), value: hop)
                 // The bot's message: guidance while working, a nudge onward once the step is done.
-                Text(done ? (step == .overview ? "That's it! Your notifications are configured." : "That's done — tap › to continue.") : hint)
-                    .font(.callout)
-                    .lineLimit(2, reservesSpace: true)
-                    .foregroundStyle(done ? Color.green : Color.primary)
-                    .padding(.horizontal, 14).padding(.vertical, 10)
-                    .background(BubbleShape().fill(done ? Color.green.mix(with: Color(.systemBackground), by: 0.8)
-                                                          : Color.secondary.mix(with: Color(.systemBackground), by: 0.82)))
-                    .scaleEffect(bubbleShown ? 1 : 0.15, anchor: .leading)
-                    .opacity(bubbleShown ? 1 : 0)
+                TypingBubble(text: done ? (step == .overview ? "That's it! Your notifications are configured." : "That's done — tap › to continue.") : hint,
+                             tint: done ? Color.green : Color.primary,
+                             fill: done ? Color.green.mix(with: Color(.systemBackground), by: 0.8) : Color.secondary.mix(with: Color(.systemBackground), by: 0.82),
+                             shown: bubbleShown)
                 Spacer(minLength: 0)
             }
         }
@@ -679,6 +674,47 @@ struct PeekableValue: View {
                     .padding(.horizontal, 12).padding(.vertical, 6)
                     .presentationCompactAdaptation(.popover)
             }
+    }
+}
+
+/// The bot's line, typed out character by character with the bubble growing behind the words.
+/// The header reserves the finished line's height from the start, so nothing below it moves.
+struct TypingBubble: View {
+    var text: String
+    var tint: Color
+    var fill: Color
+    var shown: Bool
+    @State private var revealed = 0
+    @State private var typing: Task<Void, Never>?
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            // Invisible full line: sets the space the bubble will end up needing.
+            Text(text).font(.callout).padding(.horizontal, 14).padding(.vertical, 10).hidden()
+            Text(String(text.prefix(revealed)))
+                .font(.callout)
+                .foregroundStyle(tint)
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .background(BubbleShape().fill(fill))
+                .scaleEffect(shown ? 1 : 0.15, anchor: .leading)
+                .opacity(shown ? 1 : 0)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .onChange(of: text, initial: true) { _, new in type(new) }
+        .onChange(of: shown) { _, now in if now { type(text) } }
+    }
+
+    private func type(_ full: String) {
+        typing?.cancel()
+        revealed = 0
+        typing = Task {
+            try? await Task.sleep(for: .milliseconds(320))   // let the bubble pop out first
+            for i in 1...max(1, full.count) {
+                guard !Task.isCancelled else { return }
+                revealed = i
+                try? await Task.sleep(for: .milliseconds(18))
+            }
+        }
     }
 }
 
@@ -781,6 +817,24 @@ struct BackgroundNotificationsView: View {
                         LabeledContent("Push relay", value: push.relayRegisteredAt.map { "registered " + $0.formatted(date: .omitted, time: .shortened) } ?? "not registered")
                     }
                     LabeledContent("Device file on gateway", value: push.registeredAt.map { "published " + $0.formatted(date: .omitted, time: .shortened) } ?? "not published")
+                } header: { sectionHeader("This phone") }
+                // One section either way, so a reset does not rebuild the list and throw the scroll position.
+                Section {
+                    if setup.isCompleted(for: rt) {
+                        Button(role: .destructive) { confirmReset = true } label: {
+                            if resetting { Label { Text("Resetting…") } icon: { ProgressView() } }
+                            else { Label("Reset Plugin Configuration", systemImage: "arrow.counterclockwise") }
+                        }
+                        .disabled(resetting)
+                    } else {
+                        NavigationLink { PushSetupView(setup: setup) } label: { Label("Configure background notifications", systemImage: "wand.and.stars") }
+                    }
+                } footer: {
+                    Text(setup.isCompleted(for: rt)
+                         ? "Disables the plugin on the Gateway and clears this phone's setup. Files stay for a reinstall."
+                         : "Guided setup: permission, address, sign-in, install, start, test.")
+                }
+                Section {
                     LabeledContent("Last notification") {
                         Text(setup.extensionBreadcrumb ?? "none handled yet").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
                     }
@@ -810,24 +864,8 @@ struct BackgroundNotificationsView: View {
                             Text("none yet").font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                } header: { sectionHeader("This phone") } footer: {
+                } header: { sectionHeader("Diagnostics") } footer: {
                     Text("With a Live Activity running, finish and approval alerts go through it (the Island expands and buzzes); banners only when there is none.")
-                }
-                // One section either way, so a reset does not rebuild the list and throw the scroll position.
-                Section {
-                    if setup.isCompleted(for: rt) {
-                        Button(role: .destructive) { confirmReset = true } label: {
-                            if resetting { Label { Text("Resetting…") } icon: { ProgressView() } }
-                            else { Label("Reset Plugin Configuration", systemImage: "arrow.counterclockwise") }
-                        }
-                        .disabled(resetting)
-                    } else {
-                        NavigationLink { PushSetupView(setup: setup) } label: { Label("Configure background notifications", systemImage: "wand.and.stars") }
-                    }
-                } footer: {
-                    Text(setup.isCompleted(for: rt)
-                         ? "Disables the plugin on the Gateway and clears this phone's setup. Files stay for a reinstall."
-                         : "Guided setup: permission, address, sign-in, install, start, test.")
                 }
             } else {
                 Text("Connect a gateway first.").foregroundStyle(.secondary)
@@ -835,6 +873,7 @@ struct BackgroundNotificationsView: View {
         }
         .navigationTitle("Background Notifications")
         .navigationBarTitleDisplayMode(.inline)
+        .listSectionSpacing(28)
         .animation(.smooth, value: setup.updateOutcome == nil)
         .alert("Reset the plugin configuration?", isPresented: $confirmReset) {
             Button("Reset", role: .destructive) { Task { resetting = true; if let rt { await setup.resetPluginConfiguration(runtime: rt) }; resetting = false } }
