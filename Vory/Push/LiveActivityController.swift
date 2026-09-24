@@ -20,6 +20,18 @@ private final class ActivityHandle: @unchecked Sendable {
         Task.detached { await self.activity.update(.init(state: state, staleDate: Date().addingTimeInterval(3600)), alertConfiguration: config) }
     }
 
+    /// Alert first, let iOS present it (expanded Island, haptic), then end with the card lingering.
+    /// Ending in the same instant as the alert would cancel the alert before it shows.
+    func alertThenEnd(_ state: HermesTurnAttributes.ContentState, title: String, body: String, linger: TimeInterval) {
+        let config = AlertConfiguration(title: LocalizedStringResource(String.LocalizationValue(title)),
+                                        body: LocalizedStringResource(String.LocalizationValue(body)), sound: .default)
+        Task.detached {
+            await self.activity.update(.init(state: state, staleDate: Date().addingTimeInterval(3600)), alertConfiguration: config)
+            try? await Task.sleep(for: .seconds(4))
+            await self.activity.end(.init(state: state, staleDate: nil), dismissalPolicy: .after(Date().addingTimeInterval(linger)))
+        }
+    }
+
     func end(_ state: HermesTurnAttributes.ContentState, linger: TimeInterval = 0) {
         // In front of the user the result is on screen already, so the activity goes at once; away
         // from the app it stays on the Lock Screen a while showing "finished".
@@ -165,10 +177,11 @@ final class LiveActivityController: TurnActivityReporting {
             if !inFront {
                 // The app is still awake in the background: it beats the companion's push, so it must
                 // deliver the alert itself — expand the Island and buzz — then let the card linger.
-                handle.alert(state, title: botName, body: phase == "error" ? "The turn failed — tap to see why" : "Finished — tap to read the reply")
-                Self.note("alerted from the app (background)")
+                handle.alertThenEnd(state, title: botName, body: phase == "error" ? "The turn failed — tap to see why" : "Finished — tap to read the reply", linger: linger)
+                Self.note("alerted from the app (background), ending in 4 s")
+            } else {
+                handle.end(state, linger: linger)
             }
-            handle.end(state, linger: linger)
         }
         // The companion routes finish/approval alerts through an active activity; tell it there is none now.
         NotificationCenter.default.post(name: .hermesLiveActivityToken, object: nil, userInfo: ["token": "", "storedID": chat.storedID, "startedAt": 0.0])
