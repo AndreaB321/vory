@@ -48,7 +48,7 @@ except ImportError as exc:  # pragma: no cover
 log = logging.getLogger("hermes-push")
 
 # Keep in step with plugin/vory-push/plugin.yaml; the app compares the two.
-VERSION = "1.0.13"
+VERSION = "1.0.14"
 USER_AGENT = f"Vory-Push/{VERSION} (Hermes companion)"
 try:
     # Fingerprint of the code actually running: the app compares it with the copy it ships, so a
@@ -611,7 +611,9 @@ class Relay:
                 except Exception as exc:  # noqa: BLE001
                     log.debug("activate %s failed: %s", sid, exc)
                     continue
-                stored = snap.get("stored_session_id") or sid
+                # The phone files its Live Activity token under the STORED id (the gateway's session_key);
+                # the activate snapshot does not always carry it, but the live list always does.
+                stored = snap.get("stored_session_id") or s.get("session_key") or sid
                 info = snap.get("info") or {}
                 pname = profile or info.get("profile_name") or "default"
                 self.attached[sid] = {"stored": stored, "title": s.get("title") or info.get("title") or "Hermes", "profile": pname,
