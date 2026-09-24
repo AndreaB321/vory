@@ -40,6 +40,7 @@ import ssl
 import subprocess
 import sys
 import time
+import urllib.parse
 import uuid
 from pathlib import Path
 
@@ -52,7 +53,7 @@ except ImportError as exc:  # pragma: no cover
 log = logging.getLogger("hermes-push")
 
 # Keep in step with plugin/vory-push/plugin.yaml; the app compares the two.
-VERSION = "1.0.23"
+VERSION = "1.0.24"
 USER_AGENT = f"Vory-Push/{VERSION} (Hermes companion)"
 try:
     # Fingerprint of the code actually running: the app compares it with the copy it ships, so a
@@ -637,6 +638,31 @@ class Relay:
                 reached.add(d.get("device_id"))
         return reached
 
+    #: stored session id → profile name, from each profile's own session list (refreshed every minute).
+    session_profile: dict[str, str] = {}
+    _session_profile_at = 0.0
+
+    def _refresh_session_profiles(self, profiles: list, force: bool = False) -> None:
+        """`session.activate` reports the profile it was asked with, not the session's own, so the
+        per-profile REST list (what the app's chat list uses) decides which bot a session belongs to."""
+        if not force and time.time() - self._session_profile_at < 60:
+            return
+        found: dict[str, str] = {}
+        for name in profiles:
+            if not name:
+                continue
+            try:
+                r = self.gw._http("GET", f"/api/sessions?order=recent&limit=60&profile={urllib.parse.quote(name)}")
+            except Exception as exc:  # noqa: BLE001
+                log.debug("session list for %s failed: %s", name, exc)
+                continue
+            for item in r.get("sessions") or []:
+                if isinstance(item, dict) and item.get("id"):
+                    found[str(item["id"])] = str(item.get("profile") or name)
+        if found:
+            self.session_profile.update(found)
+        self._session_profile_at = time.time()
+
     async def discover(self) -> None:
         try:
             listed = (await self.gw.call("profiles.list", {})).get("profiles", [])
@@ -644,6 +670,7 @@ class Relay:
             profiles = [p.get("name") for p in listed] or [None]
         except Exception:  # noqa: BLE001
             profiles = [None]
+        self._refresh_session_profiles(profiles)
         for profile in profiles:
             params = {"profile": profile} if profile else {}
             try:
@@ -664,9 +691,11 @@ class Relay:
                 # the activate snapshot does not always carry it, but the live list always does.
                 stored = snap.get("stored_session_id") or s.get("session_key") or sid
                 info = snap.get("info") or {}
-                # The listing for one profile can include other profiles' sessions, so the session's
-                # own profile (from its snapshot) decides which bot it belongs to.
-                pname = info.get("profile_name") or s.get("profile_name") or s.get("profile") or profile or "default"
+                # The listing for one profile includes other profiles' sessions and the snapshot echoes
+                # the profile it was asked with, so the gateway's per-profile session list decides.
+                if stored not in self.session_profile:
+                    self._refresh_session_profiles(profiles, force=True)
+                pname = self.session_profile.get(stored) or s.get("profile") or info.get("profile_name") or profile or "default"
                 self.attached[sid] = {"stored": stored, "title": s.get("title") or info.get("title") or "Hermes", "profile": pname,
                                       "bot": self.labels.get(pname, pname), "source": s.get("source") or ""}
                 log.info("attached %s (%s, profile %s)", self.attached[sid]["title"], stored[:12], self.attached[sid]["profile"])
@@ -823,6 +852,21 @@ class Relay:
     _PHASE_EVENTS = {"message.start": "thinking", "reasoning.delta": "thinking", "thinking.delta": "thinking",
                      "message.delta": "streaming", "tool.start": "tool", "tool.generating": "tool", "tool.complete": "thinking"}
 
+    #: latest usage seen per session (outputTokens / context), so every update carries the numbers.
+    la_usage: dict[str, dict] = {}
+    _la_usage_pushed: dict[str, float] = {}
+
+    @staticmethod
+    def _usage_patch(usage: dict | None) -> dict:
+        if not isinstance(usage, dict):
+            return {}
+        num = lambda v: int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None  # noqa: E731
+        patch = {"outputTokens": num(usage.get("output")) or 0,
+                 "contextPercent": num(usage.get("context_percent", usage.get("contextPercent"))),
+                 "contextUsed": num(usage.get("context_used", usage.get("contextUsed"))),
+                 "contextMax": num(usage.get("context_max", usage.get("contextMax")))}
+        return {k: v for k, v in patch.items() if v is not None}
+
     def _la_phase_event(self, sid: str, a: dict, phase: str) -> None:
         """Mirror the turn's phase into the phone's Live Activity (brain / speech bubble / wrench),
         only when it changes, so the stream of deltas costs one push per switch."""
@@ -831,13 +875,30 @@ class Relay:
             return
         self.la_phase[sid] = (phase, time.time())
         detail = {"thinking": "Thinking…", "streaming": "Writing…", "tool": "Running a tool…"}[phase]
-        self.update_live_activities(a["stored"], {"phase": phase, "detail": detail}, runtime_id=sid)
+        self.update_live_activities(a["stored"], {**self.la_usage.get(sid, {}), "phase": phase, "detail": detail}, runtime_id=sid)
+
+    def _la_usage_event(self, sid: str, a: dict, usage: dict | None) -> None:
+        """Token and context figures as the turn runs (at most one push every few seconds)."""
+        patch = self._usage_patch(usage)
+        if not patch:
+            return
+        self.la_usage[sid] = patch
+        now = time.time()
+        if now - self._la_usage_pushed.get(sid, 0) < 3:
+            return
+        self._la_usage_pushed[sid] = now
+        phase = (self.la_phase.get(sid) or ("thinking", 0))[0]
+        detail = {"thinking": "Thinking…", "streaming": "Writing…", "tool": "Running a tool…"}.get(phase, "Working…")
+        self.update_live_activities(a["stored"], {**patch, "phase": phase, "detail": detail}, runtime_id=sid)
 
     def on_event(self, ev: dict) -> None:
         kind, sid, p = ev.get("type", ""), ev.get("session_id", ""), ev.get("payload") or {}
         a = self.attached.get(sid)
         if kind in self._PHASE_EVENTS and a:
             self._la_phase_event(sid, a, self._PHASE_EVENTS[kind])
+            return
+        if kind == "session.usage" and a:
+            self._la_usage_event(sid, a, p.get("usage") if isinstance(p.get("usage"), dict) else p)
             return
         if kind == "message.complete" and not a and sid:
             # A chat that started since the last discovery poll: attach now so its finish still
@@ -848,6 +909,10 @@ class Relay:
             a["title"] = p.get("title") or a["title"]
         elif kind == "message.complete" and a:
             self.la_phase.pop(sid, None)
+            if not isinstance(p.get("usage"), dict) and sid in self.la_usage:
+                p = {**p, "usage": {"output": self.la_usage[sid].get("outputTokens"), "context_used": self.la_usage[sid].get("contextUsed"),
+                                    "context_max": self.la_usage[sid].get("contextMax"), "context_percent": self.la_usage[sid].get("contextPercent")}}
+            self.la_usage.pop(sid, None); self._la_usage_pushed.pop(sid, None)
             asyncio.create_task(self._finish_turn(sid, a, p))
         elif kind == "error" and a:
             self.push_all("error", f"{a.get('bot') or a.get('profile', 'Hermes')} · error", f"{a['title']}: {str(p.get('message', ''))[:180]}", self.meta(sid), collapse=f"err-{sid}")

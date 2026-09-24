@@ -60,7 +60,8 @@ final class NotificationViewController: UIViewController, UNNotificationContentE
     private var measured: UIHostingController<ReplyCard>?
     private static func fittedHeight(_ card: UIHostingController<ReplyCard>?, width: CGFloat) -> CGFloat {
         let h = card?.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height ?? 120
-        let cap = max(220, UIScreen.main.bounds.height * 0.34)
+        // What fits between the top of the screen and the reply field above the keyboard.
+        let cap = max(240, UIScreen.main.bounds.height * 0.45)
         return min(max(h, 96), cap)
     }
 
@@ -90,7 +91,9 @@ struct ReplyPane: View {
                 Color.clear.frame(height: 0).id("end")
             }
             .defaultScrollAnchor(.bottom)
-            .scrollBounceBehavior(.basedOnSize)
+            // Always bounce: a drag that finds nothing to scroll would otherwise fall through to
+            // the system and start dismissing the window.
+            .scrollBounceBehavior(.always)
             // The system sizes the window after the first layout (the keyboard takes its share), so
             // the end is re-shown whenever the visible height changes.
             .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height } action: { _, _ in

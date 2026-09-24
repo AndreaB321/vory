@@ -66,8 +66,13 @@ struct SettingsView: View {
                 .disabled(model.runtime == nil)
                 Section("App") {
                     ForEach(filtered(appRows)) { row in
-                        NavigationLink { row.destination.navigationTitle(row.title) } label: { SettingsLabel(row.title, row.symbol, row.color) }
-                            .badge(row.id == "notifications" && model.companionUpdateAvailable ? 1 : 0)
+                        NavigationLink { row.destination.navigationTitle(row.title) } label: {
+                            HStack {
+                                SettingsLabel(row.title, row.symbol, row.color)
+                                Spacer(minLength: 8)
+                                if row.id == "notifications", model.companionUpdateAvailable { CountBadge(1) }
+                            }
+                        }
                     }
                 }
             }
@@ -219,9 +224,16 @@ struct NotificationsView: View {
                 Toggle("Haptics", isOn: $haptics)
             }
             Section {
-                NavigationLink { BackgroundNotificationsView() } label: { Label("Background Notifications", systemImage: "server.rack") }
-                    .badge(model.companionUpdateAvailable ? 1 : 0)
-                    .disabled(model.runtime == nil)
+                NavigationLink {
+                    BackgroundNotificationsView()
+                } label: {
+                    HStack {
+                        Label("Background Notifications", systemImage: "server.rack")
+                        Spacer(minLength: 8)
+                        if model.companionUpdateAvailable { CountBadge(1) }
+                    }
+                }
+                .disabled(model.runtime == nil)
             } footer: {
                 Text("Approvals, questions, finished turns and errors while Vory is closed — delivered by the companion plugin on your gateway. Foreground and just-backgrounded events are delivered locally without it.")
             }
@@ -358,5 +370,21 @@ struct BotColorRow: View {
             BotColors.set(c, for: profile)
             raw = String(data: (try? JSONEncoder().encode(BotColors.stored())) ?? Data(), encoding: .utf8) ?? raw
         }
+    }
+}
+
+
+/// The red count circle the tab bar uses, for rows on the way to whatever needs attention.
+struct CountBadge: View {
+    var count: Int
+    init(_ count: Int) { self.count = count }
+    var body: some View {
+        Text("\(count)")
+            .font(.caption2.weight(.semibold)).monospacedDigit()
+            .foregroundStyle(.white)
+            .padding(.horizontal, count > 9 ? 6 : 0)
+            .frame(minWidth: 20, minHeight: 20)
+            .background(Capsule().fill(.red))
+            .accessibilityLabel("\(count) waiting")
     }
 }

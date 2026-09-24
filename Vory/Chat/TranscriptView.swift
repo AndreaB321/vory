@@ -91,8 +91,9 @@ struct TranscriptView: View {
                 let covered = max(0, UIScreen.main.bounds.maxY - end.minY)
                 let safeBottom = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow?.safeAreaInsets.bottom }.first ?? 0
                 let inset = max(0, covered - safeBottom)
-                let duration = n.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
-                withAnimation(.easeOut(duration: duration)) {
+                // The keyboard moves on UIKit's own spring; this spring tracks it closely, so the
+                // thread and the composer arrive together instead of the composer overlapping.
+                withAnimation(.interpolatingSpring(mass: 3, stiffness: 1000, damping: 500, initialVelocity: 0)) {
                     keyboardInset = inset
                     if stickToBottom { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
