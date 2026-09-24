@@ -30,16 +30,31 @@ final class NotificationViewController: UIViewController, UNNotificationContentE
             let h = UIHostingController(rootView: card)
             h.view.backgroundColor = .clear
             addChild(h)
-            h.view.frame = view.bounds
-            h.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             view.addSubview(h.view)
+            // Pinned with constraints: the view's bounds are still zero when this runs, and an
+            // autoresizing mask scaled from zero stays zero (a blank window).
+            h.view.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                h.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                h.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                h.view.topAnchor.constraint(equalTo: view.topAnchor),
+                h.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            ])
             h.didMove(toParent: self)
             host = h
         }
-        view.layoutIfNeeded()
-        let width = view.bounds.width > 0 ? view.bounds.width : 360
+        let width = view.bounds.width > 0 ? view.bounds.width : UIScreen.main.bounds.width - 16
         let height = host?.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height ?? 120
         preferredContentSize = CGSize(width: width, height: min(max(height, 96), 520))
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // Re-measure once the real width is known so the bubble never gets clipped.
+        guard let host, view.bounds.width > 0 else { return }
+        let height = host.sizeThatFits(in: CGSize(width: view.bounds.width, height: .greatestFiniteMagnitude)).height
+        let size = CGSize(width: view.bounds.width, height: min(max(height, 96), 520))
+        if abs(size.height - preferredContentSize.height) > 1 { preferredContentSize = size }
     }
 
     /// The banner body is "chat title: reply"; older companions send no separate text.

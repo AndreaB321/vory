@@ -60,8 +60,11 @@ final class LiveActivityController: TurnActivityReporting {
     /// The last reason `Activity.request` refused, for the diagnostics page.
     static var lastStartError: String?
     static var lastStartedAt: Date?
-    /// How long a finished card stays after the turn ends when the app is not in front.
-    static let finishedLinger: TimeInterval = 30
+    /// After the turn ends (app not in front): the card stays in the Dynamic Island this long (an
+    /// ended activity leaves the Island at once, so it stays active meanwhile)…
+    nonisolated static let finishedIsland: TimeInterval = 30
+    /// …then it is ended and lingers on the Lock Screen this much longer.
+    nonisolated static let finishedLinger: TimeInterval = 60
     /// The last dozen things that happened to activities, newest last, for the diagnostics page.
     nonisolated(unsafe) static var log: [String] = []
     nonisolated static func note(_ what: String) {
@@ -169,20 +172,38 @@ final class LiveActivityController: TurnActivityReporting {
         let state = HermesTurnAttributes.ContentState(phase: phase, detail: phase == "error" ? "The turn failed" : "Turn finished",
                                                       outputTokens: chat.usage?.output ?? 0, contextPercent: chat.usage?.contextPercent, needsAttention: false,
                                                       startedAt: startedAt, endedAt: Date(), contextUsed: chat.usage?.contextUsed, contextMax: chat.usage?.contextMax)
+        var keepToken = false
+        var finishing: String?
         if let handle {
             Self.endingIDs.insert(handle.activity.id); self.handle = nil
-            // Away from the app the card switches to "Finished" without expanding the Island and is
-            // removed half a minute later; the reply itself arrives as a notification (from the
-            // companion, or the local one when no companion is registered), which is where the buzz
-            // and the Reply action live.
-            handle.end(state, linger: inFront ? nil : Self.finishedLinger)
-            Self.note("end (\(phase)) \(inFront ? "now, app in front" : "card lingers \(Int(Self.finishedLinger)) s")")
+            if inFront {
+                handle.end(state)
+                Self.note("end (\(phase)) now, app in front")
+            } else {
+                // Away from the app the card switches to "Finished" without expanding the Island and
+                // stays there half a minute, then lingers on the Lock Screen; the reply itself arrives
+                // as a notification (the companion's, or the local one when none is registered), which
+                // is where the buzz and the Reply action live.
+                handle.update(state)
+                finishing = handle.activity.id
+                Task.detached {
+                    try? await Task.sleep(for: .seconds(Self.finishedIsland))
+                    handle.end(state, linger: Self.finishedLinger)
+                }
+                // The app may be suspended before that timer fires; the companion's own end push
+                // reaches this same activity as long as its token stays registered.
+                keepToken = LocalNotifier.companionDelivers
+                Self.note("finished (\(phase)) in the background: Island \(Int(Self.finishedIsland)) s, Lock Screen \(Int(Self.finishedLinger)) s more")
+            }
         }
-        // The companion routes finish/approval alerts through an active activity; tell it there is none now.
-        NotificationCenter.default.post(name: .hermesLiveActivityToken, object: nil, userInfo: ["token": "", "storedID": chat.storedID, "startedAt": 0.0])
+        // The companion routes finish/approval alerts through an active activity; tell it there is none
+        // now — unless that activity is still finishing and the companion's end push should reach it.
+        if !keepToken {
+            NotificationCenter.default.post(name: .hermesLiveActivityToken, object: nil, userInfo: ["token": "", "storedID": chat.storedID, "startedAt": 0.0])
+        }
         // Whatever else the system still shows for this chat (an activity from before a relaunch, or one
         // whose end push never arrived) goes with it.
-        for a in Activity<HermesTurnAttributes>.activities where a.attributes.storedSessionID == chat.storedID {
+        for a in Activity<HermesTurnAttributes>.activities where a.attributes.storedSessionID == chat.storedID && a.id != finishing {
             Self.endingIDs.insert(a.id)
             ActivityHandle(a).end(state, linger: inFront ? nil : Self.finishedLinger)
         }

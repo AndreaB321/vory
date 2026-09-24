@@ -23,7 +23,8 @@ Configuration (environment variables, all HERMES_PUSH_*):
   HERMES_PUSH_POLL_SECONDS         session discovery / test-request interval (default 3)
   HERMES_PUSH_FINISH_EXPAND        1 to make the finish expand the Dynamic Island with an alert (default: the
                                    card just switches to "Finished" and the reply arrives as a notification)
-  HERMES_PUSH_FINISH_LINGER        seconds the finished card stays before iOS removes it (default 30)
+  HERMES_PUSH_FINISH_ISLAND        seconds the finished card stays in the Dynamic Island (default 30)
+  HERMES_PUSH_FINISH_LINGER        seconds it then stays on the Lock Screen before iOS removes it (default 60)
 
 Dependencies: websockets, PyJWT, cryptography (all present in the Hermes venv).
 """
@@ -51,7 +52,7 @@ except ImportError as exc:  # pragma: no cover
 log = logging.getLogger("hermes-push")
 
 # Keep in step with plugin/vory-push/plugin.yaml; the app compares the two.
-VERSION = "1.0.20"
+VERSION = "1.0.21"
 USER_AGENT = f"Vory-Push/{VERSION} (Hermes companion)"
 try:
     # Fingerprint of the code actually running: the app compares it with the copy it ships, so a
@@ -552,9 +553,11 @@ class Relay:
         return out
 
     def end_live_activities(self, stored: str, phase: str, bot: str = "Hermes", runtime_id: str = "", usage: dict | None = None) -> set:
-        """End the activity: the card switches to "Finished"/"Failed" without expanding the Island and
-        iOS removes it after HERMES_PUSH_FINISH_LINGER seconds. The reply itself follows as a normal
-        notification (sound, Reply action). Returns the ids of the devices reached."""
+        """Finish the activity in two steps: an update switches the card to "Finished"/"Failed" without
+        expanding the Island (an ended activity leaves the Island at once, so it stays active for
+        HERMES_PUSH_FINISH_ISLAND seconds), then an end push keeps it on the Lock Screen for
+        HERMES_PUSH_FINISH_LINGER more seconds. The reply itself follows as a normal notification
+        (sound, Reply action). Returns the ids of the devices reached."""
         now = int(time.time())
         reached = set()
         targets = self.live_activity_devices(stored, runtime_id)
@@ -562,10 +565,12 @@ class Relay:
             self._la_skip(f"finish {phase}", stored)
         usage = usage if isinstance(usage, dict) else {}
         num = lambda v: int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None  # noqa: E731
-        try:
-            linger = max(5, int(float(env("HERMES_PUSH_FINISH_LINGER", "30"))))
-        except ValueError:
-            linger = 30
+        def secs(name: str, default: int) -> int:
+            try:
+                return max(0, int(float(env(name, str(default)))))
+            except ValueError:
+                return default
+        island, linger = secs("HERMES_PUSH_FINISH_ISLAND", 30), secs("HERMES_PUSH_FINISH_LINGER", 60)
         for d in targets:
             state = {"phase": phase, "detail": "Turn finished" if phase == "done" else "The turn failed",
                      "outputTokens": num(usage.get("output")) or 0,
@@ -573,17 +578,31 @@ class Relay:
                      "contextUsed": num(usage.get("context_used", usage.get("contextUsed"))),
                      "contextMax": num(usage.get("context_max", usage.get("contextMax"))), "needsAttention": False,
                      "startedAtUnix": float(d.get("live_activity_started_at") or now), "endedAtUnix": float(now)}
-            aps = {"timestamp": now, "event": "end", "content-state": state, "dismissal-date": now + linger}
+            aps = {"timestamp": now, "event": "update", "content-state": state}
             if env("HERMES_PUSH_FINISH_EXPAND") in {"1", "true", "yes"}:
                 aps["alert"] = {"title": bot, "body": "Finished — tap to read the reply" if phase == "done" else "The turn failed — tap to see why", "sound": "default"}
             ok = self.apns.send(d, {"aps": aps}, push_type="liveactivity", token_override=d["live_activity_token"])
-            self._note_la(f"finish end ({phase}, {linger}s)", ok)
+            self._note_la(f"finish update ({phase})", ok)
             if ok:
                 reached.add(d.get("device_id"))
+                self._schedule_end(d, state, island, linger)
             # No separate "end" push: when the phone holds pushes (idle, sandbox), only the latest state
             # gets applied and an end would swallow the alert. The finished card stays until the app is
             # opened, and the app ends it then.
         return reached
+
+    def _schedule_end(self, device: dict, state: dict, island: int, linger: int) -> None:
+        """Second step of the finish: after ``island`` seconds end the activity with a dismissal date
+        ``linger`` seconds out, so it leaves the Island but stays on the Lock Screen a while longer."""
+        def send_end() -> None:
+            now = int(time.time())
+            ok = self.apns.send(device, {"aps": {"timestamp": now, "event": "end", "content-state": state, "dismissal-date": now + linger}},
+                                push_type="liveactivity", token_override=device["live_activity_token"])
+            self._note_la(f"finish end (+{island}s, lingers {linger}s)", ok)
+        try:
+            asyncio.get_event_loop().call_later(island, send_end)
+        except RuntimeError:
+            send_end()
 
     def update_live_activities(self, stored: str, state_patch: dict, alert: dict | None = None, runtime_id: str = "") -> set:
         """Mid-turn update (tool running, waiting for you): only what the companion can know. With
