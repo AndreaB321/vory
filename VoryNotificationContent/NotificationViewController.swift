@@ -60,8 +60,9 @@ final class NotificationViewController: UIViewController, UNNotificationContentE
     private var measured: UIHostingController<ReplyCard>?
     private static func fittedHeight(_ card: UIHostingController<ReplyCard>?, width: CGFloat) -> CGFloat {
         let h = card?.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height ?? 120
-        // What fits between the top of the screen and the reply field above the keyboard.
-        let cap = max(240, UIScreen.main.bounds.height * 0.45)
+        // iOS fixes the expanded notification at about a third of the screen while the keyboard is
+        // up and clips anything taller, so this is the most that stays visible.
+        let cap = max(220, UIScreen.main.bounds.height * 0.34)
         return min(max(h, 96), cap)
     }
 
