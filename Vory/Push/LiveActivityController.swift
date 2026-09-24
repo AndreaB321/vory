@@ -12,6 +12,14 @@ private final class ActivityHandle: @unchecked Sendable {
         Task.detached { await self.activity.update(.init(state: state, staleDate: Date().addingTimeInterval(3600))) }
     }
 
+    /// An update that also alerts: the Island expands and the phone buzzes, like a push with an
+    /// alert would. Used when the app itself has the news while it is not in front.
+    func alert(_ state: HermesTurnAttributes.ContentState, title: String, body: String) {
+        let config = AlertConfiguration(title: LocalizedStringResource(String.LocalizationValue(title)),
+                                        body: LocalizedStringResource(String.LocalizationValue(body)), sound: .default)
+        Task.detached { await self.activity.update(.init(state: state, staleDate: Date().addingTimeInterval(3600)), alertConfiguration: config) }
+    }
+
     func end(_ state: HermesTurnAttributes.ContentState, linger: TimeInterval = 0) {
         // In front of the user the result is on screen already, so the activity goes at once; away
         // from the app it stays on the Lock Screen a while showing "finished".
@@ -119,12 +127,23 @@ final class LiveActivityController: TurnActivityReporting {
         }
     }
 
+    private var alertedAttention = false
+
     func update(for chat: ChatSession, attention: Bool, detail: String?) {
         guard let handle else { return }
         let phase = attention ? "waiting" : (detail?.hasPrefix("Running") == true ? "tool" : "streaming")
         let text = detail ?? (attention ? (chat.firstCard?.approval?.description ?? "Needs your answer") : (chat.statusLine ?? "Thinking…"))
-        handle.update(HermesTurnAttributes.ContentState(phase: phase, detail: text, outputTokens: chat.usage?.output ?? 0,
-                                                         contextPercent: chat.usage?.contextPercent, needsAttention: attention, startedAt: startedAt))
+        let state = HermesTurnAttributes.ContentState(phase: phase, detail: text, outputTokens: chat.usage?.output ?? 0,
+                                                       contextPercent: chat.usage?.contextPercent, needsAttention: attention, startedAt: startedAt)
+        if attention, !alertedAttention, UIApplication.shared.applicationState != .active {
+            alertedAttention = true
+            let botName = handle.activity.attributes.botName ?? chat.profileName
+            handle.alert(state, title: botName, body: "Approval needed — tap to answer")
+            Self.note("approval alert from the app (background)")
+            return
+        }
+        if !attention { alertedAttention = false }
+        handle.update(state)
     }
 
     func end(for chat: ChatSession, phase: String) {
@@ -134,13 +153,23 @@ final class LiveActivityController: TurnActivityReporting {
         stateTask = nil
         let inFront = UIApplication.shared.applicationState == .active
         let linger: TimeInterval = inFront ? 0 : 45
+        let botName = handle?.activity.attributes.botName ?? chat.runtime.profiles.first { $0.name == chat.profileName }?.label ?? chat.profileName
         if handle != nil || Activity<HermesTurnAttributes>.activities.contains(where: { $0.attributes.storedSessionID == chat.storedID }) {
             Self.note("end (\(phase)) \(inFront ? "now, app in front" : "lingers 45 s, app in background")")
         }
         let state = HermesTurnAttributes.ContentState(phase: phase, detail: phase == "error" ? "The turn failed" : "Turn finished",
                                                       outputTokens: chat.usage?.output ?? 0, contextPercent: chat.usage?.contextPercent, needsAttention: false,
                                                       startedAt: startedAt, endedAt: Date())
-        if let handle { Self.endingIDs.insert(handle.activity.id); self.handle = nil; handle.end(state, linger: linger) }
+        if let handle {
+            Self.endingIDs.insert(handle.activity.id); self.handle = nil
+            if !inFront {
+                // The app is still awake in the background: it beats the companion's push, so it must
+                // deliver the alert itself — expand the Island and buzz — then let the card linger.
+                handle.alert(state, title: botName, body: phase == "error" ? "The turn failed — tap to see why" : "Finished — tap to read the reply")
+                Self.note("alerted from the app (background)")
+            }
+            handle.end(state, linger: linger)
+        }
         // The companion routes finish/approval alerts through an active activity; tell it there is none now.
         NotificationCenter.default.post(name: .hermesLiveActivityToken, object: nil, userInfo: ["token": "", "storedID": chat.storedID, "startedAt": 0.0])
         // Whatever the system still shows for this chat (an activity from before a relaunch, or one whose
