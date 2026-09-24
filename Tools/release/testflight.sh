@@ -36,9 +36,10 @@ done
 MARKETING_VERSION="${MARKETING_VERSION:-$(grep -m1 'MARKETING_VERSION = ' "$PROJECT/project.pbxproj" | sed 's/.*= *//; s/;//')}"
 
 # The build number is the iteration count: one more than the highest small build number App Store
-# Connect already holds for this app (App Store Connect refuses a number it has seen, or a lower one
-# within the same version). Builds before 1.0.1 used date-style numbers (2609240140); those are
-# ignored, which is why the version moved to 1.0.1 when the scheme changed. Override with BUILD_NUMBER=.
+# Connect already holds for this app (App Store Connect refuses a number it has already seen). The
+# first ten builds used date-style numbers (up to 2609240140); those are ignored. The marketing
+# version stays 1.0 through the beta, then 1.0.1, 1.2, … and 2.0 for the App Store. Override with
+# BUILD_NUMBER=.
 next_build_number() {
     local token
     token="$(ASC_KEY_ID="$ASC_KEY_ID" ASC_ISSUER_ID="$ASC_ISSUER_ID" ASC_KEY_PATH="$ASC_KEY_PATH" swift Tools/release/asc-jwt.swift)" || return 1
