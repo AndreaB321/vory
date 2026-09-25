@@ -62,8 +62,8 @@ extension Color {
     }
 }
 
-/// A bot's avatar: its initial in its colour, the photo the user chose, or an animated Vory
-/// avatar that moves while `active` (the bot is working).
+/// A bot's avatar: the studio bot (body, eyes, colour) that moves while `active` (the bot is
+/// working), or the photo the user chose.
 struct BotAvatar: View {
     var profile: String
     var size: CGFloat = 28
@@ -79,38 +79,23 @@ struct BotAvatar: View {
     }
     private var choice: BotAvatarChoice {
         if let override { return override }
-        guard let d = avatarsRaw.data(using: .utf8), let m = try? JSONDecoder().decode([String: String].self, from: d) else { return .initial }
-        return BotAvatarChoice(raw: m[profile] ?? "initial")
+        guard let d = avatarsRaw.data(using: .utf8), let m = try? JSONDecoder().decode([String: String].self, from: d) else { return .default }
+        return BotAvatarChoice(raw: m[profile] ?? "")
     }
 
     var body: some View {
-        let tint = BotColors.color(for: profile, overrides: overrides)
+        let hex = BotColors.hex(for: profile, overrides: overrides)
         Group {
-            switch choice {
-            case .photo:
-                if let image = BotAvatarStore.photo(for: profile) {
-                    Image(uiImage: image).resizable().scaledToFill().frame(width: size, height: size).clipShape(Circle())
-                } else { initial(tint) }
-            case .animated(let style):
-                AnimatedAvatar(style: style, tint: tint, size: size, active: active)
-            case .initial:
-                initial(tint)
+            if choice == .photo, let image = BotAvatarStore.photo(for: profile) {
+                Image(uiImage: image).resizable().scaledToFill().frame(width: size, height: size).clipShape(Circle())
+            } else {
+                BotFaceView(spec: choice.spec(hex: hex), size: size, active: active)
             }
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
     }
-
-    private func initial(_ tint: Color) -> some View {
-        ZStack {
-            Circle().fill(tint.gradient)
-            Text(String(profile.prefix(1)).uppercased())
-                .font(.system(size: size * 0.48, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white)
-        }
-    }
 }
-
 
 /// Copies the bot colours, avatar choices and photo thumbnails into the shared keychain
 /// (`BotLooks`) for the notification extensions.

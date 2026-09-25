@@ -30,6 +30,8 @@ final class AppModel {
     /// The gateway's companion plugin is older than the one this build ships: Settings › Notifications ›
     /// Background Notifications carry a badge until it is updated.
     var companionUpdateAvailable = false
+    /// Companion version found on the gateway by the last check (About shows it).
+    var companionInstalledVersion: String?
 
     /// Re-reads the companion's manifest on the gateway (cheap: two small file reads) and sets
     /// `companionUpdateAvailable`. Called when the app comes to the foreground.
@@ -38,6 +40,7 @@ final class AppModel {
         let probe = PushSetupModel()
         await probe.checkCompanion(runtime: rt)
         companionUpdateAvailable = probe.updateAvailable
+        companionInstalledVersion = probe.installedVersion
     }
 
     enum AppTab: String, Hashable, CaseIterable, Sendable {

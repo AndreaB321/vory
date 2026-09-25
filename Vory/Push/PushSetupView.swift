@@ -644,7 +644,7 @@ struct StepPage<Content: View>: View {
                 Text(step.title).font(.title2.weight(.bold))
             }
             HStack(alignment: .center, spacing: 12) {
-                AnimatedAvatar(style: step.avatar, tint: done ? .green : Color(red: 0.24, green: 0.77, blue: 0.93), size: 56, active: isCurrent)
+                BotFaceView(spec: BotLookSpec.from(choice: "animated:\(step.avatar)", hex: (done ? Color.green : Color(red: 0.24, green: 0.77, blue: 0.93)).hexString), size: 56, active: isCurrent)
                     .offset(y: hop ? -12 : 0)
                     .rotationEffect(.degrees(hop ? -8 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.45), value: hop)
@@ -812,12 +812,12 @@ struct BackgroundNotificationsView: View {
                 let push = model.push
                 Section {
                     if setup.companionCheckedAt == nil {
-                        Label { Text("Checking for updates…") } icon: { ProgressView() }.foregroundStyle(.secondary)
+                        Label { Text("Checking…") } icon: { ProgressView() }.foregroundStyle(.secondary)
                     } else {
-                        CompanionStatusRows(setup: setup, runtime: rt, showInstall: false)
+                        CompanionStatusChecks(setup: setup)
                     }
                 } header: { sectionHeader("Companion on the gateway") } footer: {
-                    Text("Manifest and heartbeat read back from the Gateway.")
+                    Text("Updates are installed from Settings › Software Update.")
                 }
                 Section {
                     LabeledContent("Notifications", value: PushSetupView.statusText(push.authorization))
@@ -896,6 +896,33 @@ struct BackgroundNotificationsView: View {
         .refreshable { if let rt { await setup.checkCompanion(runtime: rt) } }
         // The badge on Settings › Notifications follows what this page finds.
         .onChange(of: setup.companionCheckedAt) { _, _ in model.companionUpdateAvailable = setup.updateAvailable }
+    }
+}
+
+/// Just the two facts, as check marks: the plugin is on the gateway, and it is running.
+struct CompanionStatusChecks: View {
+    @Bindable var setup: PushSetupModel
+
+    private var running: Bool {
+        guard let hb = setup.heartbeat else { return false }
+        return Date().timeIntervalSince(Date(timeIntervalSince1970: hb.updatedAt)) <= PushSetupModel.heartbeatSeconds * 6 && hb.connected == true
+    }
+
+    var body: some View {
+        HStack {
+            Text("Installed")
+            Spacer()
+            Image(systemName: setup.installedVersion != nil ? "checkmark.circle.fill" : "xmark.circle")
+                .foregroundStyle(setup.installedVersion != nil ? .green : .secondary)
+                .accessibilityLabel(setup.installedVersion != nil ? "Installed" : "Not installed")
+        }
+        HStack {
+            Text("Running")
+            Spacer()
+            Image(systemName: running ? "checkmark.circle.fill" : (setup.heartbeat == nil ? "questionmark.circle" : "exclamationmark.triangle.fill"))
+                .foregroundStyle(running ? .green : (setup.heartbeat == nil ? .secondary : .orange))
+                .accessibilityLabel(running ? "Running" : "Not running")
+        }
     }
 }
 

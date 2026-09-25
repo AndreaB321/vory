@@ -53,7 +53,7 @@ except ImportError as exc:  # pragma: no cover
 log = logging.getLogger("hermes-push")
 
 # Keep in step with plugin/vory-push/plugin.yaml; the app compares the two.
-VERSION = "1.0.24"
+VERSION = "1.0.25"
 USER_AGENT = f"Vory-Push/{VERSION} (Hermes companion)"
 try:
     # Fingerprint of the code actually running: the app compares it with the copy it ships, so a
@@ -806,15 +806,19 @@ class Relay:
         up to it (`thread`, fetched here with a short timeout)."""
         title = a["title"]; bot = a.get("bot") or a.get("profile", "Hermes")
         err = p.get("error")
-        thread = await self._recent_thread(sid, a)
+        # The Live Activity flips to Finished at once; the thread for the reply window is fetched
+        # with a short cap so the notification is not held up by a slow gateway.
+        self.end_live_activities(a["stored"], "error" if err else "done", bot=bot, runtime_id=sid, usage=p.get("usage"))
+        try:
+            thread = await asyncio.wait_for(self._recent_thread(sid, a), timeout=1.5)
+        except asyncio.TimeoutError:
+            thread = []
         if err:
-            self.end_live_activities(a["stored"], "error", bot=bot, runtime_id=sid, usage=p.get("usage"))
             self.push_all("error", f"{bot} · turn failed", f"{title}: {str(err)[:300]}",
                           {**self.meta(sid), "title": title, "text": str(err)[:1200], "thread": thread}, collapse=f"turn-{sid}")
         else:
             text = p.get("text") if isinstance(p.get("text"), str) else ""
             label = "cron job finished" if a.get("source") == "cron" else title
-            self.end_live_activities(a["stored"], "done", bot=bot, runtime_id=sid, usage=p.get("usage"))
             self.push_all("cron" if a.get("source") == "cron" else "turn", f"{bot} · {label}" if a.get("source") == "cron" else bot,
                           f"{title}: {(text or 'Done')[:300]}",
                           {**self.meta(sid), "title": title, "text": (text or "Done")[:1200], "thread": thread}, collapse=f"turn-{sid}")
@@ -826,7 +830,7 @@ class Relay:
             params = {"session_id": sid, "omit_messages": False}
             if a.get("profile"):
                 params["profile"] = a["profile"]
-            snap = await asyncio.wait_for(self.gw.call("session.activate", params), timeout=4)
+            snap = await asyncio.wait_for(self.gw.call("session.activate", params), timeout=1.4)
         except Exception as exc:  # noqa: BLE001
             log.debug("thread fetch failed for %s: %s", sid[:12], exc)
             return []

@@ -67,7 +67,7 @@ final class NotificationService: UNNotificationServiceExtension {
         if kind == "test" {
             // The test notification comes from no bot in particular: Vory's own little cloud.
             profile = "vory"
-            looks.avatars["vory"] = "animated:nimbus"
+            looks.avatars["vory"] = "studio:cloud:classic"
             looks.colors["vory"] = "#3B7BFF"
         }
         // The title is "<bot>" or "<bot> · approval needed": the sender is the part before the dot.
@@ -105,12 +105,12 @@ final class NotificationService: UNNotificationServiceExtension {
     }
 }
 
-/// Renders the bot's avatar (photo thumbnail, animated character as a still frame, or its initial
-/// on the bot colour) to PNG for the notification's sender image.
+/// Renders the bot's avatar (photo thumbnail, or the studio bot as a still frame) to PNG for the
+/// notification's sender image.
 enum AvatarRender {
     @MainActor
     static func image(profile: String, name: String, looks: BotLooks) -> Data? {
-        let choice = looks.avatars[profile] ?? "initial"
+        let choice = looks.avatars[profile] ?? ""
         if choice == "photo", let data = looks.photos[profile], let ui = UIImage(data: data) {
             // Round it like a contact photo.
             let side: CGFloat = 256
@@ -123,38 +123,11 @@ enum AvatarRender {
             }
             return img.pngData()
         }
-        let tint = Color(hexString: looks.colors[profile] ?? "") ?? .purple
-        let style = choice.hasPrefix("animated:") ? String(choice.dropFirst("animated:".count)) : nil
-        let view = AvatarView(style: style, initial: String(name.prefix(1)).uppercased(), tint: tint).frame(width: 128, height: 128)
-        let renderer = ImageRenderer(content: view)
+        let spec = BotLookSpec.from(choice: choice, hex: looks.colors[profile] ?? "#7C5CFF")
+        let renderer = ImageRenderer(content: BotFaceView(spec: spec, size: 128, active: false).padding(6))
         renderer.scale = 2
         renderer.isOpaque = false
         return renderer.uiImage?.pngData()
-    }
-
-    struct AvatarView: View {
-        var style: String?
-        var initial: String
-        var tint: Color
-        var body: some View {
-            if let style {
-                Canvas(opaque: false, rendersAsynchronously: false) { ctx, sz in
-                    let r = CGRect(origin: .zero, size: sz)
-                    ctx.clip(to: Path(ellipseIn: r))
-                    ctx.fill(Path(ellipseIn: r), with: .linearGradient(Gradient(colors: [tint.opacity(0.95), tint.opacity(0.65)]), startPoint: .zero, endPoint: CGPoint(x: 0, y: sz.height)))
-                    let z = AvatarArt.zoom(style)
-                    ctx.translateBy(x: sz.width / 2, y: sz.height / 2)
-                    ctx.scaleBy(x: z, y: z)
-                    ctx.translateBy(x: -sz.width / 2, y: -sz.height / 2)
-                    AvatarArt.draw(style, in: &ctx, size: sz, time: 0, active: false)
-                }
-            } else {
-                ZStack {
-                    Circle().fill(tint.gradient)
-                    Text(initial).font(.system(size: 60, weight: .semibold, design: .rounded)).foregroundStyle(.white)
-                }
-            }
-        }
     }
 }
 

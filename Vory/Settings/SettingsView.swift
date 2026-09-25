@@ -3,6 +3,8 @@ import VoryCore
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
+    /// The first-run "set up notifications" card: shown once, until it is tapped or dismissed.
+    @AppStorage("notificationsSetupCardDone") private var setupCardDone = false
     @State private var search = ""
 
     private struct Row: Identifiable { let id: String; let title: String; let symbol: String; let color: Color; let destination: AnyView }
@@ -28,6 +30,7 @@ struct SettingsView: View {
             Row(id: "notifications", title: "Notifications", symbol: "bell.badge", color: .red, destination: AnyView(NotificationsView())),
             Row(id: "security", title: "Security", symbol: "faceid", color: .green, destination: AnyView(SecurityView())),
             Row(id: "appearance", title: "Appearance", symbol: "circle.lefthalf.filled", color: .black, destination: AnyView(AppearanceView())),
+            Row(id: "update", title: "Software Update", symbol: "arrow.down.circle", color: .gray, destination: AnyView(SoftwareUpdateView())),
             Row(id: "about", title: "About", symbol: "info.circle", color: .blue, destination: AnyView(AboutView())),
         ]
     }
@@ -37,6 +40,27 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                if search.isEmpty, !setupCardDone, model.runtime != nil, model.push.registeredAt == nil {
+                    Section {
+                        NavigationLink { SetupWizardHost() } label: {
+                            HStack(spacing: 12) {
+                                BotFaceView(spec: BotLookSpec(shape: "cloud", eyes: "classic", hex: "#3B7BFF"), size: 46, active: true)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Set up notifications").font(.headline)
+                                    Text("Replies, approvals and Live Activities while Vory is closed.").font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button { withAnimation(.snappy) { setupCardDone = true } } label: {
+                                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Dismiss")
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .simultaneousGesture(TapGesture().onEnded { setupCardDone = true })
+                    }
+                }
                 if search.isEmpty {
                     Section {
                         NavigationLink { GatewaysView() } label: {
@@ -70,7 +94,7 @@ struct SettingsView: View {
                             HStack {
                                 SettingsLabel(row.title, row.symbol, row.color)
                                 Spacer(minLength: 8)
-                                if row.id == "notifications", model.companionUpdateAvailable { CountBadge(1) }
+                                if row.id == "update", model.companionUpdateAvailable { CountBadge(1) }
                             }
                         }
                     }
@@ -227,11 +251,7 @@ struct NotificationsView: View {
                 NavigationLink {
                     BackgroundNotificationsView()
                 } label: {
-                    HStack {
-                        Label("Background Notifications", systemImage: "server.rack")
-                        Spacer(minLength: 8)
-                        if model.companionUpdateAvailable { CountBadge(1) }
-                    }
+                    Label("Background Notifications", systemImage: "server.rack")
                 }
                 .disabled(model.runtime == nil)
             } footer: {
@@ -345,15 +365,150 @@ struct AppearanceView: View {
 }
 
 struct AboutView: View {
+    @Environment(AppModel.self) private var model
+    @State private var taps = 0
+    @State private var lastTap = Date.distantPast
+    @State private var raining = false
+
+    private var appVersion: String { (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") + " (" + (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?") + ")" }
+    static let voryBot = BotLookSpec(shape: "cloud", eyes: "classic", hex: "#3B7BFF")
+
     var body: some View {
         List {
-            LabeledContent("Version", value: (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") + " (" + (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?") + ")")
-            LabeledContent("Protocol", value: "Hermes dashboard REST + JSON-RPC over /api/ws")
-            Link("Hermes Agent documentation", destination: URL(string: "https://hermes-agent.nousresearch.com/docs")!)
+            Section {
+                VStack(spacing: 10) {
+                    ZStack {
+                        BotFaceView(spec: Self.voryBot, size: 132, active: true)
+                        if raining { RainOverlay().frame(width: 200, height: 200).allowsHitTesting(false).transition(.opacity) }
+                    }
+                    .frame(height: 170)
+                    .contentShape(Rectangle())
+                    .onTapGesture { tapped() }
+                    Text("Vory").font(.title.weight(.bold))
+                    Text("Version \(appVersion)").font(.footnote).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
+            Section {
+                LabeledContent("Companion plugin", value: model.companionInstalledVersion.map { "v\($0)" } ?? "not installed")
+                LabeledContent("Ships with this build", value: "v\(PushSetupModel.bundledPluginVersion)")
+                LabeledContent("Push relay", value: PushRelay.isConfigured ? "configured" : "none")
+                LabeledContent("Live Activity", value: appVersion)
+                LabeledContent("Notification extensions", value: appVersion)
+            } header: { Text("Installed") } footer: {
+                Text("What Vory puts on your gateway and inside this app. Updates arrive under Software Update.")
+            }
+            Section {
+                Link("Hermes Agent documentation", destination: URL(string: "https://hermes-agent.nousresearch.com/docs")!)
+            }
+        }
+        .animation(.smooth, value: raining)
+        .task { await model.refreshCompanionUpdateFlag() }
+    }
+
+    /// Five quick taps on the cloud and it rains for ten seconds.
+    private func tapped() {
+        let now = Date()
+        taps = now.timeIntervalSince(lastTap) < 1.5 ? taps + 1 : 1
+        lastTap = now
+        guard taps >= 5, !raining else { return }
+        taps = 0
+        raining = true
+        Task { try? await Task.sleep(for: .seconds(10)); raining = false }
+    }
+}
+
+/// Rain drops falling from the cloud: a couple of dozen streaks with their own speed and phase.
+struct RainOverlay: View {
+    struct Drop { var x: Double; var speed: Double; var phase: Double; var len: Double }
+    private static let drops: [Drop] = (0..<28).map { (i: Int) -> Drop in
+        let col: Double = Double(i % 9) / 9.0
+        let jitter: Double = Double((i * 7) % 5) * 0.012
+        let speed: Double = 0.9 + Double((i * 13) % 7) / 7.0 * 0.8
+        let phase: Double = Double((i * 31) % 100) / 100.0
+        let len: Double = 10.0 + Double((i * 5) % 4) * 4.0
+        return Drop(x: 0.18 + col * 0.64 + jitter, speed: speed, phase: phase, len: len)
+    }
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1 / 40)) { tl in
+            let t = tl.date.timeIntervalSinceReferenceDate
+            Canvas { ctx, size in
+                for d in Self.drops {
+                    let u = ((t * d.speed) + d.phase).truncatingRemainder(dividingBy: 1)
+                    let y = size.height * 0.52 + u * size.height * 0.5
+                    let x = size.width * d.x
+                    var p = Path()
+                    p.move(to: CGPoint(x: x, y: y))
+                    p.addLine(to: CGPoint(x: x - 2, y: y + d.len))
+                    ctx.stroke(p, with: .color(Color(red: 0.45, green: 0.7, blue: 1).opacity(0.85 * (1 - u * 0.6))), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                }
+            }
         }
     }
 }
 
+/// Settings › Software Update: the companion plugin on the gateway, updated in place like an iOS update.
+struct SoftwareUpdateView: View {
+    @Environment(AppModel.self) private var model
+    @State private var setup = PushSetupModel()
+
+    var body: some View {
+        List {
+            if let rt = model.runtime {
+                Section {
+                    if setup.companionCheckedAt == nil {
+                        Label { Text("Checking for updates…") } icon: { ProgressView() }.foregroundStyle(.secondary)
+                    } else if setup.installedVersion == nil {
+                        Label("The companion is not installed yet. Set up notifications first.", systemImage: "info.circle").foregroundStyle(.secondary)
+                    } else if setup.updateAvailable || setup.updating || setup.showUpdateConsole || setup.updateOutcome != nil {
+                        CompanionUpdateRows(setup: setup, runtime: rt)
+                    } else {
+                        VStack(spacing: 8) {
+                            BotFaceView(spec: AboutView.voryBot, size: 56, active: false)
+                            Text("Vory Companion \(PushSetupModel.bundledPluginVersion)").font(.headline)
+                            Text("Your gateway is up to date.").font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity).padding(.vertical, 10)
+                    }
+                } header: { sectionHeader("Vory Companion") } footer: {
+                    Text("The plugin on your gateway that delivers notifications and Live Activity updates. Installs in place; no restart unless it says so.")
+                }
+                Section {
+                    LabeledContent("On the gateway", value: setup.installedVersion.map { "v\($0)" } ?? "—")
+                    if let hb = setup.heartbeat { LabeledContent("Running", value: "v\(hb.version)") }
+                    LabeledContent("This build ships", value: "v\(PushSetupModel.bundledPluginVersion)")
+                    Button { Task { await setup.checkCompanion(runtime: rt) } } label: {
+                        Label("Check again\(setup.companionCheckedAt.map { " (last \($0.formatted(date: .omitted, time: .shortened)))" } ?? "")", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .disabled(setup.checkingCompanion)
+                }
+            } else {
+                Text("Connect a gateway first.").foregroundStyle(.secondary)
+            }
+        }
+        .listSectionSpacing(28)
+        .animation(.smooth, value: setup.updateOutcome == nil)
+        .task { if let rt = model.runtime { await setup.prepare(runtime: rt) } }
+        .refreshable { if let rt = model.runtime { await setup.checkCompanion(runtime: rt) } }
+        .onChange(of: setup.companionCheckedAt) { _, _ in
+            model.companionUpdateAvailable = setup.updateAvailable
+            model.companionInstalledVersion = setup.installedVersion
+        }
+    }
+}
+
+/// The notifications wizard, opened straight from the first-run card in Settings.
+struct SetupWizardHost: View {
+    @Environment(AppModel.self) private var model
+    @State private var setup = PushSetupModel()
+    var body: some View {
+        PushSetupView(setup: setup)
+            .task { if let rt = model.runtime { await setup.prepare(runtime: rt) } }
+    }
+}
 
 struct BotColorRow: View {
     var profile: String

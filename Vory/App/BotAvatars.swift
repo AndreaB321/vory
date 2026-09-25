@@ -6,23 +6,30 @@ import UIKit
 /// the animated Vory avatars. Stored per profile in UserDefaults (`botAvatars`, `{profile: raw}`)
 /// with photos under Application Support/BotAvatars; both stay on this device.
 enum BotAvatarChoice: Equatable {
-    case initial
     case photo
-    case animated(String)
+    case studio(shape: String, eyes: String)
+    /// Older stored values ("initial", "animated:<style>"); they draw as a studio bot.
+    case legacy(String)
 
     var raw: String {
         switch self {
-        case .initial: return "initial"
         case .photo: return "photo"
-        case .animated(let id): return "animated:\(id)"
+        case .studio(let shape, let eyes): return "studio:\(shape):\(eyes)"
+        case .legacy(let r): return r
         }
     }
 
     init(raw: String) {
-        if raw == "photo" { self = .photo }
-        else if raw.hasPrefix("animated:") { self = .animated(String(raw.dropFirst("animated:".count))) }
-        else { self = .initial }
+        if raw == "photo" { self = .photo; return }
+        let spec = BotLookSpec.from(choice: raw, hex: "")
+        if raw.hasPrefix("studio:") { self = .studio(shape: spec.shape, eyes: spec.eyes) }
+        else if raw.isEmpty || raw == "initial" { self = .studio(shape: BotLookSpec.defaultShape, eyes: BotLookSpec.defaultEyes) }
+        else { self = .legacy(raw) }
     }
+
+    /// The look this choice draws, for a given colour.
+    func spec(hex: String) -> BotLookSpec { BotLookSpec.from(choice: raw, hex: hex) }
+    static let `default` = BotAvatarChoice.studio(shape: BotLookSpec.defaultShape, eyes: BotLookSpec.defaultEyes)
 }
 
 enum BotAvatarStore {
@@ -46,7 +53,7 @@ enum BotAvatarStore {
     }
 
     static func choice(for profile: String, overrides: [String: String]? = nil) -> BotAvatarChoice {
-        BotAvatarChoice(raw: (overrides ?? stored())[profile] ?? "initial")
+        BotAvatarChoice(raw: (overrides ?? stored())[profile] ?? "")
     }
 
     static func set(_ choice: BotAvatarChoice, for profile: String) {
@@ -91,92 +98,116 @@ enum BotAvatarStore {
     }
 }
 
-/// The animated Vory avatars. Each one idles as a still frame and moves while the bot works.
-struct AnimatedAvatarStyle: Identifiable, Hashable {
-    var id: String
-    var name: String
-    var tagline: String
-
-    static let all: [AnimatedAvatarStyle] = [
-        .init(id: "nimbus", name: "Nimbus", tagline: "A little cloud that breathes while it thinks"),
-        .init(id: "halo", name: "Halo", tagline: "Two rings in orbit"),
-        .init(id: "pip", name: "Pip", tagline: "A spark that bounces when busy"),
-        .init(id: "ember", name: "Ember", tagline: "A flame that flickers as it works"),
-        .init(id: "wisp", name: "Wisp", tagline: "A ribbon of light passing through"),
-        .init(id: "prism", name: "Prism", tagline: "A slowly turning crystal"),
-    ]
-
-    static func named(_ id: String) -> AnimatedAvatarStyle? { all.first { $0.id == id } }
-}
-
-/// Canvas-drawn avatar. `active` runs the timeline; otherwise it draws frame zero, so a list of
-/// idle bots costs nothing.
-struct AnimatedAvatar: View {
-    var style: String
-    var tint: Color
-    var size: CGFloat
-    var active: Bool = false
-
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 30, paused: !active)) { timeline in
-            let t = active ? timeline.date.timeIntervalSinceReferenceDate : 0
-            Canvas(opaque: false, rendersAsynchronously: false) { ctx, sz in
-                let r = CGRect(origin: .zero, size: sz)
-                ctx.clip(to: Path(ellipseIn: r))
-                ctx.fill(Path(ellipseIn: r), with: .linearGradient(Gradient(colors: [tint.opacity(0.95), tint.opacity(0.65)]), startPoint: .zero, endPoint: CGPoint(x: 0, y: sz.height)))
-                // Each character is drawn at its own natural size, then scaled about the centre so
-                // none sits tiny in the circle or crowds its edge — the same in every place it appears.
-                let z = AvatarArt.zoom(style)
-                ctx.translateBy(x: sz.width / 2, y: sz.height / 2)
-                ctx.scaleBy(x: z, y: z)
-                ctx.translateBy(x: -sz.width / 2, y: -sz.height / 2)
-                AvatarArt.draw(style, in: &ctx, size: sz, time: t, active: active)
-            }
-        }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
-    }
-}
-
-
-/// Picker for the profile card: initial, photo, and each animated style, drawn live.
-struct AvatarChoiceRow: View {
+/// The Creator Studio: pick the bot's body, its eyes and its colour, and watch it come alive.
+struct CreatorStudio: View {
     var profile: String
     @Binding var choice: BotAvatarChoice
+    @AppStorage(BotColors.storageKey) private var colorsRaw = ""
+    @State private var custom: Color = .accentColor
     @State private var photoItem: PhotosPickerItem?
     @State private var photoError: String?
     @State private var photoVersion = 0
+    @State private var tab: StudioTab = .body
+
+    enum StudioTab: String, CaseIterable { case body, eyes, colour }
+
+    private var hex: String { BotColors.hex(for: profile) }
+    private var current: BotLookSpec { choice.spec(hex: hex) }
+    private var shape: String { current.shape }
+    private var eyes: String { current.eyes }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 14) {
-                    option(.initial, label: "Initial") { BotAvatar(profile: profile, size: 56, override: .initial) }
-                    PhotosPicker(selection: $photoItem, matching: .images) {
-                        VStack(spacing: 6) {
-                            ZStack {
-                                if BotAvatarStore.photo(for: profile) != nil {
-                                    BotAvatar(profile: profile, size: 56, override: .photo).id(photoVersion)
-                                } else {
-                                    Circle().fill(Color(.tertiarySystemFill)).frame(width: 56, height: 56)
-                                    Image(systemName: "camera").foregroundStyle(.secondary)
-                                }
-                            }
-                            .overlay(Circle().stroke(choice == .photo ? Color.accentColor : .clear, lineWidth: 3).padding(-3))
-                            Text("Photo").font(.caption2)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    ForEach(AnimatedAvatarStyle.all) { style in
-                        option(.animated(style.id), label: style.name) { BotAvatar(profile: profile, size: 56, active: true, override: .animated(style.id)) }
+        VStack(spacing: 14) {
+            Picker("", selection: $tab) {
+                Label("Body", systemImage: "circle.hexagongrid.fill").tag(StudioTab.body)
+                Label("Eyes", systemImage: "eyes").tag(StudioTab.eyes)
+                Label("Colour", systemImage: "paintpalette.fill").tag(StudioTab.colour)
+            }
+            .pickerStyle(.segmented)
+            .labelStyle(.iconOnly)
+            switch tab {
+            case .body:
+                grid(BotLookSpec.shapes, selected: shape, name: BotLookSpec.name(ofShape:)) { s in
+                    BotFaceView(spec: BotLookSpec(shape: s, eyes: eyes, hex: hex), size: 58, active: shape == s)
+                } pick: { choice = .studio(shape: $0, eyes: eyes) }
+                photoRow
+            case .eyes:
+                grid(BotLookSpec.eyeStyles, selected: eyes, name: BotLookSpec.name(ofEyes:)) { e in
+                    BotFaceView(spec: BotLookSpec(shape: shape, eyes: e, hex: hex), size: 58, active: eyes == e)
+                } pick: { choice = .studio(shape: shape, eyes: $0) }
+            case .colour:
+                colourRow
+            }
+            HStack {
+                Button("Reset to default") {
+                    choice = .default
+                    var map = BotColors.stored(); map[profile] = nil; BotColors.save(map)
+                    colorsRaw = String(data: (try? JSONEncoder().encode(BotColors.stored())) ?? Data(), encoding: .utf8) ?? ""
+                }
+                .font(.subheadline)
+                Spacer()
+                if let photoError { Text(photoError).font(.caption).foregroundStyle(.red) }
+            }
+        }
+        .padding(.vertical, 6)
+        .animation(.snappy, value: tab)
+        .onAppear { custom = BotColors.color(for: profile) }
+    }
+
+    private func grid<V: View>(_ ids: [String], selected: String, name: @escaping (String) -> String, @ViewBuilder preview: @escaping (String) -> V, pick: @escaping (String) -> Void) -> some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 12) {
+            ForEach(ids, id: \.self) { id in
+                Button { pick(id) } label: {
+                    VStack(spacing: 6) {
+                        preview(id)
+                            .padding(8)
+                            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.tertiarySystemFill).opacity(selected == id ? 1 : 0)))
+                            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(selected == id ? Color.accentColor : .clear, lineWidth: 2))
+                        Text(name(id)).font(.caption2).foregroundStyle(selected == id ? .primary : .secondary)
                     }
                 }
-                .padding(.vertical, 4)
+                .buttonStyle(.plain)
             }
-            if case .animated(let id) = choice, let s = AnimatedAvatarStyle.named(id) {
-                Text("\(s.name) — \(s.tagline).").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var colourRow: some View {
+        let swatches = BotColors.palette + ["#FFFFFF", "#8E8E93", "#A2845E"]
+        return VStack(spacing: 12) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 7), spacing: 12) {
+                ForEach(swatches, id: \.self) { h in
+                    Button { setColour(h) } label: {
+                        Circle().fill(Color(hex: h) ?? .gray)
+                            .frame(width: 34, height: 34)
+                            .overlay(Circle().stroke(Color.primary.opacity(hex.uppercased() == h.uppercased() ? 0.9 : 0), lineWidth: 2.5).padding(-4))
+                    }
+                    .buttonStyle(.plain)
+                }
+                ColorPicker("", selection: $custom, supportsOpacity: false)
+                    .labelsHidden()
+                    .frame(width: 34, height: 34)
+                    .onChange(of: custom) { _, c in setColour(c.hexString) }
             }
-            if let photoError { Text(photoError).font(.caption).foregroundStyle(.red) }
+            HStack(spacing: 14) {
+                BotFaceView(spec: current, size: 44, active: true)
+                Text("Colour, body and eyes are used everywhere this bot appears: chats, the Island, notifications.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var photoRow: some View {
+        HStack {
+            PhotosPicker(selection: $photoItem, matching: .images) {
+                Label(choice == .photo ? "Change photo" : "Use a photo instead", systemImage: "photo")
+                    .font(.subheadline)
+            }
+            .buttonStyle(.plain).foregroundStyle(.tint)
+            Spacer()
+            if choice == .photo {
+                Button("Back to the bot") { BotAvatarStore.removePhoto(for: profile); choice = .studio(shape: shape, eyes: eyes) }
+                    .font(.subheadline)
+            }
         }
         .onChange(of: photoItem) { _, item in
             guard let item else { return }
@@ -193,13 +224,8 @@ struct AvatarChoiceRow: View {
         }
     }
 
-    @ViewBuilder private func option<V: View>(_ c: BotAvatarChoice, label: String, @ViewBuilder preview: () -> V) -> some View {
-        Button { choice = c } label: {
-            VStack(spacing: 6) {
-                preview().overlay(Circle().stroke(choice == c ? Color.accentColor : .clear, lineWidth: 3).padding(-3))
-                Text(label).font(.caption2)
-            }
-        }
-        .buttonStyle(.plain)
+    private func setColour(_ h: String) {
+        var map = BotColors.stored(); map[profile] = h; BotColors.save(map)
+        colorsRaw = String(data: (try? JSONEncoder().encode(BotColors.stored())) ?? Data(), encoding: .utf8) ?? ""
     }
 }

@@ -9,7 +9,6 @@ import VoryCore
 /// "Reply" text field underneath is the system's, from the notification category's text action.
 final class NotificationViewController: UIViewController, UNNotificationContentExtension {
     private var host: UIHostingController<ReplyPane>?
-
     func didReceive(_ notification: UNNotification) {
         let content = notification.request.content
         let hermes = content.userInfo["hermes"] as? [String: Any] ?? [:]
@@ -29,7 +28,8 @@ final class NotificationViewController: UIViewController, UNNotificationContentE
             tintHex: looks.colors[profile] ?? "",
             avatar: looks.avatars[profile] ?? "initial",
             failed: content.categoryIdentifier == "HERMES_ERROR")
-        measured = UIHostingController(rootView: ReplyCard(model: model))
+        measured = UIHostingController(rootView: ReplyCard(model: model, page: .reply))
+        measuredThread = model.thread.isEmpty ? nil : UIHostingController(rootView: ReplyCard(model: model, page: .thread))
         let card = ReplyPane(model: model)
         if let host {
             host.rootView = card
@@ -51,15 +51,18 @@ final class NotificationViewController: UIViewController, UNNotificationContentE
             host = h
         }
         let width = view.bounds.width > 0 ? view.bounds.width : UIScreen.main.bounds.width - 16
-        preferredContentSize = CGSize(width: width, height: Self.fittedHeight(measured, width: width))
+        preferredContentSize = CGSize(width: width, height: fittedHeight(width: width))
     }
 
     /// The card's natural height, measured on the plain card (a scroll view would claim any height),
     /// capped at what fits above the keyboard and the reply field: the system clips a taller view
     /// rather than shrinking it, so the cap is what makes the pane scroll instead of being cut off.
     private var measured: UIHostingController<ReplyCard>?
-    private static func fittedHeight(_ card: UIHostingController<ReplyCard>?, width: CGFloat) -> CGFloat {
-        let h = card?.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height ?? 120
+    private var measuredThread: UIHostingController<ReplyCard>?
+    private func fittedHeight(width: CGFloat) -> CGFloat {
+        let a = measured?.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height ?? 120
+        let b = measuredThread?.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height ?? 0
+        let h = max(a, b) + (measuredThread == nil ? 0 : 22)   // page dots
         // iOS fixes the expanded notification at about a third of the screen while the keyboard is
         // up and clips anything taller, so this is the most that stays visible.
         let cap = max(220, UIScreen.main.bounds.height * 0.34)
@@ -70,7 +73,7 @@ final class NotificationViewController: UIViewController, UNNotificationContentE
         super.viewDidLayoutSubviews()
         // Re-measure once the real width is known so the bubbles never get clipped.
         guard view.bounds.width > 0 else { return }
-        let size = CGSize(width: view.bounds.width, height: Self.fittedHeight(measured, width: view.bounds.width))
+        let size = CGSize(width: view.bounds.width, height: fittedHeight(width: view.bounds.width))
         if abs(size.height - preferredContentSize.height) > 1 { preferredContentSize = size }
     }
 
@@ -81,31 +84,29 @@ final class NotificationViewController: UIViewController, UNNotificationContentE
     }
 }
 
-/// The card in a scroll view, so a long reply or thread can be read in place (the window is
-/// capped at a screen's worth); the newest message is what shows first.
+/// Two pages side by side: the earlier exchanges, then the reply (shown first). Vertical drags
+/// inside a notification belong to the system's pull-to-dismiss, so the pane pages sideways instead.
 struct ReplyPane: View {
     var model: ReplyCard.Model
+    @State private var page = 1
+
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                ReplyCard(model: model)
-                Color.clear.frame(height: 0).id("end")
+        if model.thread.isEmpty {
+            ReplyCard(model: model, page: .reply)
+        } else {
+            TabView(selection: $page) {
+                ReplyCard(model: model, page: .thread).tag(0)
+                ReplyCard(model: model, page: .reply).tag(1)
             }
-            .defaultScrollAnchor(.bottom)
-            // Always bounce: a drag that finds nothing to scroll would otherwise fall through to
-            // the system and start dismissing the window.
-            .scrollBounceBehavior(.always)
-            // The system sizes the window after the first layout (the keyboard takes its share), so
-            // the end is re-shown whenever the visible height changes.
-            .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height } action: { _, _ in
-                proxy.scrollTo("end", anchor: .bottom)
-            }
-            .onAppear { proxy.scrollTo("end", anchor: .bottom) }
+            .tabViewStyle(.page(indexDisplayMode: .always))
+            .indexViewStyle(.page(backgroundDisplayMode: .never))
         }
     }
 }
 
 struct ReplyCard: View {
+    enum Page { case thread, reply }
+    var page: Page = .reply
     struct Line: Identifiable {
         var fromUser: Bool
         var text: String
@@ -122,12 +123,14 @@ struct ReplyCard: View {
     }
     var model: Model
 
+    init(model: Model, page: Page = .reply) { self.model = model; self.page = page }
+
     private var tint: Color { Color(hexString: model.tintHex) ?? .purple }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
-                LookAvatar(avatar: model.avatar, initial: String(model.bot.prefix(1)).uppercased(), tint: tint, size: 40)
+                LookAvatar(avatar: model.avatar, initial: String(model.bot.prefix(1)).uppercased(), tintHex: model.tintHex, size: 44)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(model.bot).font(.headline)
                     Text(model.chatTitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
@@ -137,12 +140,12 @@ struct ReplyCard: View {
                     Label("Failed", systemImage: "xmark.circle.fill").font(.caption.weight(.semibold)).foregroundStyle(.red)
                 }
             }
-            ForEach(model.thread) { line in
+            ForEach(page == .thread ? model.thread : []) { line in
                 if line.fromUser {
                     HStack(alignment: .bottom, spacing: 0) {
                         Spacer(minLength: 48)
                         Text(line.text)
-                            .font(.subheadline)
+                            .font(.subheadline).lineLimit(3)
                             .foregroundStyle(.white)
                             .padding(.horizontal, 13).padding(.vertical, 8)
                             .background(Color.accentColor, in: BubbleShape(tailOnRight: true))
@@ -151,7 +154,7 @@ struct ReplyCard: View {
                 } else {
                     HStack(alignment: .bottom, spacing: 0) {
                         Text(line.text)
-                            .font(.subheadline)
+                            .font(.subheadline).lineLimit(3)
                             .padding(.horizontal, 13).padding(.vertical, 8)
                             .background(Color(uiColor: .secondarySystemFill), in: BubbleShape())
                             .frame(maxWidth: 300, alignment: .leading)
@@ -159,14 +162,22 @@ struct ReplyCard: View {
                     }
                 }
             }
-            HStack(alignment: .bottom, spacing: 0) {
-                Text(model.text)
-                    .font(.body)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 14).padding(.vertical, 10)
-                    .background(Color(uiColor: .secondarySystemFill), in: BubbleShape())
-                    .frame(maxWidth: 320, alignment: .leading)
-                Spacer(minLength: 24)
+            if page == .reply {
+                HStack(alignment: .bottom, spacing: 0) {
+                    Text(model.text)
+                        .font(.body)
+                        .lineLimit(9)
+                        .truncationMode(.tail)
+                        .padding(.horizontal, 14).padding(.vertical, 10)
+                        .background(Color(uiColor: .secondarySystemFill), in: BubbleShape())
+                        .frame(maxWidth: 320, alignment: .leading)
+                    Spacer(minLength: 24)
+                }
+                if !model.thread.isEmpty {
+                    Text("Swipe for what came before").font(.caption2).foregroundStyle(.tertiary).frame(maxWidth: .infinity)
+                }
+            } else {
+                Text("Swipe back for the reply").font(.caption2).foregroundStyle(.tertiary).frame(maxWidth: .infinity)
             }
         }
         .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 12)
@@ -196,39 +207,15 @@ struct BubbleShape: Shape {
     }
 }
 
-/// The bot's avatar; animated styles move here because this is a real view, not a widget.
+/// The bot's avatar; it animates here because this is a real view, not a widget.
 struct LookAvatar: View {
     var avatar: String
     var initial: String
-    var tint: Color
+    var tintHex: String
     var size: CGFloat
 
     var body: some View {
-        Group {
-            if avatar.hasPrefix("animated:") {
-                let style = String(avatar.dropFirst("animated:".count))
-                TimelineView(.animation(minimumInterval: 1 / 30)) { timeline in
-                    let t = timeline.date.timeIntervalSinceReferenceDate
-                    Canvas(opaque: false, rendersAsynchronously: false) { ctx, sz in
-                        let r = CGRect(origin: .zero, size: sz)
-                        ctx.clip(to: Path(ellipseIn: r))
-                        ctx.fill(Path(ellipseIn: r), with: .linearGradient(Gradient(colors: [tint.opacity(0.95), tint.opacity(0.65)]), startPoint: .zero, endPoint: CGPoint(x: 0, y: sz.height)))
-                        let z = AvatarArt.zoom(style)
-                        ctx.translateBy(x: sz.width / 2, y: sz.height / 2)
-                        ctx.scaleBy(x: z, y: z)
-                        ctx.translateBy(x: -sz.width / 2, y: -sz.height / 2)
-                        AvatarArt.draw(style, in: &ctx, size: sz, time: t, active: true)
-                    }
-                }
-            } else {
-                ZStack {
-                    Circle().fill(tint.gradient)
-                    Text(initial).font(.system(size: size * 0.48, weight: .semibold, design: .rounded)).foregroundStyle(.white)
-                }
-            }
-        }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
+        BotFaceView(spec: BotLookSpec.from(choice: avatar, hex: tintHex), size: size, active: true)
     }
 }
 

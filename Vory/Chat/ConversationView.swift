@@ -156,6 +156,8 @@ struct ChatHeader: View {
     var onNewChat: () -> Void
     var onClose: () -> Void
     @Environment(\.colorScheme) private var scheme
+    /// The bot pops into the header the way a contact does in Messages.
+    @State private var popped = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -166,25 +168,33 @@ struct ChatHeader: View {
             .buttonStyle(.plain).accessibilityLabel("Back").accessibilityIdentifier("chat.back")
             Spacer(minLength: 0)
             Button(action: onProfile) {
-                VStack(spacing: 4) {
-                    BotAvatar(profile: chat.profileName, size: 40, active: chat.isRunning)
-                    HStack(spacing: 3) {
-                        // Hug the text like Messages does; long titles are shortened in code rather
-                        // than letting a max-width frame stretch the pill across the screen.
-                        Text(chat.title.count > 26 ? String(chat.title.prefix(25)) + "…" : chat.title).font(.caption.weight(.semibold)).lineLimit(1)
-                        Image(systemName: "chevron.right").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
+                VStack(spacing: -10) {
+                    // The bot sits above the pill, overlapping its top edge, like a contact photo in
+                    // Messages; it springs in from small on the first appearance.
+                    BotAvatar(profile: chat.profileName, size: 52, active: chat.isRunning)
+                        .scaleEffect(popped ? 1 : 0.3)
+                        .opacity(popped ? 1 : 0)
+                        .zIndex(1)
+                    VStack(spacing: 1) {
+                        HStack(spacing: 3) {
+                            // Hug the text like Messages does; long titles are shortened in code rather
+                            // than letting a max-width frame stretch the pill across the screen.
+                            Text(chat.title.count > 26 ? String(chat.title.prefix(25)) + "…" : chat.title).font(.caption.weight(.semibold)).lineLimit(1)
+                            Image(systemName: "chevron.right").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
+                        }
+                        Text(chat.isRunning ? (chat.statusLine ?? "Thinking…") : (chat.isResuming ? "Syncing…" : chat.subtitle))
+                            .font(.caption2).lineLimit(1)
+                            .foregroundStyle(chat.isRunning ? BotColors.color(for: chat.profileName) : .secondary)
+                            .contentTransition(.numericText())
+                            .animation(.snappy, value: chat.statusLine)
                     }
-                    Text(chat.isRunning ? (chat.statusLine ?? "Thinking…") : (chat.isResuming ? "Syncing…" : chat.subtitle))
-                        .font(.caption2).lineLimit(1)
-                        .foregroundStyle(chat.isRunning ? BotColors.color(for: chat.profileName) : .secondary)
-                        .contentTransition(.numericText())
-                        .animation(.snappy, value: chat.statusLine)
+                    .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 8)
+                    .fixedSize()
+                    .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 22))
                 }
-                .padding(.horizontal, 14).padding(.top, 6).padding(.bottom, 8)
-                .fixedSize()
-                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 22))
             }
             .buttonStyle(.plain)
+            .onAppear { withAnimation(.spring(response: 0.5, dampingFraction: 0.55).delay(0.05)) { popped = true } }
             .accessibilityLabel("Chat info: \(chat.title), \(chat.subtitle)")
             .accessibilityIdentifier("chat.titlePill")
             Spacer(minLength: 0)
@@ -211,22 +221,41 @@ struct ChatHeader: View {
     }
 }
 
-/// Re-enables the navigation controller's interactive pop gesture while its bar is hidden, so a
-/// swipe from the left edge still goes back like every stock app.
+/// Re-enables the navigation controller's interactive pop gesture while its bar is hidden, and
+/// lets it start anywhere on the screen (not only at the left edge) for one-handed use: a pan
+/// recognizer on the navigation view drives the same targets as the edge gesture.
 struct InteractivePopEnabler: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> Controller { Controller() }
     func updateUIViewController(_ c: Controller, context: Context) { c.enable() }
 
     final class Controller: UIViewController, UIGestureRecognizerDelegate {
+        private var fullScreenPan: UIPanGestureRecognizer?
+
         override func didMove(toParent parent: UIViewController?) { super.didMove(toParent: parent); enable() }
         override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); enable() }
+
         func enable() {
-            guard let nav = navigationController ?? parent?.navigationController, let g = nav.interactivePopGestureRecognizer else { return }
-            g.isEnabled = true
-            g.delegate = self
+            guard let nav = navigationController ?? parent?.navigationController, let edge = nav.interactivePopGestureRecognizer else { return }
+            edge.isEnabled = true
+            edge.delegate = self
+            guard fullScreenPan == nil, let targets = edge.value(forKey: "targets") as? NSArray, targets.count > 0 else { return }
+            let pan = UIPanGestureRecognizer()
+            pan.setValue(targets, forKey: "targets")
+            pan.delegate = self
+            pan.maximumNumberOfTouches = 1
+            nav.view.addGestureRecognizer(pan)
+            fullScreenPan = pan
         }
+
         func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
-            (navigationController ?? parent?.navigationController).map { $0.viewControllers.count > 1 } ?? false
+            guard let nav = navigationController ?? parent?.navigationController, nav.viewControllers.count > 1 else { return false }
+            guard let pan = g as? UIPanGestureRecognizer, g === fullScreenPan else { return true }
+            // Only a clear rightward, mostly horizontal drag; vertical scrolling and the leftward
+            // time-reveal drag in the thread are left alone.
+            let v = pan.velocity(in: pan.view)
+            return v.x > 250 && abs(v.x) > abs(v.y) * 1.8
         }
+
+        func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { false }
     }
 }

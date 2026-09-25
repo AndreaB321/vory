@@ -89,7 +89,7 @@ struct ProfileCardView: View {
     @AppStorage(BotColors.storageKey) private var colorsRaw = ""
     @State private var description = ""
     @State private var tint: Color = .accentColor
-    @State private var avatar: BotAvatarChoice = .initial
+    @State private var avatar: BotAvatarChoice = .default
     @AppStorage(BotAvatarStore.storageKey) private var avatarsRaw = ""
     @State private var options: ModelOptionsResult?
     @State private var status: String?
@@ -106,7 +106,7 @@ struct ProfileCardView: View {
         List {
             Section {
                 VStack(spacing: 10) {
-                    BotAvatar(profile: profileName, size: 84, active: true)
+                    BotAvatar(profile: profileName, size: 110, active: true)
                     Text(profile?.label ?? profileName).font(.title2.weight(.semibold))
                     if let m = profile?.model, !m.isEmpty { Text(m).font(.caption).foregroundStyle(.secondary) }
                 }
@@ -116,17 +116,12 @@ struct ProfileCardView: View {
                 .listRowSeparator(.hidden)
             }
             Section {
-                AvatarChoiceRow(profile: profileName, choice: $avatar)
+                CreatorStudio(profile: profileName, choice: $avatar)
                     .onChange(of: avatar) { _, c in
                         BotAvatarStore.set(c, for: profileName)
                         avatarsRaw = String(data: (try? JSONEncoder().encode(BotAvatarStore.stored())) ?? Data(), encoding: .utf8) ?? avatarsRaw
                     }
-                ColorPicker("Color", selection: $tint, supportsOpacity: false)
-                    .onChange(of: tint) { _, c in
-                        BotColors.set(c, for: profileName)
-                        colorsRaw = String(data: (try? JSONEncoder().encode(BotColors.stored())) ?? Data(), encoding: .utf8) ?? colorsRaw
-                    }
-            } header: { Text("Avatar") } footer: { Text("The animated avatars move in the chat list and the chat header while this bot is working. Photo and color are used everywhere the bot appears, including its Live Activity. Stored on this device.") }
+            } header: { Text("Creator Studio") } footer: { Text("How this bot looks everywhere: chats, the Island, notifications. Stored on this device.") }
             Section {
                 TextField("Description", text: $description, axis: .vertical)
                     .lineLimit(1...4)

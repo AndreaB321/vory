@@ -164,45 +164,23 @@ struct PhaseGlyph: View {
     }
 }
 
-/// The bot itself: its animated character as a still frame (WidgetKit views cannot animate) or
-/// its initial on the bot colour, with a small phase badge on the corner. Photos live in the app's
-/// own container, which the widget cannot read, so they fall back to the initial.
+/// The bot itself as a still frame (WidgetKit views cannot animate), with a small phase badge on
+/// the corner. Photos live in the app's own container, which the widget cannot read, so a photo
+/// avatar shows the bot's default look instead.
 struct BotMark: View {
     var attributes: HermesTurnAttributes
     var state: HermesTurnAttributes.ContentState
     var size: CGFloat
 
-    private var tint: Color { Color(hexString: attributes.tintHex) ?? PhaseStyle.tint("streaming") }
-    private var style: String? {
-        guard let raw = attributes.avatar, raw.hasPrefix("animated:") else { return nil }
-        return String(raw.dropFirst("animated:".count))
-    }
+    private var spec: BotLookSpec { BotLookSpec.from(choice: attributes.avatar, hex: attributes.tintHex) }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            if let style {
-                Canvas(opaque: false, rendersAsynchronously: false) { ctx, sz in
-                    let r = CGRect(origin: .zero, size: sz)
-                    ctx.clip(to: Path(ellipseIn: r))
-                    ctx.fill(Path(ellipseIn: r), with: .linearGradient(Gradient(colors: [tint.opacity(0.95), tint.opacity(0.65)]), startPoint: .zero, endPoint: CGPoint(x: 0, y: sz.height)))
-                    let z = AvatarArt.zoom(style)
-                    ctx.translateBy(x: sz.width / 2, y: sz.height / 2)
-                    ctx.scaleBy(x: z, y: z)
-                    ctx.translateBy(x: -sz.width / 2, y: -sz.height / 2)
-                    AvatarArt.draw(style, in: &ctx, size: sz, time: 0, active: false)
-                }
-            } else {
-                ZStack {
-                    Circle().fill(tint.gradient)
-                    Text(String(attributes.displayBotName.prefix(1)).uppercased())
-                        .font(.system(size: size * 0.48, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white)
-                }
-            }
+            BotFaceView(spec: spec, size: size, active: false)
             if size >= 28 {
                 PhaseBadge(phase: state.phase, attention: state.needsAttention, size: size * 0.42, botHex: attributes.tintHex)
                     .overlay(Circle().strokeBorder(.black.opacity(0.9), lineWidth: 1.5))
-                    .offset(x: size * 0.08, y: size * 0.08)
+                    .offset(x: size * 0.10, y: size * 0.06)
             }
         }
         .frame(width: size, height: size)
