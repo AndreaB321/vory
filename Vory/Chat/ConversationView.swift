@@ -158,6 +158,10 @@ struct ChatHeader: View {
     @Environment(\.colorScheme) private var scheme
     /// The bot pops into the header the way a contact does in Messages.
     @State private var popped = false
+    @AppStorage(ChatStyle.headerShowsTitle) private var headerShowsTitle = false
+    private var botLabel: String { chat.runtime.profiles.first { $0.name == chat.profileName }?.label ?? chat.profileName }
+    private var headline: String { headerShowsTitle ? chat.title : botLabel }
+    private var idleLine: String { headerShowsTitle ? chat.subtitle : (chat.title.count > 30 ? String(chat.title.prefix(29)) + "…" : chat.title) }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -179,10 +183,10 @@ struct ChatHeader: View {
                         HStack(spacing: 3) {
                             // Hug the text like Messages does; long titles are shortened in code rather
                             // than letting a max-width frame stretch the pill across the screen.
-                            Text(chat.title.count > 26 ? String(chat.title.prefix(25)) + "…" : chat.title).font(.caption.weight(.semibold)).lineLimit(1)
+                            Text(headline.count > 26 ? String(headline.prefix(25)) + "…" : headline).font(.caption.weight(.semibold)).lineLimit(1)
                             Image(systemName: "chevron.right").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
                         }
-                        Text(chat.isRunning ? (chat.statusLine ?? "Thinking…") : (chat.isResuming ? "Syncing…" : chat.subtitle))
+                        Text(chat.isRunning ? (chat.statusLine ?? "Thinking…") : (chat.isResuming ? "Syncing…" : idleLine))
                             .font(.caption2).lineLimit(1)
                             .foregroundStyle(chat.isRunning ? BotColors.color(for: chat.profileName) : .secondary)
                             .contentTransition(.numericText())

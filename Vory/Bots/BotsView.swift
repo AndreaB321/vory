@@ -170,16 +170,11 @@ struct BotDetailView: View {
     var body: some View {
         List {
             Section {
-                Button { showInfo = true } label: {
-                    HStack {
-                        Label("Instructions & settings", systemImage: "doc.text")
-                        Spacer()
-                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                NavigationLink { ProfileCardView(profileName: profile.name) } label: {
+                    HStack(spacing: 12) {
+                        BotAvatar(profile: profile.name, size: 36)
+                        Text("Profile")
                     }
-                }
-                .tint(.primary)
-                NavigationLink(value: ChatRoute(storedID: nil, title: nil, profile: profile.name)) {
-                    Label("New chat with \(profile.label)", systemImage: "square.and.pencil")
                 }
             }
             Section {
@@ -197,7 +192,15 @@ struct BotDetailView: View {
         }
         .navigationTitle(profile.label)
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showInfo) { ProfileInfoSheet(chat: nil, profileName: profile.name) }
+        // Compose sits beside the tab bar and minimizes with it, exactly as the system does it.
+        .toolbar {
+            ToolbarItem(placement: .bottomBar) {
+                NavigationLink(value: ChatRoute(storedID: nil, title: nil, profile: profile.name)) {
+                    Image(systemName: "square.and.pencil")
+                }
+                .accessibilityLabel("New chat with \(profile.label)")
+            }
+        }
         .refreshable { await load() }
         .task { await load() }
         .alert("Delete chat?", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })) {

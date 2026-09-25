@@ -43,21 +43,17 @@ struct ChatListView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { profileMenu }
             }
-            // Like Messages: compose is a detached glass circle beside the tab bar, not a bar item.
-            .overlay(alignment: .bottomTrailing) {
-                Button { path.append(ChatRoute(storedID: nil, title: nil)) } label: {
-                    Image(systemName: "square.and.pencil").font(.title3.weight(.semibold))
-                        .frame(width: 50, height: 50)
-                        .glassEffect(.regular.interactive(), in: .circle)
+            // Like Messages: compose is a glass circle beside the tab bar. As a bottom toolbar item
+            // the system moves it with the tab bar's own minimize/expand, at the same moment.
+            .toolbar {
+                ToolbarItem(placement: .bottomBar) {
+                    Button { path.append(ChatRoute(storedID: nil, title: nil)) } label: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .disabled(runtime == nil)
+                    .accessibilityLabel("New Chat")
+                    .accessibilityIdentifier("chats.new")
                 }
-                .buttonStyle(.plain)
-                .disabled(runtime == nil)
-                .accessibilityLabel("New Chat")
-                .accessibilityIdentifier("chats.new")
-                .padding(.trailing, 20).padding(.bottom, 8)
-                // The tab bar minimizes into a small circle on scroll-down; sit level with it.
-                .offset(y: barCollapsed ? 62 : 0)
-                .animation(.snappy(duration: 0.3), value: barCollapsed)
             }
             .navigationDestination(for: ChatRoute.self) { route in ConversationView(route: route) }
             .searchable(text: $searchText, prompt: "Search chats")

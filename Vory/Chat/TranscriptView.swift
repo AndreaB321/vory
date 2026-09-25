@@ -137,6 +137,7 @@ struct TranscriptView: View {
 }
 
 /// UserDefaults keys for the Appearance › Chat toggles.
+extension ChatStyle { static let headerShowsTitle = "chatHeaderShowsTitle" }
 enum ChatStyle {
     static let showToolCalls = "chat.showToolCalls"
     static let showReasoning = "chat.showReasoning"

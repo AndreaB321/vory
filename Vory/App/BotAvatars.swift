@@ -145,6 +145,7 @@ struct CreatorStudio: View {
                     colorsRaw = String(data: (try? JSONEncoder().encode(BotColors.stored())) ?? Data(), encoding: .utf8) ?? ""
                 }
                 .font(.subheadline)
+                .buttonStyle(.borderless)
                 Spacer()
                 if let photoError { Text(photoError).font(.caption).foregroundStyle(.red) }
             }
@@ -207,6 +208,7 @@ struct CreatorStudio: View {
             if choice == .photo {
                 Button("Back to the bot") { BotAvatarStore.removePhoto(for: profile); choice = .studio(shape: shape, eyes: eyes) }
                     .font(.subheadline)
+                    .buttonStyle(.borderless)
             }
         }
         .onChange(of: photoItem) { _, item in

@@ -11,7 +11,7 @@ struct VoryApp: App {
         Keychain.accessGroup = Keychain.sharedGroupFromBundle()
         Keychain.migrateToAccessGroupIfNeeded()
         WatchSync.shared.start()
-        _model = State(initialValue: AppModel())
+        _model = State(initialValue: AppModel.shared)
     }
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("colorSchemePreference") private var scheme = "system"
@@ -23,7 +23,6 @@ struct VoryApp: App {
                 .preferredColorScheme(scheme == "light" ? .light : scheme == "dark" ? .dark : nil)
                 .onOpenURL { url in model.open(url) }
                 .task {
-                    AppDelegate.model = model
                     await model.activateSavedConnection()
                     await model.refreshCompanionUpdateFlag()
                 }

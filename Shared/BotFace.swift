@@ -58,7 +58,11 @@ public enum BotFace {
             let h = r.height * 0.64
             return Path(roundedRect: CGRect(x: r.minX, y: c.y - h / 2, width: r.width, height: h), cornerRadius: h / 2, style: .continuous)
         case "triangle":
-            return roundedPolygon(sides: 3, in: r.insetBy(dx: -r.width * 0.04, dy: 0), rotation: -.pi / 2, corner: r.width * 0.14)
+            // Inscribed in a circle a triangle sits high and small; centre it lower and larger so
+            // the base reaches near the bottom and the eyes have a face to sit in.
+            let d = r.width * 1.16
+            let box2 = CGRect(x: c.x - d / 2, y: r.minY + r.height * 0.56 - d / 2, width: d, height: d)
+            return roundedPolygon(sides: 3, in: box2, rotation: -.pi / 2, corner: r.width * 0.13)
         case "hexagon":
             return roundedPolygon(sides: 6, in: r, rotation: -.pi / 2, corner: r.width * 0.10)
         case "cloud":
@@ -123,7 +127,7 @@ public enum BotFace {
     /// Where the eyes sit for a shape (fraction of the square), and how far apart.
     static func eyeAnchor(_ shape: String) -> (y: CGFloat, spread: CGFloat) {
         switch shape {
-        case "triangle": return (0.62, 0.11)
+        case "triangle": return (0.64, 0.10)
         case "drop": return (0.62, 0.11)
         case "cloud": return (0.58, 0.11)
         case "pill": return (0.50, 0.13)
@@ -156,7 +160,7 @@ public enum BotFace {
     }
 
     /// Draws body and eyes into `size` (square). `active` animates; otherwise `time` should be 0.
-    public static func draw(_ spec: BotLookSpec, in ctx: inout GraphicsContext, size: CGSize, time t: Double, active: Bool) {
+    public static func draw(_ spec: BotLookSpec, in ctx: inout GraphicsContext, size: CGSize, time t: Double, active: Bool, gaze: CGPoint = .zero) {
         let box = CGRect(origin: .zero, size: size)
         let s = min(size.width, size.height)
         let seed = spec.shape.utf8.reduce(0) { $0 + Int($1) } + spec.eyes.utf8.reduce(0) { $0 + Int($1) }
@@ -172,15 +176,20 @@ public enum BotFace {
         }
 
         let body = bodyPath(spec.shape, in: box, time: t, active: active)
-        ctx.fill(body, with: .linearGradient(Gradient(colors: [tint.opacity(1), tint.opacity(0.82)]), startPoint: CGPoint(x: 0, y: 0), endPoint: CGPoint(x: 0, y: size.height)))
-        // A soft rim light along the top so the flat colour reads as a form, not a sticker.
-        ctx.stroke(body, with: .linearGradient(Gradient(colors: [.white.opacity(0.35), .white.opacity(0)]), startPoint: .zero, endPoint: CGPoint(x: 0, y: size.height * 0.7)), lineWidth: max(1, s * 0.03))
+        ctx.fill(body, with: .linearGradient(Gradient(colors: [tint.opacity(1), tint.opacity(0.84)]), startPoint: CGPoint(x: 0, y: 0), endPoint: CGPoint(x: 0, y: size.height)))
+        // A soft light across the top, clipped to the body so shapes made of several pieces (the
+        // cloud) show no seams: just the shape and its colour.
+        ctx.drawLayer { layer in
+            layer.clip(to: body)
+            layer.fill(Path(box), with: .linearGradient(Gradient(colors: [.white.opacity(0.22), .white.opacity(0)]), startPoint: .zero, endPoint: CGPoint(x: 0, y: size.height * 0.55)))
+        }
 
         // Eyes: black shapes, blinking by squashing to a line, glancing by sliding.
+        // Both eyes move together: a glance or a gaze shifts the pair, never their spacing.
         let anchor = eyeAnchor(spec.shape)
-        let cy = s * anchor.y
-        let dx = s * anchor.spread + CGFloat(live.glance) * s * 0.035
-        let cx = size.width / 2 + CGFloat(live.glance) * s * 0.045
+        let dx = s * anchor.spread
+        let cx = size.width / 2 + CGFloat(live.glance) * s * 0.06 + gaze.x * s * 0.06
+        let cy = s * anchor.y + gaze.y * s * 0.07
         let open = CGFloat(1 - live.blink * 0.92)
         let ink = Color(red: 0.05, green: 0.05, blue: 0.07)
         func eye(at x: CGFloat, w: CGFloat, h: CGFloat, round: Bool) {
@@ -222,19 +231,31 @@ public struct BotFaceView: View {
     public var spec: BotLookSpec
     public var size: CGFloat
     public var active: Bool
+    /// Where the eyes look, −1…1 on each axis (0,0 straight ahead); eased over a third of a second.
+    public var gaze: CGPoint
+    @State private var shownGaze: CGPoint = .zero
+    @State private var gazeFrom: CGPoint = .zero
+    @State private var gazeChangedAt: Date = .distantPast
 
-    public init(spec: BotLookSpec, size: CGFloat, active: Bool = false) {
+    public init(spec: BotLookSpec, size: CGFloat, active: Bool = false, gaze: CGPoint = .zero) {
         self.spec = spec
         self.size = size
         self.active = active
+        self.gaze = gaze
     }
 
     public var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 30, paused: !active)) { timeline in
+        TimelineView(.animation(minimumInterval: 1 / 30, paused: !active && gaze == shownGaze)) { timeline in
             let t = active ? timeline.date.timeIntervalSinceReferenceDate : 0
+            let u = min(1, max(0, timeline.date.timeIntervalSince(gazeChangedAt) / 0.35))
+            let ease = u * u * (3 - 2 * u)
+            let g = CGPoint(x: gazeFrom.x + (gaze.x - gazeFrom.x) * ease, y: gazeFrom.y + (gaze.y - gazeFrom.y) * ease)
             Canvas(opaque: false, rendersAsynchronously: false) { ctx, sz in
-                BotFace.draw(spec, in: &ctx, size: sz, time: t, active: active)
+                BotFace.draw(spec, in: &ctx, size: sz, time: t, active: active, gaze: g)
             }
+        }
+        .onChange(of: gaze) { old, new in
+            gazeFrom = old; shownGaze = new; gazeChangedAt = Date()
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)

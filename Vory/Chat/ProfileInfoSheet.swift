@@ -10,7 +10,7 @@ struct ProfileInfoSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     /// Opens tall; the medium detent stays reachable by pulling it down.
-    @State private var detent: PresentationDetent = .large
+    @State private var detent: PresentationDetent = .medium
     @State private var titleDraft = ""
     @State private var titleStatus: String?
 
@@ -18,55 +18,13 @@ struct ProfileInfoSheet: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                if let chat {
-                    Section {
-                        HStack {
-                            Text("Title")
-                            TextField("Chat title", text: $titleDraft)
-                                .multilineTextAlignment(.trailing).submitLabel(.done)
-                                .onSubmit { Task { await saveTitle(chat) } }
-                            if titleDraft != chat.title, !titleDraft.trimmingCharacters(in: .whitespaces).isEmpty {
-                                Button { Task { await saveTitle(chat) } } label: { Image(systemName: "checkmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(.tint)
-                            }
-                        }
-                        Menu { ModelMenuContent(chat: chat) } label: {
-                            LabeledContent("Model", value: chat.modelName.isEmpty ? "Choose…" : (chat.modelName.split(separator: "/").last.map(String.init) ?? chat.modelName))
-                        }
-                        .tint(.primary)
-                        if let u = chat.usage, let pct = u.computedContextPercent {
-                            LabeledContent("Context", value: "\(pct)% of \((u.contextMax ?? 0).formatted())")
-                        }
-                        if let e = chat.info?.reasoningEffort, !e.isEmpty { LabeledContent("Reasoning", value: e) }
-                    } header: { Text("This chat") } footer: { if let titleStatus { Text(titleStatus) } }
-                }
-                Section {
-                    NavigationLink { ProfileCardView(profileName: profileName) } label: {
-                        HStack(spacing: 12) {
-                            BotAvatar(profile: profileName, size: 40)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(profile?.label ?? profileName).font(.body.weight(.medium))
-                                Text([profile?.description, profile?.model].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
-                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            }
-                        }
-                    }
-                } header: { Text("Profile") }
-                Section {
-                    NavigationLink { SoulEditorView(profileName: profileName) } label: {
-                        Label("Instructions (SOUL.md)", systemImage: "doc.text")
-                    }
-                } footer: { Text("The bot's standing instructions. Edits are written to the gateway when you tap the check mark.") }
-            }
-            .navigationTitle(chat?.title ?? (profile?.label ?? profileName))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-            .onAppear { titleDraft = chat?.title ?? "" }
+            ProfileCardView(profileName: profileName, chat: chat)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
         .presentationDetents([.medium, .large], selection: $detent)
+        .presentationDragIndicator(.visible)
     }
 
-    /// `PATCH /api/sessions/{id}` with `title`; the gateway echoes the stored title back.
     private func saveTitle(_ chat: ChatSession) async {
         guard let rt = model.runtime else { return }
         let t = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -85,6 +43,7 @@ struct ProfileInfoSheet: View {
 /// The bot's card: colour, description and default model, each saved as it is changed.
 struct ProfileCardView: View {
     var profileName: String
+    var chat: ChatSession? = nil
     @Environment(AppModel.self) private var model
     @AppStorage(BotColors.storageKey) private var colorsRaw = ""
     @State private var description = ""
@@ -136,6 +95,22 @@ struct ProfileCardView: View {
             } header: { Text("Model") } footer: { Text("Writes this profile's config.yaml. Running chats keep their own model.") }
             if let p = profile?.path { Section { Text(p).font(.caption.monospaced()).foregroundStyle(.tertiary) } header: { Text("Home") } }
             if let status { Section { Text(status).font(.footnote).foregroundStyle(status.hasPrefix("Saved") ? Color.secondary : Color.red) } }
+            if let chat {
+                Section {
+                    Menu { ModelMenuContent(chat: chat) } label: {
+                        LabeledContent("Model", value: chat.modelName.isEmpty ? "Choose…" : (chat.modelName.split(separator: "/").last.map(String.init) ?? chat.modelName))
+                    }
+                    .tint(.primary)
+                    if let u = chat.usage, let pct = u.computedContextPercent {
+                        LabeledContent("Context", value: "\(pct)% of \((u.contextMax ?? 0).formatted())")
+                    }
+                } header: { Text("This chat") }
+            }
+            Section {
+                NavigationLink { SoulEditorView(profileName: profileName) } label: {
+                    Label("Instructions (SOUL.md)", systemImage: "doc.text")
+                }
+            } footer: { Text("The bot's standing instructions. Edits are written to the gateway when you tap the check mark.") }
         }
         .navigationTitle(profile?.label ?? profileName)
         .navigationBarTitleDisplayMode(.inline)

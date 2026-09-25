@@ -20,6 +20,9 @@ struct PendingRoute: Hashable, Sendable {
 @MainActor
 @Observable
 final class AppModel {
+    /// The one model, owned here rather than by the scene, so a notification action that launches
+    /// the app in the background (no window yet) still has somewhere to go.
+    static let shared = AppModel()
     let store = ConnectionStore()
     let lock = AppLock()
     let push = PushRegistrar()
@@ -148,15 +151,30 @@ final class AppModel {
     }
 
     private func ensureConnection(for r: PendingRoute) async {
+        // Launched in the background for a notification action: keep the process alive long enough
+        // to connect and send, and bring the saved gateway up first.
+        let assertion = UIApplication.shared.beginBackgroundTask(withName: "vory.notification.route")
+        defer { if assertion != .invalid { UIApplication.shared.endBackgroundTask(assertion) } }
+        if runtime == nil { await activateSavedConnection() }
         let target: GatewayConnection? = r.connectionID.flatMap { store.connection(id: $0) }
             ?? store.connections.first { c in r.gateway.map { c.gateway.description == $0 } ?? false }
+            ?? store.active
         guard let target else { return }
         if runtime?.connection.id != target.id { await activate(target) }
         if let p = r.profile, !p.isEmpty, runtime?.selectedProfile != p { runtime?.selectedProfile = p }
         if let action = r.action, let rt = runtime {
             // Quick actions from the notification: reply or answer the approval without opening the chat.
             if action == LocalNotifier.replyAction {
-                if let text = r.replyText, !text.isEmpty, let chat = try? await rt.openChat(storedID: r.storedSessionID, title: nil) { await chat.send(text) }
+                guard let text = r.replyText, !text.isEmpty else { return }
+                // The socket may still be connecting right after a background launch.
+                let deadline = Date().addingTimeInterval(12)
+                while rt.socketState != .open, Date() < deadline { try? await Task.sleep(for: .milliseconds(250)) }
+                if let chat = try? await rt.openChat(storedID: r.storedSessionID, title: nil) {
+                    LiveActivityController.note("reply from notification → sending to \(r.storedSessionID.prefix(12))")
+                    await chat.send(text)
+                } else {
+                    LiveActivityController.note("reply from notification: could not open the chat")
+                }
                 return
             }
             if let chat = try? await rt.openChat(storedID: r.storedSessionID, title: nil) {
@@ -171,7 +189,7 @@ final class AppModel {
 
 /// UIKit delegate for APNs registration and notification taps.
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
-    static weak var model: AppModel?
+    static var model: AppModel? { AppModel.shared }
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self

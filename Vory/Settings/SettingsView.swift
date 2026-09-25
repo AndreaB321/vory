@@ -289,8 +289,15 @@ struct AppearanceView: View {
 
     private var layout: TabLayout { TabLayout.parse(layoutRaw) }
 
+    @AppStorage(ChatStyle.headerShowsTitle) private var headerShowsTitle = false
     var body: some View {
         List {
+            Section {
+                Picker("Chat header shows", selection: $headerShowsTitle) {
+                    Text("Bot name").tag(false)
+                    Text("Chat title").tag(true)
+                }
+            } footer: { Text("What the pill under the bot leads with in a chat; the other is shown beneath it while the bot is idle.") }
             Section {
                 Picker("Theme", selection: $scheme) {
                     Text("System").tag("system")
@@ -377,11 +384,14 @@ struct AboutView: View {
         List {
             Section {
                 VStack(spacing: 10) {
-                    ZStack {
-                        BotFaceView(spec: Self.voryBot, size: 132, active: true)
-                        if raining { RainOverlay().frame(width: 200, height: 200).allowsHitTesting(false).transition(.opacity) }
+                    ZStack(alignment: .top) {
+                        if raining {
+                            // Falls from under the cloud, not out of its middle.
+                            RainOverlay().frame(width: 150, height: 110).offset(y: 118).allowsHitTesting(false).transition(.opacity)
+                        }
+                        BotFaceView(spec: Self.voryBot, size: 132, active: true, gaze: CGPoint(x: 0, y: raining ? 1 : 0))
                     }
-                    .frame(height: 170)
+                    .frame(height: 230, alignment: .top)
                     .contentShape(Rectangle())
                     .onTapGesture { tapped() }
                     Text("Vory").font(.title.weight(.bold))
@@ -409,7 +419,7 @@ struct AboutView: View {
         .task { await model.refreshCompanionUpdateFlag() }
     }
 
-    /// Five quick taps on the cloud and it rains for ten seconds.
+    /// Five quick taps on the cloud and it rains for five seconds (and it watches the rain).
     private func tapped() {
         let now = Date()
         taps = now.timeIntervalSince(lastTap) < 1.5 ? taps + 1 : 1
@@ -417,7 +427,7 @@ struct AboutView: View {
         guard taps >= 5, !raining else { return }
         taps = 0
         raining = true
-        Task { try? await Task.sleep(for: .seconds(10)); raining = false }
+        Task { try? await Task.sleep(for: .seconds(5)); raining = false }
     }
 }
 
@@ -438,7 +448,7 @@ struct RainOverlay: View {
             Canvas { ctx, size in
                 for d in Self.drops {
                     let u = ((t * d.speed) + d.phase).truncatingRemainder(dividingBy: 1)
-                    let y = size.height * 0.52 + u * size.height * 0.5
+                    let y = u * size.height
                     let x = size.width * d.x
                     var p = Path()
                     p.move(to: CGPoint(x: x, y: y))

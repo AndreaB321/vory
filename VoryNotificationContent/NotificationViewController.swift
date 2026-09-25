@@ -63,9 +63,9 @@ final class NotificationViewController: UIViewController, UNNotificationContentE
         let a = measured?.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height ?? 120
         let b = measuredThread?.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height ?? 0
         let h = max(a, b) + (measuredThread == nil ? 0 : 22)   // page dots
-        // iOS fixes the expanded notification at about a third of the screen while the keyboard is
-        // up and clips anything taller, so this is the most that stays visible.
-        let cap = max(220, UIScreen.main.bounds.height * 0.34)
+        // iOS fixes the expanded notification's height while the keyboard is up and clips anything
+        // taller; the Lock Screen (clock and widgets above) gives less room than the Home Screen.
+        let cap = max(200, UIScreen.main.bounds.height * 0.29)
         return min(max(h, 96), cap)
     }
 
@@ -128,9 +128,9 @@ struct ReplyCard: View {
     private var tint: Color { Color(hexString: model.tintHex) ?? .purple }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                LookAvatar(avatar: model.avatar, initial: String(model.bot.prefix(1)).uppercased(), tintHex: model.tintHex, size: 44)
+                LookAvatar(avatar: model.avatar, initial: String(model.bot.prefix(1)).uppercased(), tintHex: model.tintHex, size: 40)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(model.bot).font(.headline)
                     Text(model.chatTitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
@@ -164,14 +164,15 @@ struct ReplyCard: View {
             }
             if page == .reply {
                 HStack(alignment: .bottom, spacing: 0) {
-                    Text(model.text)
-                        .font(.body)
-                        .lineLimit(9)
+                    Text(model.text.replacingOccurrences(of: "\n\n", with: "\n"))
+                        .font(.subheadline)
+                        .lineLimit(6)
                         .truncationMode(.tail)
-                        .padding(.horizontal, 14).padding(.vertical, 10)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 13).padding(.vertical, 9)
                         .background(Color(uiColor: .secondarySystemFill), in: BubbleShape())
-                        .frame(maxWidth: 320, alignment: .leading)
-                    Spacer(minLength: 24)
+                        .frame(maxWidth: 300, alignment: .leading)
+                    Spacer(minLength: 32)
                 }
                 if !model.thread.isEmpty {
                     Text("Swipe for what came before").font(.caption2).foregroundStyle(.tertiary).frame(maxWidth: .infinity)
@@ -180,7 +181,7 @@ struct ReplyCard: View {
                 Text("Swipe back for the reply").font(.caption2).foregroundStyle(.tertiary).frame(maxWidth: .infinity)
             }
         }
-        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 12)
+        .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
