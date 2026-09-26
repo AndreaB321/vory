@@ -53,11 +53,24 @@ struct MainTabView: View {
                 }
                 .badge(badge(for: tab))
             }
+            // The search role draws this as a separate circle to the right of the bar, which is
+            // exactly Messages' compose layout. Selecting it never shows a pane: it raises a
+            // new-chat request and snaps back to the tab that was showing.
+            Tab(AppModel.AppTab.compose.title, systemImage: AppModel.AppTab.compose.symbol, value: AppModel.AppTab.compose, role: .search) {
+                Color.clear
+            }
         }
-        .tabBarMinimizeBehavior(.onScrollDown)
+        // The bar stays expanded so the compose circle always sits in the same place.
+        .tabBarMinimizeBehavior(.never)
+        .onChange(of: model.selectedTab) { old, now in
+            if now == .compose {
+                model.selectedTab = old == .compose ? .chats : old
+                model.newChatRequest = UUID()
+            }
+        }
         .onChange(of: tabs) { _, now in
             // The selected tab was removed from the layout: fall back to Chats instead of a blank pane.
-            if !now.contains(model.selectedTab) { model.selectedTab = .chats }
+            if !now.contains(model.selectedTab), model.selectedTab != .compose { model.selectedTab = .chats }
         }
     }
 
@@ -86,6 +99,7 @@ struct MainTabView: View {
         case .cron: NavigationStack { CronView().navigationTitle("Cron Jobs") }
         case .approvals: NavigationStack { ApprovalsView().navigationTitle("Approvals") }
         case .system: NavigationStack { SystemView().navigationTitle("System") }
+        case .compose: Color.clear
         }
     }
 }

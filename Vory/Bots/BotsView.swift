@@ -164,7 +164,6 @@ struct BotDetailView: View {
     var profile: ProfileInfo
     @State private var sessions: [StoredSession] = []
     @State private var error: String?
-    @State private var barCollapsed = false
     @State private var pendingDelete: StoredSession?
 
     var body: some View {
@@ -192,20 +191,8 @@ struct BotDetailView: View {
         }
         .navigationTitle(profile.label)
         .navigationBarTitleDisplayMode(.inline)
-        // Compose: a glass circle beside the tab bar that follows the bar's own minimize/expand.
-        .overlay(alignment: .bottomTrailing) {
-            NavigationLink(value: ChatRoute(storedID: nil, title: nil, profile: profile.name)) {
-                Image(systemName: "square.and.pencil").font(.title3.weight(.semibold))
-                    .frame(width: 50, height: 50)
-                    .glassEffect(.regular.interactive(), in: .circle)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("New chat with \(profile.label)")
-            .padding(.trailing, 20).padding(.bottom, 8)
-            .offset(y: barCollapsed ? 62 : 0)
-            .animation(.snappy(duration: 0.3), value: barCollapsed)
-            .background(TabBarMinimizeObserver(minimized: $barCollapsed).frame(width: 0, height: 0))
-        }
+        .onAppear { model.composeProfile = profile.name }
+        .onDisappear { if model.composeProfile == profile.name { model.composeProfile = nil } }
         .refreshable { await load() }
         .task { await load() }
         .alert("Delete chat?", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })) {

@@ -389,20 +389,18 @@ struct AboutView: View {
                     ZStack(alignment: .top) {
                         if raining {
                             // Falls from under the cloud, not out of its middle.
-                            RainOverlay().frame(width: 150, height: 96).offset(y: 118 - 56).allowsHitTesting(false).transition(.opacity)
+                            RainOverlay().frame(width: 140, height: 64).offset(y: 118 - 30).allowsHitTesting(false).transition(.opacity)
                         }
                         BotFaceView(spec: Self.voryBot, size: 132, active: true, gaze: CGPoint(x: 0, y: raining ? 1 : 0))
-                            .offset(y: lifted ? -56 : 0)
+                            .offset(y: lifted ? -30 : 0)
                         if relieved {
-                            Text("Ahhhh…that's better.")
-                                .font(.subheadline.weight(.medium))
-                                .padding(.horizontal, 12).padding(.vertical, 7)
-                                .background(Color(uiColor: .secondarySystemFill), in: Capsule())
-                                .offset(x: 96, y: -8)
-                                .transition(.scale(scale: 0.4, anchor: .bottomLeading).combined(with: .opacity))
+                            SpeechBubble(text: "Ahhhh…that's better.")
+                                .offset(x: 118, y: -4)
+                                .transition(.scale(scale: 0.2, anchor: .bottomLeading).combined(with: .opacity))
                         }
                     }
                     .frame(height: 140, alignment: .top)
+                    .padding(.top, 30)
                     .contentShape(Rectangle())
                     .onTapGesture { tapped() }
                     Text("Vory").font(.title.weight(.bold))
@@ -452,6 +450,32 @@ struct AboutView: View {
             try? await Task.sleep(for: .seconds(3))
             relieved = false
         }
+    }
+}
+
+/// A little speech bubble with its tail at the bottom-left, pointing at whoever said it.
+struct SpeechBubble: View {
+    var text: String
+    var body: some View {
+        Text(text)
+            .font(.subheadline.weight(.medium))
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background {
+                let fill = Color(uiColor: .secondarySystemFill)
+                RoundedRectangle(cornerRadius: 16, style: .continuous).fill(fill)
+                    .overlay(alignment: .bottomLeading) {
+                        Path { p in
+                            p.move(to: CGPoint(x: 14, y: 0))
+                            p.addQuadCurve(to: CGPoint(x: -4, y: 9), control: CGPoint(x: 6, y: 5))
+                            p.addQuadCurve(to: CGPoint(x: 6, y: -6), control: CGPoint(x: 4, y: 2))
+                            p.closeSubpath()
+                        }
+                        .fill(fill)
+                        .frame(width: 20, height: 12)
+                        .offset(x: 4, y: 6)
+                    }
+            }
+            .fixedSize()
     }
 }
 
