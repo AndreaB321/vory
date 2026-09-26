@@ -29,24 +29,37 @@ struct HermesTurnLiveActivity: Widget {
                     HStack(spacing: 8) {
                         BotMark(attributes: context.attributes, state: context.state, size: 34)
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(context.attributes.displayBotName).font(.headline).lineLimit(1).minimumScaleFactor(0.6).layoutPriority(1)
+                            Text(context.attributes.displayBotName).font(.headline).lineLimit(1).minimumScaleFactor(0.6)
                             Text(PhaseText.headline(for: context.state)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
                     .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    ElapsedTimer(state: context.state)
-                        .font(.headline.monospacedDigit())
-                        .multilineTextAlignment(.trailing).frame(minWidth: 44)
-                        .fixedSize()
-                        .padding(.trailing, 4)
+                    if context.state.needsAttention {
+                        ApprovalButtons(attributes: context.attributes)
+                            .padding(.trailing, 2)
+                    } else {
+                        ElapsedTimer(state: context.state)
+                            .font(.headline.monospacedDigit())
+                            .multilineTextAlignment(.trailing).frame(width: 52)
+                            .minimumScaleFactor(0.7)
+                            .padding(.trailing, 4)
+                    }
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(context.attributes.sessionTitle).font(.subheadline.weight(.medium)).lineLimit(1)
-                        Text(context.state.detail).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                        StatsRow(attributes: context.attributes, state: context.state)
+                        if context.state.needsAttention {
+                            HStack(spacing: 6) {
+                                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
+                                Text("Needs Approval").font(.title3.weight(.bold))
+                            }
+                            Text(context.state.detail).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                        } else {
+                            Text(context.attributes.sessionTitle).font(.subheadline.weight(.medium)).lineLimit(1)
+                            Text(context.state.detail).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                            StatsRow(attributes: context.attributes, state: context.state)
+                        }
                     }
                     .padding(.horizontal, 6)
                     .padding(.top, 4)
@@ -177,7 +190,12 @@ struct BotMark: View {
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            BotFaceView(spec: spec, size: size, active: false)
+            // Drawn straight into a Canvas: a TimelineView in a widget blanked the bot for a
+            // frame on every state change.
+            Canvas(opaque: false, rendersAsynchronously: false) { ctx, sz in
+                BotFace.draw(spec, in: &ctx, size: sz, time: 0, active: false, breathe: false, idleEyes: false, move: false)
+            }
+            .frame(width: size, height: size)
             if size >= 28 {
                 PhaseBadge(phase: state.phase, attention: state.needsAttention, size: size * 0.42, botHex: attributes.tintHex)
                     .overlay(Circle().strokeBorder(.black.opacity(0.9), lineWidth: 1.5))
@@ -262,22 +280,57 @@ struct LockScreenTurnView: View {
             HStack(alignment: .center, spacing: 12) {
                 BotMark(attributes: attributes, state: state, size: 44)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(attributes.displayBotName).font(.headline).lineLimit(1).minimumScaleFactor(0.6).layoutPriority(1)
-                    Text(attributes.sessionTitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(attributes.displayBotName).font(.headline).lineLimit(1).minimumScaleFactor(0.6)
+                    if state.needsAttention {
+                        HStack(spacing: 5) {
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
+                            Text("Needs Approval").font(.title3.weight(.bold))
+                        }
+                    } else {
+                        Text(attributes.sessionTitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
                     Text(state.detail).font(.subheadline).lineLimit(2)
                 }
                 Spacer(minLength: 4)
-                // A fixed width: the ticking timer text otherwise claims the whole row and squeezes
-                // the title down to a few letters.
-                VStack(alignment: .trailing, spacing: 2) {
-                    ElapsedTimer(state: state).font(.title3.monospacedDigit().weight(.medium)).multilineTextAlignment(.trailing).minimumScaleFactor(0.7)
-                    Text(PhaseText.headline(for: state)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                if state.needsAttention {
+                    ApprovalButtons(attributes: attributes)
+                } else {
+                    // A fixed width: the ticking timer text otherwise claims the whole row and
+                    // squeezes the title down to a few letters.
+                    VStack(alignment: .trailing, spacing: 2) {
+                        ElapsedTimer(state: state).font(.title3.monospacedDigit().weight(.medium)).multilineTextAlignment(.trailing).minimumScaleFactor(0.7)
+                        Text(PhaseText.headline(for: state)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    .frame(width: 66, alignment: .trailing)
                 }
-                .frame(width: 66, alignment: .trailing)
             }
-            StatsRow(attributes: attributes, state: state)
+            if !state.needsAttention { StatsRow(attributes: attributes, state: state) }
         }
         .padding(14)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Approve / Deny, stacked: each opens the app on that chat's card and applies the choice.
+struct ApprovalButtons: View {
+    var attributes: HermesTurnAttributes
+    private func url(_ choice: String) -> URL {
+        var c = URLComponents(); c.scheme = "vory"; c.host = "approval"
+        c.queryItems = [URLQueryItem(name: "session", value: attributes.storedSessionID), URLQueryItem(name: "choice", value: choice)]
+        return c.url!
+    }
+    var body: some View {
+        VStack(spacing: 6) {
+            Link(destination: url("once")) {
+                Text("Approve").font(.caption.weight(.semibold)).foregroundStyle(.black)
+                    .padding(.horizontal, 12).padding(.vertical, 6).frame(minWidth: 76)
+                    .background(Color.yellow, in: .capsule)
+            }
+            Link(destination: url("deny")) {
+                Text("Deny").font(.caption.weight(.semibold)).foregroundStyle(.white)
+                    .padding(.horizontal, 12).padding(.vertical, 6).frame(minWidth: 76)
+                    .background(Color.white.opacity(0.18), in: .capsule)
+            }
+        }
     }
 }

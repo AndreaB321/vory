@@ -705,9 +705,9 @@ struct InstalledFilesWindow: View {
     }
 }
 
-/// Settings › Notifications › Background Notifications: what is running now, and either the guided
-/// setup or a reset.
-struct BackgroundNotificationsView: View {
+/// Settings › Companion: everything about the plugin on the gateway in one place — whether it is
+/// installed and running, Configure (the guided setup), Software Update, and Uninstall.
+struct CompanionView: View {
     @Environment(AppModel.self) private var model
     @State private var setup = PushSetupModel()
     @State private var confirmReset = false
@@ -726,7 +726,7 @@ struct BackgroundNotificationsView: View {
                         CompanionStatusChecks(setup: setup)
                     }
                 } header: { sectionHeader("Companion on the gateway") } footer: {
-                    Text("Updates are installed from Settings › Software Update.")
+                    Text("A small plugin on your gateway. It sends replies as notifications, keeps the Live Activity up to date, and gets approval cards to your phone the moment a bot needs a yes.")
                 }
                 Section {
                     LabeledContent("Notifications", value: PushSetupView.statusText(push.authorization))
@@ -735,21 +735,30 @@ struct BackgroundNotificationsView: View {
                     }
                     LabeledContent("Device file on gateway", value: push.registeredAt.map { "published " + $0.formatted(date: .omitted, time: .shortened) } ?? "not published")
                 } header: { sectionHeader("This phone") }
-                // One section either way, so a reset does not rebuild the list and throw the scroll position.
                 Section {
-                    if setup.isCompleted(for: rt) {
-                        Button(role: .destructive) { confirmReset = true } label: {
-                            if resetting { Label { Text("Resetting…") } icon: { ProgressView() } }
-                            else { Label("Reset Plugin Configuration", systemImage: "arrow.counterclockwise") }
+                    NavigationLink { PushSetupView(setup: setup) } label: {
+                        Label(setup.isCompleted(for: rt) ? "Configure" : "Configure the Companion", systemImage: "wand.and.stars")
+                    }
+                    NavigationLink { SoftwareUpdateView() } label: {
+                        HStack {
+                            Label("Software Update", systemImage: "arrow.down.circle")
+                            Spacer(minLength: 8)
+                            if setup.updateAvailable { CountBadge(1) }
                         }
-                        .disabled(resetting)
-                    } else {
-                        NavigationLink { PushSetupView(setup: setup) } label: { Label("Configure background notifications", systemImage: "wand.and.stars") }
                     }
                 } footer: {
-                    Text(setup.isCompleted(for: rt)
-                         ? "Disables the plugin on the Gateway and clears this phone's setup. Files stay for a reinstall."
-                         : "Guided setup: permission, address, sign-in, install, start, test.")
+                    Text(setup.isCompleted(for: rt) ? "Configure walks through the setup again — address, sign-in, install, test." : "Guided setup: permission, address, sign-in, install, start, test.")
+                }
+                if setup.isCompleted(for: rt) || setup.installedVersion != nil {
+                    Section {
+                        Button(role: .destructive) { confirmReset = true } label: {
+                            if resetting { Label { Text("Uninstalling…") } icon: { ProgressView() } }
+                            else { Label("Uninstall Companion", systemImage: "trash") }
+                        }
+                        .disabled(resetting)
+                    } footer: {
+                        Text("Stops the service and removes the plugin and its files from the gateway, and this phone forgets the setup. Installing again starts from scratch.")
+                    }
                 }
                 Section {
                     LabeledContent("Last notification") {
@@ -788,15 +797,15 @@ struct BackgroundNotificationsView: View {
                 Text("Connect a gateway first.").foregroundStyle(.secondary)
             }
         }
-        .navigationTitle("Background Notifications")
+        .navigationTitle("Companion")
         .navigationBarTitleDisplayMode(.inline)
         .listSectionSpacing(28)
         .animation(.smooth, value: setup.updateOutcome == nil)
-        .alert("Reset the plugin configuration?", isPresented: $confirmReset) {
-            Button("Reset", role: .destructive) { Task { resetting = true; if let rt { await setup.resetPluginConfiguration(runtime: rt) }; resetting = false } }
+        .alert("Uninstall the Companion?", isPresented: $confirmReset) {
+            Button("Uninstall", role: .destructive) { Task { resetting = true; if let rt { await setup.uninstall(runtime: rt, model: model) }; resetting = false } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("The plugin is disabled on the gateway and this phone forgets the address, the companion sign-in and the setup. Notifications stop until it is set up again.")
+            Text("The plugin is disabled, its service is stopped and its files are deleted from the gateway (a bot runs the removal — approve it in the chat that opens). Notifications, Live Activities and approval cards stop until it is installed again.")
         }
         .task {
             guard let rt else { return }
@@ -1033,9 +1042,19 @@ final class PushSetupModel {
     func isCompleted(for rt: GatewayRuntime) -> Bool { UserDefaults.standard.bool(forKey: Self.completedKey(rt)) }
     func markCompleted(for rt: GatewayRuntime) { UserDefaults.standard.set(true, forKey: Self.completedKey(rt)) }
 
-    /// Disables the plugin on the gateway and clears this phone's setup; the files stay for a reinstall.
-    func resetPluginConfiguration(runtime rt: GatewayRuntime) async {
+    /// Removes the companion for good: the plugin is disabled, this phone's device file is
+    /// withdrawn, Hermes is asked to run `install.sh --uninstall` (service, plugin folder and the
+    /// push folder go — an approval card in a new chat, like the install), and the phone forgets
+    /// its setup. The next Configure is a clean install.
+    func uninstall(runtime rt: GatewayRuntime, model: AppModel) async {
         let _: JSONValue? = try? await rt.api.send("POST", "/api/dashboard/agent-plugins/vory-push/disable", body: EmptyBody())
+        await model.push.removeRegistration(runtime: rt)
+        let cmd = installCommand(for: rt) + " --uninstall"
+        if let chat = try? await rt.newChat() {
+            await chat.send("Run this exact command in the terminal and show me its full output: `\(cmd)`. It stops the Vory companion service and deletes its files. If it fails, tell me the error verbatim.")
+            model.pendingRoute = PendingRoute(connectionID: rt.connection.id, storedSessionID: chat.storedID, profile: rt.selectedProfile)
+            model.selectedTab = .chats
+        }
         startOver(runtime: rt)
         heartbeat = nil; installedVersion = nil; installedScriptMatches = false
         await checkCompanion(runtime: rt)

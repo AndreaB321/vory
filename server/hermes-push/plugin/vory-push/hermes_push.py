@@ -721,7 +721,7 @@ class Relay:
         if method == "approval":
             body = params.get("description") or params.get("command") or "A command is waiting for your decision"
             via_la = self.update_live_activities(a.get("stored", sid), {"phase": "waiting", "detail": str(body)[:80], "needsAttention": True},
-                                                 alert={"title": bot, "body": "Approval needed — tap to answer"}, runtime_id=sid)
+                                                 alert={"title": bot, "body": "Approval needed — tap to answer. It waits for you."}, runtime_id=sid)
             self.push_all("approval", f"{bot} · approval needed", f"{title}: {str(body)[:180]}", {**self.meta(sid), "request_id": params.get("request_id", rid)}, collapse=rid, skip=via_la)
         elif method == "clarify":
             q = params.get("question") or (params.get("questions") or [{}])[0].get("question") or "Hermes has a question"

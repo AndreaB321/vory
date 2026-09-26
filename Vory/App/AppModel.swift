@@ -133,6 +133,15 @@ final class AppModel {
         if url.host == "chat", let id = url.pathComponents.dropFirst().first {
             pendingRoute = PendingRoute(connectionID: runtime?.connection.id, storedSessionID: id, profile: runtime?.selectedProfile)
         }
+        // From the Live Activity's Approve / Deny: open the chat on its card and apply the choice.
+        if url.host == "approval", let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+           let sid = items.first(where: { $0.name == "session" })?.value, !sid.isEmpty {
+            let choice = items.first(where: { $0.name == "choice" })?.value ?? "once"
+            var r = PendingRoute(connectionID: runtime?.connection.id, storedSessionID: sid, profile: runtime?.selectedProfile)
+            r.action = choice == "deny" ? LocalNotifier.denyAction : LocalNotifier.approveOnceAction
+            pendingRoute = r
+            Task { await ensureConnection(for: r) }
+        }
     }
 
     func deactivate() async {

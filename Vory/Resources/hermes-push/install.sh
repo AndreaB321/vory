@@ -5,6 +5,28 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONF="$HERE/hermes-push.conf"
+
+# --uninstall: stop and remove the service, the plugin folder and this push folder, so the next
+# install from Vory starts from nothing. Safe to run twice.
+if [ "${1:-}" = "--uninstall" ]; then
+    case "$(uname -s)" in
+    Linux)
+        systemctl --user disable --now hermes-push 2>/dev/null || true
+        rm -f "$HOME/.config/systemd/user/hermes-push.service"
+        systemctl --user daemon-reload 2>/dev/null || true
+        ;;
+    Darwin)
+        PL="$HOME/Library/LaunchAgents/com.vorantx.hermes-push.plist"
+        launchctl bootout "gui/$(id -u)" "$PL" 2>/dev/null || true
+        rm -f "$PL"
+        ;;
+    esac
+    pkill -f "$HERE/hermes_push.py" 2>/dev/null || true
+    rm -rf "$(dirname "$HERE")/plugins/vory-push"
+    rm -rf "$HERE"
+    echo "hermes-push removed: service stopped, plugin and $HERE deleted"
+    exit 0
+fi
 [ -f "$CONF" ] || { echo "no $CONF — run the setup in Vory › Settings › Notifications first"; exit 1; }
 
 # Python with websockets + PyJWT: the Hermes venv has both.

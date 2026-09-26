@@ -31,7 +31,7 @@ struct SettingsView: View {
             Row(id: "security", title: "Security", symbol: "faceid", color: .green, destination: AnyView(SecurityView())),
             Row(id: "bots", title: "Bots", symbol: "cloud.fill", color: .indigo, destination: AnyView(BotsSettingsView())),
             Row(id: "appearance", title: "Appearance", symbol: "circle.lefthalf.filled", color: .black, destination: AnyView(AppearanceView())),
-            Row(id: "update", title: "Software Update", symbol: "arrow.down.circle", color: .gray, destination: AnyView(SoftwareUpdateView())),
+            Row(id: "companion", title: "Companion", symbol: "puzzlepiece.extension.fill", color: .blue, destination: AnyView(CompanionView())),
             Row(id: "about", title: "About", symbol: "info.circle", color: .blue, destination: AnyView(AboutView())),
         ]
     }
@@ -46,7 +46,7 @@ struct SettingsView: View {
             List {
                 if search.isEmpty, !setupCardDone, model.runtime != nil, model.push.registeredAt == nil {
                     Section {
-                        NavigationLink { SoftwareUpdateView() } label: {
+                        NavigationLink { CompanionView() } label: {
                             HStack(spacing: 12) {
                                 BotFaceView(spec: AboutView.voryBot, size: 46, active: true)
                                 VStack(alignment: .leading, spacing: 2) {
@@ -102,7 +102,7 @@ struct SettingsView: View {
                             HStack {
                                 SettingsLabel(row.title, row.symbol, row.color)
                                 Spacer(minLength: 8)
-                                if row.id == "update", model.companionUpdateAvailable { CountBadge(1) }
+                                if row.id == "companion", model.companionUpdateAvailable { CountBadge(1) }
                             }
                         }
                     }
@@ -268,14 +268,10 @@ struct NotificationsView: View {
                 Toggle("Haptics", isOn: $haptics)
             }
             Section {
-                NavigationLink {
-                    BackgroundNotificationsView()
-                } label: {
-                    Label("Background Notifications", systemImage: "server.rack")
-                }
-                .disabled(model.runtime == nil)
+                NavigationLink { CompanionView() } label: { Label("Companion", systemImage: "puzzlepiece.extension") }
+                    .disabled(model.runtime == nil)
             } footer: {
-                Text("Approvals, questions, finished turns and errors while Vory is closed — delivered by the companion plugin on your gateway. Foreground and just-backgrounded events are delivered locally without it.")
+                Text("Approvals, questions, finished turns and errors while Vory is closed are delivered by the Companion on your gateway. In the foreground they arrive locally without it.")
             }
         }
         .task { await push.refreshAuthorization() }
