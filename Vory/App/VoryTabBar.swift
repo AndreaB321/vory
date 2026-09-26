@@ -173,7 +173,7 @@ struct VoryTabBar: View {
 
     @ViewBuilder private func icon(for tab: AppModel.AppTab, size: CGFloat) -> some View {
         if tab == .bots {
-            VoryOutlineIcon().frame(width: size * 1.3, height: size * 1.1)
+            VoryOutlineIcon().frame(width: size * 1.5, height: size * 1.28)
         } else {
             Image(systemName: tab.symbol).font(.system(size: size, weight: .medium))
         }

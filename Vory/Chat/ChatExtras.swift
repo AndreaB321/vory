@@ -31,7 +31,7 @@ enum SessionCache {
 
 /// A bot avatar rendered to a UIImage, for places SwiftUI cannot draw a view — menu item icons.
 enum BotAvatarImage {
-    static func make(profile: String, size: CGFloat = 28) -> UIImage {
+    @MainActor static func make(profile: String, size: CGFloat = 28) -> UIImage {
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
         if BotAvatarStore.choice(for: profile) == .photo, let photo = BotAvatarStore.photo(for: profile) {
             return renderer.image { ctx in
@@ -39,17 +39,12 @@ enum BotAvatarImage {
                 photo.draw(in: CGRect(x: 0, y: 0, width: size, height: size))
             }.withRenderingMode(.alwaysOriginal)
         }
-        let tint = UIColor(BotColors.color(for: profile))
-        let image = renderer.image { ctx in
-            tint.setFill()
-            ctx.cgContext.fillEllipse(in: CGRect(x: 0, y: 0, width: size, height: size))
-            let initial = String(profile.prefix(1)).uppercased() as NSString
-            let font = UIFont.systemFont(ofSize: size * 0.5, weight: .semibold)
-            let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor.white]
-            let s = initial.size(withAttributes: attrs)
-            initial.draw(at: CGPoint(x: (size - s.width) / 2, y: (size - s.height) / 2), withAttributes: attrs)
-        }
-        return image.withRenderingMode(.alwaysOriginal)
+        // The studio bot itself, painted (glass cannot render offscreen), at 3x for the menu.
+        let spec = BotAvatarStore.choice(for: profile).spec(hex: BotColors.hex(for: profile))
+        let r = ImageRenderer(content: BotFaceView(spec: spec, size: size, active: false, drawn: true))
+        r.scale = 3
+        r.isOpaque = false
+        return (r.uiImage ?? renderer.image { _ in }).withRenderingMode(.alwaysOriginal)
     }
 }
 

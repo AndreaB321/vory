@@ -11,6 +11,7 @@ struct VoryApp: App {
         Keychain.accessGroup = Keychain.sharedGroupFromBundle()
         Keychain.migrateToAccessGroupIfNeeded()
         WatchSync.shared.start()
+        BotFace.liveGlass = true
         _model = State(initialValue: AppModel.shared)
     }
     @Environment(\.scenePhase) private var scenePhase

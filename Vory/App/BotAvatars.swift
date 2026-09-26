@@ -7,14 +7,15 @@ import UIKit
 /// with photos under Application Support/BotAvatars; both stay on this device.
 enum BotAvatarChoice: Equatable {
     case photo
-    case studio(shape: String, eyes: String)
+    /// `glass`: the Liquid Glass finish (beta), stored as a fourth part of the raw string.
+    case studio(shape: String, eyes: String, glass: Bool = false)
     /// Older stored values ("initial", "animated:<style>"); they draw as a studio bot.
     case legacy(String)
 
     var raw: String {
         switch self {
         case .photo: return "photo"
-        case .studio(let shape, let eyes): return "studio:\(shape):\(eyes)"
+        case .studio(let shape, let eyes, let glass): return "studio:\(shape):\(eyes)" + (glass ? ":glass" : "")
         case .legacy(let r): return r
         }
     }
@@ -22,7 +23,7 @@ enum BotAvatarChoice: Equatable {
     init(raw: String) {
         if raw == "photo" { self = .photo; return }
         let spec = BotLookSpec.from(choice: raw, hex: "")
-        if raw.hasPrefix("studio:") { self = .studio(shape: spec.shape, eyes: spec.eyes) }
+        if raw.hasPrefix("studio:") { self = .studio(shape: spec.shape, eyes: spec.eyes, glass: spec.isGlass) }
         else if raw.isEmpty || raw == "initial" { self = .studio(shape: BotLookSpec.defaultShape, eyes: BotLookSpec.defaultEyes) }
         else { self = .legacy(raw) }
     }
@@ -30,6 +31,8 @@ enum BotAvatarChoice: Equatable {
     /// The look this choice draws, for a given colour.
     func spec(hex: String) -> BotLookSpec { BotLookSpec.from(choice: raw, hex: hex) }
     static let `default` = BotAvatarChoice.studio(shape: BotLookSpec.defaultShape, eyes: BotLookSpec.defaultEyes)
+
+    var isGlass: Bool { if case .studio(_, _, let g) = self { return g } else { return false } }
 }
 
 enum BotAvatarStore {
@@ -115,6 +118,7 @@ struct CreatorStudio: View {
     private var current: BotLookSpec { choice.spec(hex: hex) }
     private var shape: String { current.shape }
     private var eyes: String { current.eyes }
+    private var glass: Bool { current.isGlass }
 
     var body: some View {
         VStack(spacing: 14) {
@@ -128,16 +132,17 @@ struct CreatorStudio: View {
             switch tab {
             case .body:
                 grid(BotLookSpec.shapes, selected: shape, name: BotLookSpec.name(ofShape:)) { s in
-                    BotFaceView(spec: BotLookSpec(shape: s, eyes: eyes, hex: hex), size: 58, active: shape == s)
-                } pick: { choice = .studio(shape: $0, eyes: eyes) }
+                    BotFaceView(spec: BotLookSpec(shape: s, eyes: eyes, hex: hex, finish: current.finish), size: 58, active: shape == s)
+                } pick: { choice = .studio(shape: $0, eyes: eyes, glass: glass) }
                 photoRow
             case .eyes:
                 grid(BotLookSpec.eyeStyles, selected: eyes, name: BotLookSpec.name(ofEyes:)) { e in
-                    BotFaceView(spec: BotLookSpec(shape: shape, eyes: e, hex: hex), size: 58, active: eyes == e)
-                } pick: { choice = .studio(shape: shape, eyes: $0) }
+                    BotFaceView(spec: BotLookSpec(shape: shape, eyes: e, hex: hex, finish: current.finish), size: 58, active: eyes == e)
+                } pick: { choice = .studio(shape: shape, eyes: $0, glass: glass) }
             case .colour:
                 colourRow
             }
+            glassRow
             HStack {
                 Button("Reset to default") {
                     choice = .default
@@ -197,6 +202,26 @@ struct CreatorStudio: View {
         }
     }
 
+    /// Beta: the bot as Liquid Glass, like the app icon. Real glass in the app; the Island and
+    /// notifications get a painted version of it.
+    private var glassRow: some View {
+        Toggle(isOn: Binding(get: { glass }, set: { choice = .studio(shape: shape, eyes: eyes, glass: $0) })) {
+            HStack(spacing: 10) {
+                BotFaceView(spec: BotLookSpec(shape: shape, eyes: eyes, hex: hex, finish: "glass"), size: 30, active: false)
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 6) {
+                        Text("Liquid Glass").font(.subheadline)
+                        Text("BETA").font(.caption2.weight(.bold)).padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Capsule().fill(Color.accentColor.opacity(0.15))).foregroundStyle(Color.accentColor)
+                    }
+                    Text("The bot as a piece of glass, like the app icon.").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .disabled(choice == .photo)
+        .accessibilityIdentifier("studio.glass")
+    }
+
     private var photoRow: some View {
         HStack {
             PhotosPicker(selection: $photoItem, matching: .images) {
@@ -206,7 +231,7 @@ struct CreatorStudio: View {
             .buttonStyle(.plain).foregroundStyle(.tint)
             Spacer()
             if choice == .photo {
-                Button("Back to the bot") { BotAvatarStore.removePhoto(for: profile); choice = .studio(shape: shape, eyes: eyes) }
+                Button("Back to the bot") { BotAvatarStore.removePhoto(for: profile); choice = .studio(shape: shape, eyes: eyes, glass: glass) }
                     .font(.subheadline)
                     .buttonStyle(.borderless)
             }

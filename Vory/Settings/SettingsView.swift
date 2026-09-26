@@ -44,7 +44,7 @@ struct SettingsView: View {
                     Section {
                         NavigationLink { SetupWizardHost() } label: {
                             HStack(spacing: 12) {
-                                BotFaceView(spec: BotLookSpec(shape: "cloud", eyes: "classic", hex: "#3B7BFF"), size: 46, active: true)
+                                BotFaceView(spec: AboutView.voryBot, size: 46, active: true)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("Set up notifications").font(.headline)
                                     Text("Replies, approvals and Live Activities while Vory is closed.").font(.caption).foregroundStyle(.secondary)
@@ -380,7 +380,7 @@ struct AboutView: View {
     @State private var relieved = false
 
     private var appVersion: String { (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") + " (" + (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?") + ")" }
-    static let voryBot = BotLookSpec(shape: "cloud", eyes: "classic", hex: "#3B7BFF")
+    static let voryBot = BotLookSpec(shape: "cloud", eyes: "classic", hex: "#3B7BFF", finish: "glass")
 
     var body: some View {
         List {

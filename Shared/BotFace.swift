@@ -7,24 +7,30 @@ public struct BotLookSpec: Hashable, Sendable {
     public var shape: String
     public var eyes: String
     public var hex: String
+    /// "flat" (the painted bot) or "glass" (Liquid Glass, like the app icon; beta).
+    public var finish: String
 
-    public init(shape: String, eyes: String, hex: String) {
+    public init(shape: String, eyes: String, hex: String, finish: String = "flat") {
         self.shape = shape
         self.eyes = eyes
         self.hex = hex
+        self.finish = finish
     }
+
+    public var isGlass: Bool { finish == "glass" }
 
     public static let shapes = ["circle", "blob", "square", "pill", "triangle", "hexagon", "cloud", "drop"]
     public static let eyeStyles = ["classic", "tall", "sleepy", "tiny", "round", "wide", "curious", "bold"]
     public static let defaultShape = "blob"
     public static let defaultEyes = "classic"
 
-    /// The avatar choice string the app stores: "studio:<shape>:<eyes>". Older values ("initial",
-    /// "animated:<style>") map onto a shape so nothing looks broken after the update.
+    /// The avatar choice string the app stores: "studio:<shape>:<eyes>" plus ":glass" for the
+    /// glass finish. Older values ("initial", "animated:<style>") map onto a shape so nothing
+    /// looks broken after the update.
     public static func from(choice raw: String?, hex: String) -> BotLookSpec {
         let parts = (raw ?? "").split(separator: ":").map(String.init)
-        if parts.first == "studio", parts.count == 3, shapes.contains(parts[1]), eyeStyles.contains(parts[2]) {
-            return BotLookSpec(shape: parts[1], eyes: parts[2], hex: hex)
+        if parts.first == "studio", parts.count == 3 || parts.count == 4, shapes.contains(parts[1]), eyeStyles.contains(parts[2]) {
+            return BotLookSpec(shape: parts[1], eyes: parts[2], hex: hex, finish: parts.count == 4 && parts[3] == "glass" ? "glass" : "flat")
         }
         if parts.first == "animated", parts.count == 2 {
             let legacy: [String: (String, String)] = ["nimbus": ("cloud", "classic"), "halo": ("circle", "round"), "pip": ("drop", "tiny"),
@@ -34,7 +40,7 @@ public struct BotLookSpec: Hashable, Sendable {
         return BotLookSpec(shape: defaultShape, eyes: defaultEyes, hex: hex)
     }
 
-    public var choiceString: String { "studio:\(shape):\(eyes)" }
+    public var choiceString: String { "studio:\(shape):\(eyes)" + (isGlass ? ":glass" : "") }
 
     public static func name(ofShape s: String) -> String {
         ["circle": "Circle", "blob": "Blob", "square": "Square", "pill": "Pill", "triangle": "Triangle", "hexagon": "Hex", "cloud": "Cloud", "drop": "Drop"][s] ?? s.capitalized
@@ -159,8 +165,26 @@ public enum BotFace {
         return (blink, glance, breath)
     }
 
+    /// Which part of the bot to draw: everything, or just one layer (the app draws a glass bot as
+    /// real glass for the body and the eyes, and only needs the eyes' geometry from here).
+    public enum Part { case all, body, eyes }
+
+    /// Set by the app: it can draw glass bots with real Liquid Glass (a backdrop exists). The
+    /// extensions and offscreen renders keep the painted approximation.
+    nonisolated(unsafe) public static var liveGlass = false
+
+    /// The eyes' ink; on a glass bot they are dark glass, drawn a little lighter.
+    static let ink = Color(red: 0.05, green: 0.05, blue: 0.07)
+
+    /// The whisper of squash and stretch about the bottom while working.
+    static func breathScale(time t: Double, active: Bool, spec: BotLookSpec) -> CGFloat {
+        guard active else { return 1 }
+        let seed = spec.shape.utf8.reduce(0) { $0 + Int($1) } + spec.eyes.utf8.reduce(0) { $0 + Int($1) }
+        return 1 + 0.025 * (liveliness(time: t, seed: seed).breath - 0.5)
+    }
+
     /// Draws body and eyes into `size` (square). `active` animates; otherwise `time` should be 0.
-    public static func draw(_ spec: BotLookSpec, in ctx: inout GraphicsContext, size: CGSize, time t: Double, active: Bool, gaze: CGPoint = .zero) {
+    public static func draw(_ spec: BotLookSpec, in ctx: inout GraphicsContext, size: CGSize, time t: Double, active: Bool, gaze: CGPoint = .zero, part: Part = .all, breathe: Bool = true) {
         let box = CGRect(origin: .zero, size: size)
         let s = min(size.width, size.height)
         let seed = spec.shape.utf8.reduce(0) { $0 + Int($1) } + spec.eyes.utf8.reduce(0) { $0 + Int($1) }
@@ -168,7 +192,7 @@ public enum BotFace {
         let tint = Color(botHex: spec.hex) ?? Color(red: 0.49, green: 0.36, blue: 1)
 
         // Breathing: a whisper of squash and stretch about the bottom while working.
-        if active {
+        if active && breathe {
             let sy = 1 + 0.025 * (live.breath - 0.5)
             ctx.translateBy(x: size.width / 2, y: size.height * 0.96)
             ctx.scaleBy(x: 1 / sy, y: sy)
@@ -176,39 +200,84 @@ public enum BotFace {
         }
 
         let body = bodyPath(spec.shape, in: box, time: t, active: active)
-        ctx.fill(body, with: .linearGradient(Gradient(colors: [tint.opacity(1), tint.opacity(0.84)]), startPoint: CGPoint(x: 0, y: 0), endPoint: CGPoint(x: 0, y: size.height)))
-        // A soft light across the top, clipped to the body so shapes made of several pieces (the
-        // cloud) show no seams: just the shape and its colour.
-        ctx.drawLayer { layer in
-            layer.clip(to: body)
-            layer.fill(Path(box), with: .linearGradient(Gradient(colors: [.white.opacity(0.22), .white.opacity(0)]), startPoint: .zero, endPoint: CGPoint(x: 0, y: size.height * 0.55)))
+        if part != .eyes {
+            if spec.isGlass {
+                drawGlassBody(body, tint: tint, in: &ctx, box: box, s: s)
+            } else {
+                ctx.fill(body, with: .linearGradient(Gradient(colors: [tint.opacity(1), tint.opacity(0.84)]), startPoint: CGPoint(x: 0, y: 0), endPoint: CGPoint(x: 0, y: size.height)))
+                // A soft light across the top, clipped to the body so shapes made of several pieces (the
+                // cloud) show no seams: just the shape and its colour.
+                ctx.drawLayer { layer in
+                    layer.clip(to: body)
+                    layer.fill(Path(box), with: .linearGradient(Gradient(colors: [.white.opacity(0.22), .white.opacity(0)]), startPoint: .zero, endPoint: CGPoint(x: 0, y: size.height * 0.55)))
+                }
+            }
         }
+        guard part != .body else { return }
 
         // Eyes: black shapes, blinking by squashing to a line, glancing by sliding.
-        // Both eyes move together: a glance or a gaze shifts the pair, never their spacing.
+        let eyes = eyePaths(spec, size: size, time: t, active: active, gaze: gaze)
+        let eyeInk = spec.isGlass ? ink.opacity(0.78) : ink
+        if eyes.stroked {
+            ctx.stroke(eyes.path, with: .color(eyeInk), style: StrokeStyle(lineWidth: s * 0.045, lineCap: .round))
+        } else {
+            ctx.fill(eyes.path, with: .color(eyeInk))
+            if spec.isGlass {
+                // The rim of a dark glass eye: a hair of light along its top edge.
+                ctx.drawLayer { layer in
+                    layer.clip(to: eyes.path)
+                    layer.stroke(eyes.path, with: .linearGradient(Gradient(colors: [.white.opacity(0.55), .white.opacity(0)]), startPoint: CGPoint(x: 0, y: eyes.path.boundingRect.minY), endPoint: CGPoint(x: 0, y: eyes.path.boundingRect.maxY)), lineWidth: s * 0.03)
+                }
+            }
+        }
+    }
+
+    /// The painted stand-in for Liquid Glass, for where real glass cannot render (widgets,
+    /// notification images, menu icons): a translucent tinted body with a lit rim, a darker
+    /// lower edge and a soft highlight across the top, like the app icon.
+    static func drawGlassBody(_ body: Path, tint: Color, in ctx: inout GraphicsContext, box: CGRect, s: CGFloat) {
+        ctx.drawLayer { layer in
+            layer.addFilter(.shadow(color: .black.opacity(0.28), radius: s * 0.05, y: s * 0.03))
+            layer.fill(body, with: .linearGradient(Gradient(colors: [tint.opacity(0.92), tint.opacity(0.62)]), startPoint: CGPoint(x: 0, y: box.minY), endPoint: CGPoint(x: 0, y: box.maxY)))
+        }
+        ctx.drawLayer { layer in
+            layer.clip(to: body)
+            // Specular: light pooling along the top, fading out a third of the way down.
+            layer.fill(Path(box), with: .linearGradient(Gradient(colors: [.white.opacity(0.42), .white.opacity(0.05), .white.opacity(0)]), startPoint: CGPoint(x: 0, y: box.minY), endPoint: CGPoint(x: 0, y: box.maxY * 0.5)))
+            // Rim: bright where the light hits (top-left), dark on the underside.
+            layer.stroke(body, with: .linearGradient(Gradient(colors: [.white.opacity(0.9), .white.opacity(0.15), .black.opacity(0.28)]), startPoint: CGPoint(x: box.minX, y: box.minY), endPoint: CGPoint(x: box.maxX, y: box.maxY)), lineWidth: s * 0.045)
+        }
+    }
+
+    /// The eyes' geometry for a frame: one path (both eyes) and whether it is stroked (sleepy
+    /// lids) rather than filled. Both eyes move together: a glance or a gaze shifts the pair,
+    /// never their spacing.
+    public static func eyePaths(_ spec: BotLookSpec, size: CGSize, time t: Double, active: Bool, gaze: CGPoint = .zero) -> (path: Path, stroked: Bool) {
+        let s = min(size.width, size.height)
+        let seed = spec.shape.utf8.reduce(0) { $0 + Int($1) } + spec.eyes.utf8.reduce(0) { $0 + Int($1) }
+        let live = liveliness(time: active ? t : 0, seed: seed)
         let anchor = eyeAnchor(spec.shape)
         let dx = s * anchor.spread
         let cx = size.width / 2 + CGFloat(live.glance) * s * 0.06 + gaze.x * s * 0.06
         let cy = s * anchor.y + gaze.y * s * 0.07
         let open = CGFloat(1 - live.blink * 0.92)
-        let ink = Color(red: 0.05, green: 0.05, blue: 0.07)
+        var path = Path()
         func eye(at x: CGFloat, w: CGFloat, h: CGFloat, round: Bool) {
             let hh = max(s * 0.025, h * open)
             let rect = CGRect(x: x - w / 2, y: cy - hh / 2, width: w, height: hh)
-            let path = round && open > 0.5 ? Path(ellipseIn: rect) : Path(roundedRect: rect, cornerRadius: min(w, hh) / 2, style: .continuous)
-            ctx.fill(path, with: .color(ink))
+            path.addPath(round && open > 0.5 ? Path(ellipseIn: rect) : Path(roundedRect: rect, cornerRadius: min(w, hh) / 2, style: .continuous))
+        }
+        if spec.eyes == "sleepy" {
+            // Lids: two soft downward arcs.
+            for x in [cx - dx, cx + dx] {
+                path.move(to: CGPoint(x: x - s * 0.075, y: cy - s * 0.01))
+                path.addQuadCurve(to: CGPoint(x: x + s * 0.075, y: cy - s * 0.01), control: CGPoint(x: x, y: cy + s * 0.05))
+            }
+            return (path, true)
         }
         switch spec.eyes {
         case "tall":
             eye(at: cx - dx, w: s * 0.085, h: s * 0.30, round: false); eye(at: cx + dx, w: s * 0.085, h: s * 0.30, round: false)
-        case "sleepy":
-            // Lids: two soft downward arcs.
-            for x in [cx - dx, cx + dx] {
-                var p = Path()
-                p.move(to: CGPoint(x: x - s * 0.075, y: cy - s * 0.01))
-                p.addQuadCurve(to: CGPoint(x: x + s * 0.075, y: cy - s * 0.01), control: CGPoint(x: x, y: cy + s * 0.05))
-                ctx.stroke(p, with: .color(ink), style: StrokeStyle(lineWidth: s * 0.045, lineCap: .round))
-            }
         case "tiny":
             eye(at: cx - dx * 0.8, w: s * 0.07, h: s * 0.07, round: true); eye(at: cx + dx * 0.8, w: s * 0.07, h: s * 0.07, round: true)
         case "round":
@@ -222,7 +291,27 @@ public enum BotFace {
         default: // classic
             eye(at: cx - dx, w: s * 0.10, h: s * 0.22, round: false); eye(at: cx + dx, w: s * 0.10, h: s * 0.22, round: false)
         }
+        return (path, false)
     }
+}
+
+/// The bot's body as a Shape, so the app can give it real Liquid Glass.
+public struct BotBodyShape: Shape {
+    public var spec: BotLookSpec
+    public var time: Double
+    public var active: Bool
+    public init(spec: BotLookSpec, time: Double, active: Bool) { self.spec = spec; self.time = time; self.active = active }
+    public func path(in rect: CGRect) -> Path { BotFace.bodyPath(spec.shape, in: rect, time: time, active: active) }
+}
+
+/// The bot's eyes as a Shape (filled styles only; sleepy lids stay painted).
+public struct BotEyesShape: Shape {
+    public var spec: BotLookSpec
+    public var time: Double
+    public var active: Bool
+    public var gaze: CGPoint
+    public init(spec: BotLookSpec, time: Double, active: Bool, gaze: CGPoint) { self.spec = spec; self.time = time; self.active = active; self.gaze = gaze }
+    public func path(in rect: CGRect) -> Path { BotFace.eyePaths(spec, size: rect.size, time: time, active: active, gaze: gaze).path.offsetBy(dx: rect.minX, dy: rect.minY) }
 }
 
 /// The bot as a view. `active` runs the animation (blink, glance, breathing, the blob's morph);
@@ -237,11 +326,40 @@ public struct BotFaceView: View {
     @State private var gazeFrom: CGPoint = .zero
     @State private var gazeChangedAt: Date = .distantPast
 
-    public init(spec: BotLookSpec, size: CGFloat, active: Bool = false, gaze: CGPoint = .zero) {
+    /// Paint the glass finish even in the app (for offscreen renders such as menu icons).
+    public var drawn: Bool
+
+    public init(spec: BotLookSpec, size: CGFloat, active: Bool = false, gaze: CGPoint = .zero, drawn: Bool = false) {
         self.spec = spec
         self.size = size
         self.active = active
         self.gaze = gaze
+        self.drawn = drawn
+    }
+
+    /// The glass bot as the icon is built: the body a tinted piece of glass, the eyes a darker
+    /// piece in front, each in its own container (in one container they would merge into a
+    /// single shape). Sleepy lids are strokes, so they stay painted.
+    @ViewBuilder private func liveGlass(time t: Double, gaze g: CGPoint) -> some View {
+        let tint = Color(botHex: spec.hex) ?? Color(red: 0.49, green: 0.36, blue: 1)
+        let sy = BotFace.breathScale(time: t, active: active, spec: spec)
+        ZStack {
+            GlassEffectContainer {
+                Color.clear
+                    .glassEffect(.regular.tint(tint.opacity(0.72)), in: BotBodyShape(spec: spec, time: t, active: active))
+            }
+            if spec.eyes == "sleepy" {
+                Canvas(opaque: false, rendersAsynchronously: false) { ctx, sz in
+                    BotFace.draw(spec, in: &ctx, size: sz, time: t, active: active, gaze: g, part: .eyes, breathe: false)
+                }
+            } else {
+                GlassEffectContainer {
+                    Color.clear
+                        .glassEffect(.clear.tint(BotFace.ink.opacity(0.7)), in: BotEyesShape(spec: spec, time: t, active: active, gaze: g))
+                }
+            }
+        }
+        .scaleEffect(x: 1 / sy, y: sy, anchor: UnitPoint(x: 0.5, y: 0.96))
     }
 
     public var body: some View {
@@ -250,8 +368,12 @@ public struct BotFaceView: View {
             let u = min(1, max(0, timeline.date.timeIntervalSince(gazeChangedAt) / 0.35))
             let ease = u * u * (3 - 2 * u)
             let g = CGPoint(x: gazeFrom.x + (gaze.x - gazeFrom.x) * ease, y: gazeFrom.y + (gaze.y - gazeFrom.y) * ease)
-            Canvas(opaque: false, rendersAsynchronously: false) { ctx, sz in
-                BotFace.draw(spec, in: &ctx, size: sz, time: t, active: active, gaze: g)
+            if spec.isGlass && BotFace.liveGlass && !drawn {
+                liveGlass(time: t, gaze: g)
+            } else {
+                Canvas(opaque: false, rendersAsynchronously: false) { ctx, sz in
+                    BotFace.draw(spec, in: &ctx, size: sz, time: t, active: active, gaze: g)
+                }
             }
         }
         .onChange(of: gaze) { old, new in
