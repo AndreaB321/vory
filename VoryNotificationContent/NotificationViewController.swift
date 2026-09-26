@@ -123,29 +123,35 @@ struct ReplyCard: View {
     }
 }
 
-/// A message bubble like Messages: rounded, and at the bottom corner a small curl of a tail. The
-/// corner under the tail is squared off inside the shape, so the tail and the body are one piece.
+/// A message bubble like Messages: rounded, with a small curl of a tail at the bottom corner,
+/// drawn as one outline so the tail and the body are a single piece.
 struct BubbleShape: Shape {
     var tailOnRight = false
     func path(in r: CGRect) -> Path {
         let radius: CGFloat = 17
-        var p = Path(roundedRect: r, cornerRadius: radius, style: .continuous)
-        var tail = Path()
+        var p = Path()
+        p.move(to: CGPoint(x: r.minX + radius, y: r.minY))
+        p.addLine(to: CGPoint(x: r.maxX - radius, y: r.minY))
+        p.addArc(center: CGPoint(x: r.maxX - radius, y: r.minY + radius), radius: radius, startAngle: .degrees(-90), endAngle: .degrees(0), clockwise: false)
         if tailOnRight {
-            tail.move(to: CGPoint(x: r.maxX - radius, y: r.maxY - radius))
-            tail.addLine(to: CGPoint(x: r.maxX, y: r.maxY - radius))
-            tail.addLine(to: CGPoint(x: r.maxX, y: r.maxY - 10))
-            tail.addQuadCurve(to: CGPoint(x: r.maxX + 6, y: r.maxY), control: CGPoint(x: r.maxX + 1, y: r.maxY - 2))
-            tail.addLine(to: CGPoint(x: r.maxX - radius, y: r.maxY))
+            p.addLine(to: CGPoint(x: r.maxX, y: r.maxY - 10))
+            p.addQuadCurve(to: CGPoint(x: r.maxX + 6, y: r.maxY), control: CGPoint(x: r.maxX + 1, y: r.maxY - 2))
+            p.addQuadCurve(to: CGPoint(x: r.maxX - radius, y: r.maxY), control: CGPoint(x: r.maxX - 4, y: r.maxY))
         } else {
-            tail.move(to: CGPoint(x: r.minX + radius, y: r.maxY - radius))
-            tail.addLine(to: CGPoint(x: r.minX, y: r.maxY - radius))
-            tail.addLine(to: CGPoint(x: r.minX, y: r.maxY - 10))
-            tail.addQuadCurve(to: CGPoint(x: r.minX - 6, y: r.maxY), control: CGPoint(x: r.minX - 1, y: r.maxY - 2))
-            tail.addLine(to: CGPoint(x: r.minX + radius, y: r.maxY))
+            p.addLine(to: CGPoint(x: r.maxX, y: r.maxY - radius))
+            p.addArc(center: CGPoint(x: r.maxX - radius, y: r.maxY - radius), radius: radius, startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false)
         }
-        tail.closeSubpath()
-        p.addPath(tail)
+        if tailOnRight {
+            p.addLine(to: CGPoint(x: r.minX + radius, y: r.maxY))
+            p.addArc(center: CGPoint(x: r.minX + radius, y: r.maxY - radius), radius: radius, startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false)
+        } else {
+            p.addLine(to: CGPoint(x: r.minX + radius, y: r.maxY))
+            p.addQuadCurve(to: CGPoint(x: r.minX - 6, y: r.maxY), control: CGPoint(x: r.minX + 4, y: r.maxY))
+            p.addQuadCurve(to: CGPoint(x: r.minX, y: r.maxY - 10), control: CGPoint(x: r.minX - 1, y: r.maxY - 2))
+        }
+        p.addLine(to: CGPoint(x: r.minX, y: r.minY + radius))
+        p.addArc(center: CGPoint(x: r.minX + radius, y: r.minY + radius), radius: radius, startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false)
+        p.closeSubpath()
         return p
     }
 }
