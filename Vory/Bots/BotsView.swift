@@ -355,12 +355,13 @@ struct RoomView: View {
     @State private var text = ""
     @State private var error: String?
     @State private var cursor = 0
+    @State private var loaded = false
     /// One thread per room composer; the gateway wants the same id on every message.
     private let threadID = "main"
 
     /// Which rows draw: the human's messages as blue bubbles, the bots' as grey ones with the
     /// bot in front, room activity as a quiet line; everything else stays out of the way.
-    private var shown: [RoomEvent] { events.filter { ["message.user", "message.member", "room.activity"].contains($0.kind) } }
+    private var shown: [RoomEvent] { events.filter { $0.kind.hasPrefix("message.") || $0.kind == "room.activity" } }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -377,7 +378,7 @@ struct RoomView: View {
                                     .foregroundStyle(.white)
                                     .background(Color.accentColor, in: .rect(cornerRadius: 18))
                             }
-                        case "message.member":
+                        case _ where ev.kind.hasPrefix("message."):
                             let member = ev.payload["member_id"]?.stringValue ?? ev.actor.id
                             let profile = room.members.first { $0.memberId == member || $0.handle == member }?.profile ?? member
                             HStack(alignment: .bottom, spacing: 8) {
@@ -400,6 +401,24 @@ struct RoomView: View {
                     Color.clear.frame(height: 0).id("bottom")
                 }
                 .padding()
+            }
+            .overlay {
+                // Nothing said yet: the bots in the room, the way a new chat shows its bot.
+                if shown.isEmpty, loaded, error == nil {
+                    VStack(spacing: 12) {
+                        HStack(spacing: -14) {
+                            ForEach(Array(room.members.enumerated()), id: \.offset) { i, m in
+                                BotAvatar(profile: m.profile ?? m.handle ?? "?", size: 56, mood: BotFaceView.Mood(profile: "room-\(room.roomId)-\(i)"))
+                                    .zIndex(Double(room.members.count - i))
+                            }
+                        }
+                        Text(room.members.compactMap { $0.displayName ?? $0.handle ?? $0.profile }.formatted(.list(type: .and)))
+                            .font(.subheadline.weight(.medium)).multilineTextAlignment(.center)
+                        Text("Say something to the group").foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 32)
+                    .transition(.opacity)
+                }
             }
             .safeAreaInset(edge: .bottom) {
                 HStack {
@@ -426,6 +445,7 @@ struct RoomView: View {
             let r: GroupsLogResult = try await rt.rpc("groups.log", ["room_id": .string(room.roomId), "since_seq": .number(Double(cursor)), "limit": 200]).decode()
             if cursor == 0 { events = r.events } else { events.append(contentsOf: r.events) }
             cursor = r.latestSeq
+            loaded = true
         } catch { self.error = error.localizedDescription }
     }
 

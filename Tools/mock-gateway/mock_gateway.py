@@ -283,6 +283,7 @@ def rest(path: str, query: dict) -> tuple[int, object] | None:
 
 RESTART: dict = {}
 ROOMS: list = []
+ROOM_LOGS: dict = {}
 
 
 def process_request(connection, request):
@@ -442,6 +443,9 @@ class Gateway:
         def ok(result: dict) -> dict:
             return {"jsonrpc": "2.0", "id": rid, "result": result}
 
+        def err(code: int, message: str) -> dict:
+            return {"jsonrpc": "2.0", "id": rid, "error": {"code": code, "message": message}}
+
         if method == "ping":
             return ok({"pong": True})
         if method == "profiles.list":
@@ -453,13 +457,31 @@ class Gateway:
         if method == "groups.list":
             return ok({"rooms": ROOMS, "next_offset": None})
         if method == "groups.create":
-            room = {"room_id": f"room-{len(ROOMS) + 1}", "name": p.get("name") or "Room", "members": [
-                {"member_id": "m1", "profile": "default", "handle": "hermes", "display_name": "Hermes"}],
+            members = [{"member_id": f"m{i + 1}", "profile": m.get("profile"), "handle": m.get("handle") or m.get("profile"),
+                        "display_name": (m.get("handle") or m.get("profile") or "").capitalize()} for i, m in enumerate(p.get("members") or [])] \
+                or [{"member_id": "m1", "profile": "default", "handle": "hermes", "display_name": "Hermes"}]
+            room = {"room_id": p.get("room_id") or f"room-{len(ROOMS) + 1}", "name": p.get("name") or "Room", "members": members,
                 "updated_at": time.time(), "disbanded_at": None, "latest_seq": 0}
             ROOMS.append(room)
             return ok({"room": room})
+        if method == "groups.send":
+            # The real gateway insists on payload == {text, thread_id} and an identifier event_id.
+            payload = p.get("payload") or {}
+            if set(payload) != {"text", "thread_id"}:
+                return err(-32602, "user payload is missing fields: thread_id" if "thread_id" not in payload else "unexpected payload fields")
+            room_id = p.get("room_id"); log = ROOM_LOGS.setdefault(room_id, [])
+            def ev(kind, actor, pl):
+                log.append({"room_id": room_id, "seq": len(log) + 1, "event_id": f"evt-{uuid.uuid4().hex[:12]}",
+                            "kind": kind, "actor": actor, "payload": pl, "created_at": time.time()})
+            ev("message.user", {"kind": "user", "id": "user"}, {"text": payload["text"], "thread_id": "main"})
+            ev("room.activity", {"kind": "system", "id": "room"}, {"status": "hermes is typing…"})
+            ev("message.member", {"kind": "member", "id": "m1"}, {"text": f"Got it — **{payload['text']}**. On it.", "member_id": "m1", "thread_id": "main"})
+            return ok({"event_id": log[-3]["event_id"], "seq": log[-3]["seq"]})
         if method == "groups.log":
-            return ok({"events": [], "cursor": 0, "latest_seq": 0, "has_more": False})
+            log = ROOM_LOGS.get(p.get("room_id"), [])
+            since = int(p.get("since_seq") or 0)
+            evs = [e for e in log if e["seq"] > since]
+            return ok({"events": evs, "cursor": (evs[-1]["seq"] if evs else since), "latest_seq": len(log), "has_more": False})
         if method == "client.capabilities":
             return ok({"server_requests": ["approval", "clarify", "sudo", "secret",
                                            "vault.unlock_prompt", "vault.save_login", "vault.code"]})

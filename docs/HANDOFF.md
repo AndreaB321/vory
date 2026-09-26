@@ -9,9 +9,12 @@ at a time, ship a TestFlight build, wait for their verdict.
 
 - **Latest TestFlight build: 1.0.1 (43)** (42 before it), uploaded 2026-09-26 ~15:05 (31–41 earlier that day),
   companion 1.0.26.
-- **Build 43 uploaded 2026-09-26 ~15:50** — the build-42 review list (see its entry). Awaiting the
-  user's verdict; phone-only checks: chat menus with the keyboard up, LA Approve/Deny, tilt
-  switch, Vory Summaries (needs Apple Intelligence).
+- **Build 44 in progress (2026-09-26 evening)** — the build-43 review list, all done and committed
+  (`0c4473e` + follow-ups); sim-verified in light mode. **Not uploaded yet**: the user picks a
+  chat-row variant (a/b/c screenshots sent) and says "ship it" first. Phone-only checks: LA
+  glass phase glyphs, test notification (no reply, glass cloud), group send on the real gateway,
+  attachment bubble after send, Software Update "Checking…" + Vory turn, summaries scroll.
+- Build 43 (2026-09-26 ~15:50) reviewed: approvals work, summaries "look amazing".
 - **Public beta rule (user, 2026-09-26):** nothing user-specific in notes, setup copy, sample data
   or docs — no bot names, gateway names or hostnames. Write for strangers.
   Build 39 (shipped on the user's "ship it"): dark-mode icon blue lighter
@@ -161,6 +164,55 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
   `hermes.text` (≤1200) and `hermes.title`; payload trimmed under Apple's 4 KB.
 
 ## Change log
+
+### 2026-09-26 (build 44, from the build-43 review)
+- **Light-mode bot colour everywhere painted**: `BotFace.draw(..., light:)` →
+  `drawGlassBody(light:)` uses the live glass's light recipe (lighter shadow 0.12, fill 0.82→0.68,
+  rim dark 0.10, specular 0.5). `BotFaceView` passes `colorScheme == .light`. Menu/picker images
+  (`BotAvatarImage.make(scheme:)`) render for the current scheme and are `.renderingMode(.original)`
+  so the toolbar/menu tint no longer paints them blue; `.id` keys include the scheme. Fixes the
+  corner profile button, Settings picker, context-menu preview and app-switcher snapshot.
+- **Per-shape seating**: `BotFace.baseline(of:)` is now a hand-set table (blob .985, pill .795,
+  cloud .825, triangle .815, others .96) and `seatDrop(_:)` = distance to the blob's base. `BotCard`
+  overlap `10 + 78 * seatDrop`, chat header `9 + 52 * seatDrop`. DEBUG `-vory-shape-grid` overlays
+  every shape on a pill on the Bots tab to eyeball it.
+- **Group chats**: `groups.send` params `{room_id, event_id: "evt-<12 hex>", payload: {text,
+  thread_id: "main"}}` (the gateway rejects any other payload key set). RoomView renders
+  `message.user` (blue bubble, right), any other `message.*` (grey bubble with the member's bot,
+  name above) and `room.activity` (`payload.status`, quiet centred line); other kinds hidden.
+  Empty state shows the room's bots overlapped + names + "Say something to the group"
+  (`loaded` flag so it does not flash before the first `groups.log`). Chats list: filter toggle
+  "Group chats" (`chats.filter.groups`), context-menu `RoomPreview` (last 5 messages), swipe
+  leading Archive (local `chats.archivedRooms` CSV of room ids; hidden unless "Archived" is on)
+  and trailing Delete (tries `groups.disband`, `groups.delete`, `groups.close`; alert first).
+  Mock gateway now has `groups.send` (validates the payload, appends user + activity + member
+  reply to `ROOM_LOGS`) and a real `groups.log`.
+- **Attachments**: composer strip shows photos as 64 pt thumbnails (tap → QuickLook via
+  `stagedPreview`) with an × badge; other files stay chips. `ChatSession.apply(snapshot:)` keeps
+  local `AttachmentPreview`s for user messages with the same text (the gateway transcript has
+  none) — including the `inflight-user` row — so the photo stays in the bubble after send.
+- **Companion page**: Configure / Software Update section first, then status, then This phone.
+  Software Update "Check again" → card says "Checking for updates…" and Vory (profile
+  `vory-update`) does the 360° turn (`turnFinished` on `checkingCompanion` rising edge).
+- **Wizard**: `StepPage` content margin `headerHeight + 10` (initial 270) so the Install step's
+  section header clears the title. `SpeechBubbleShape(tailOnTop:)` — `VoryTypedBubble` tail now
+  points up at Vory. `Color.readableGreen` (dark: systemGreen; light: 0.10/0.50/0.22) for the done
+  bubble tint and the "Installed at…" line.
+- **Test notification**: NSE sets `categoryIdentifier = "HERMES_TEST"` (registered with no
+  actions, no content extension) and Vory's look `studio:cloud:classic:glass`.
+- **Live Activity**: `GlassDisc` (gradient fill, top specular, gradient rim, shadow) behind
+  `PhaseGlyph` (20 pt) and `PhaseBadge`; attention state keeps yellow with a dark symbol.
+- **Summaries** generate one at a time (`pending` queue, `drain()`, `Task(priority: .utility)`).
+- `UpdateCommit.at` decodes a String or a number (Unix seconds → formatted); fixes the System
+  page's Maintenance decode error.
+- Settings symbols: Scheduled Tasks `timer`, Companion `puzzlepiece.fill` (rows + header cards).
+- Creator Studio swatches get a 1 pt `primary.opacity(0.18)` hairline (white swatch visible).
+  New Bot sheet: preview (84 pt, zero row insets, 6 pt top margin) → Creator Studio → Bot →
+  Model; no auto-focus on Name (it scrolled the sheet to the middle on open).
+- Conversation with a resume error: placeholder hidden, `ContentUnavailableView` padded above
+  the dock + keyboard, composer disabled until the chat opens.
+- **Chat rows**: `ChatRowStyle` — card inset 8 (was 16), row leading inset 12, preview 2 lines;
+  DEBUG `-vory-row-style a|b|c` (a = old, b = default, c = 3-line preview). User to pick.
 
 ### 2026-09-26 (build 43, from the build-42 review)
 - **Tilt** is its own switch (Settings › Bots › "Tilt with the phone", BETA, `bots.tilt`, off by
