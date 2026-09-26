@@ -240,6 +240,20 @@ public final class ChatSession: @MainActor Identifiable, ChatIdentity {
         }
         if isRunning { activity.start(for: self) }
         saveTranscriptCache()
+        Task { await pollPendingApprovals() }
+    }
+
+    /// The fallback the gateway offers for a missed approval frame: anything still waiting on
+    /// this session becomes a card answered through `approval.respond`.
+    public func pollPendingApprovals() async {
+        guard let r = try? await runtime.rpc("approval.pending", ["session_id": .string(runtimeID)], timeout: 10) else { return }
+        let list = r["pending"]?.arrayValue ?? r["approvals"]?.arrayValue ?? (r["request_id"] != nil ? [r] : [])
+        for pa in list {
+            guard let rid = pa["request_id"]?.stringValue, !cards.contains(where: { $0.approval?.requestId == rid }) else { continue }
+            var params = pa.objectValue ?? [:]
+            params["session_id"] = .string(runtimeID)
+            addCard(PendingCard(id: "queue-\(rid)", method: "approval", params: .object(params), viaApprovalRPC: true))
+        }
     }
 
     public func loadUsage() async {

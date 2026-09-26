@@ -28,7 +28,9 @@ struct ComposerView: View {
     private var slashSuggestions: [(name: String, description: String)] {
         guard text.hasPrefix("/"), !text.contains(" "), let catalog else { return [] }
         let q = text.dropFirst().lowercased()
+        // Some gateways list the names with their slash already.
         return catalog.allPairs
+            .map { (name: $0.name.hasPrefix("/") ? String($0.name.dropFirst()) : $0.name, description: $0.description) }
             .filter { q.isEmpty || $0.name.lowercased().hasPrefix(q) }
             .sorted { $0.name.lowercased() < $1.name.lowercased() }
     }
@@ -45,11 +47,12 @@ struct ComposerView: View {
                         ForEach(slashSuggestions, id: \.name) { s in
                             Button { text = "/" + s.name + " " } label: {
                                 HStack(spacing: 10) {
-                                    Text("/" + s.name).font(.subheadline.monospaced().weight(.medium))
+                                    Text("/" + s.name).font(.subheadline.monospaced().weight(.medium)).lineLimit(1)
                                     Text(s.description).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                     Spacer(minLength: 0)
                                 }
-                                .padding(.vertical, 8)
+                                .frame(height: 30)
+                                .padding(.vertical, 4)
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
@@ -60,7 +63,9 @@ struct ComposerView: View {
                     .padding(.horizontal, 14).padding(.vertical, 4)
                 }
                 .scrollIndicators(.visible)
-                .frame(maxHeight: min(commandListCap, CGFloat(slashSuggestions.count) * 38 + 8))
+                // A fixed height; the dock's keyboard handling is manual (ConversationView) so
+                // this scroll view cannot swallow the keyboard inset.
+                .frame(height: min(commandListCap, CGFloat(slashSuggestions.count) * 38 + 8))
                 .glassEffect(.regular, in: .rect(cornerRadius: 16))
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }

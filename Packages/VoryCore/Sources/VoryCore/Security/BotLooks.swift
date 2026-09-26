@@ -20,5 +20,13 @@ public struct BotLooks: Codable, Sendable {
     }
 
     public static func load() -> BotLooks { Keychain.getCodable(BotLooks.self, account: account) ?? BotLooks() }
+
+    /// The key a bot is stored under: its profile name, else its label (the app mirrors both),
+    /// else a case-insensitive match. Nil when the bot is unknown here.
+    public func key(profile: String, label: String) -> String? {
+        for k in [profile, label] where !k.isEmpty { if colors[k] != nil || avatars[k] != nil { return k } }
+        let wanted = [profile.lowercased(), label.lowercased()].filter { !$0.isEmpty }
+        return (Array(colors.keys) + Array(avatars.keys)).first { wanted.contains($0.lowercased()) }
+    }
     public func save() { try? Keychain.setCodable(self, account: Self.account) }
 }

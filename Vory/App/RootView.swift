@@ -61,6 +61,8 @@ struct MainTabView: View {
             if !model.tabBarHidden {
                 VoryTabBar(tabs: tabs) { compose() }
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+                    // Not tappable while it slides away: a tap then switched tabs under an open chat.
+                    .allowsHitTesting(!model.tabBarHidden)
             }
         }
         // Lists inside the pages' navigation stacks do not pick up the inset above on this iOS

@@ -110,8 +110,24 @@ public final class GatewayRuntime {
 
     public func reconnectNow() async { await socket.disconnect(); await socket.connect() }
 
+    /// Tells the gateway this socket answers server → client requests (approval, clarify…).
+    /// Without it the gateway never writes the approval frame and the agent waits with no card.
+    /// The result names what it will send; anything missing "approval" is retried once.
+    public private(set) var serverRequestsAdvertised: [String] = []
+    public func advertiseCapabilities() async {
+        for attempt in 0..<2 {
+            if let r = try? await socket.call("client.capabilities", params: ["server_requests": true], timeout: 15) {
+                serverRequestsAdvertised = r["server_requests"]?.arrayValue?.compactMap(\.stringValue) ?? []
+                log.info("client.capabilities → \(self.serverRequestsAdvertised.joined(separator: ","), privacy: .public)")
+                if serverRequestsAdvertised.contains("approval") || attempt == 1 { return }
+            } else {
+                log.warning("client.capabilities: no answer (attempt \(attempt + 1))")
+            }
+        }
+    }
+
     private func didReconnect() async {
-        _ = try? await socket.call("client.capabilities", params: ["server_requests": true])
+        await advertiseCapabilities()
         for chat in registry.all { await chat.reattachAfterReconnect() }
         await probeCodeSkew()
     }
@@ -143,7 +159,7 @@ public final class GatewayRuntime {
     public func refreshCapabilities() async {
         do {
             try await socket.waitUntilReady()
-            _ = try? await socket.call("client.capabilities", params: ["server_requests": true])
+            await advertiseCapabilities()
             if let caps: GroupsCapabilities = try? (await socket.call("groups.capabilities", params: profileParams())).decode() {
                 hasBotMode = caps.driver ?? false || !(caps.methods ?? []).isEmpty
             } else {
@@ -224,11 +240,17 @@ public final class GatewayRuntime {
     }
 
     private func answer(serverRequest req: ServerRequest) async -> JSONValue? {
-        guard let chat = registry.byRuntime(req.sessionID) else {
-            log.warning("server request for unknown session \(req.sessionID, privacy: .public)")
-            return nil
+        if let chat = registry.byRuntime(req.sessionID) ?? registry.byStored(req.sessionID) {
+            return await chat.answer(serverRequest: req)
         }
-        return await chat.answer(serverRequest: req)
+        // An approval for a session this app has not opened (a cron run, a chat started
+        // elsewhere): refusing it withdraws the prompt, so open the session and show the card.
+        let stored = req.params["stored_session_id"]?.stringValue ?? req.sessionID
+        log.warning("server request \(req.method, privacy: .public) for unopened session \(stored, privacy: .public); opening it")
+        if let chat = try? await openChat(storedID: stored, title: nil, waitForResume: true) {
+            return await chat.answer(serverRequest: req)
+        }
+        return nil
     }
 
     public func setAttention(storedID: String, needed: Bool) {

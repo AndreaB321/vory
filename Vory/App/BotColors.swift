@@ -108,13 +108,23 @@ enum BotLooksMirror {
         // The all-bots glass setting is baked in here, for every profile the gateway knows, so
         // the extensions (which only read this mirror) draw the same bot as the app.
         var avatars = BotAvatarStore.stored()
-        let known = Set(avatars.keys).union(AppModel.shared.runtime?.profiles.map(\.name) ?? [])
-        for profile in known { avatars[profile] = BotAvatarStore.effective(avatars[profile] ?? "") }
+        var colors = BotColors.stored()
+        let profiles = AppModel.shared.runtime?.profiles ?? []
+        let known = Set(avatars.keys).union(profiles.map(\.name))
+        for profile in known {
+            avatars[profile] = BotAvatarStore.effective(avatars[profile] ?? "")
+            if colors[profile] == nil { colors[profile] = BotColors.hex(for: profile) }
+        }
         var photos: [String: Data] = [:]
         for (profile, choice) in avatars where choice == "photo" {
             if let image = BotAvatarStore.photo(for: profile), let data = thumbnail(image) { photos[profile] = data }
         }
-        BotLooks(colors: BotColors.stored(), avatars: avatars, photos: photos).save()
+        // The push names a bot by its profile name; a companion that only knows the label still
+        // finds it, so every look is stored under both.
+        for p in profiles where p.label != p.name && !p.label.isEmpty {
+            avatars[p.label] = avatars[p.name]; colors[p.label] = colors[p.name]; photos[p.label] = photos[p.name]
+        }
+        BotLooks(colors: colors, avatars: avatars, photos: photos).save()
     }
 
     private static func thumbnail(_ image: UIImage) -> Data? {

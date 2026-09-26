@@ -72,7 +72,9 @@ final class NotificationService: UNNotificationServiceExtension {
         }
         // The title is "<bot>" or "<bot> · approval needed": the sender is the part before the dot.
         let bot = content.title.components(separatedBy: " · ").first ?? content.title
-        let png = AvatarRender.image(profile: profile, name: bot, looks: looks)
+        let key = looks.key(profile: profile, label: bot) ?? profile
+        breadcrumb("look for profile '\(profile)' / bot '\(bot)' → \(key.isEmpty ? "none" : key) (mirror has \(looks.avatars.count) bots)")
+        let png = AvatarRender.image(profile: key, name: bot, looks: looks)
         let handle = INPersonHandle(value: profile.isEmpty ? bot : profile, type: .unknown)
         let sender = INPerson(personHandle: handle, nameComponents: nil, displayName: bot, image: png.map { INImage(imageData: $0) },
                               contactIdentifier: nil, customIdentifier: profile.isEmpty ? bot : profile, isMe: false, suggestionType: .none)

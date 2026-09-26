@@ -16,12 +16,14 @@ final class NotificationViewController: UIViewController, UNNotificationContentE
         Keychain.accessGroup = Keychain.sharedGroupFromBundle()
         let looks = BotLooks.load()
         let profile = hermes["profile"] as? String ?? ""
+        let bot = content.title.isEmpty ? (profile.isEmpty ? "Hermes" : profile) : content.title
+        let key = looks.key(profile: profile, label: bot.components(separatedBy: " · ").first ?? bot) ?? profile
         let model = ReplyCard.Model(
-            bot: content.title.isEmpty ? (profile.isEmpty ? "Hermes" : profile) : content.title,
+            bot: bot,
             chatTitle: (hermes["title"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? content.subtitle,
             text: (hermes["text"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? Self.stripTitle(content.body),
-            tintHex: looks.colors[profile] ?? "",
-            avatar: looks.avatars[profile] ?? "initial",
+            tintHex: looks.colors[key] ?? "",
+            avatar: looks.avatars[key] ?? "initial",
             failed: content.categoryIdentifier == "HERMES_ERROR",
             when: notification.date)
         let card = ReplyCard(model: model)
@@ -102,14 +104,17 @@ struct ReplyCard: View {
                 }
             }
             HStack(alignment: .bottom, spacing: 0) {
-                Text(model.text.replacingOccurrences(of: "\n\n", with: "\n"))
-                    .font(.subheadline)
-                    .lineLimit(8)
-                    .truncationMode(.tail)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 14).padding(.vertical, 10)
-                    .background(Color(uiColor: .secondarySystemFill), in: BubbleShape())
-                    .frame(maxWidth: 300, alignment: .leading)
+                ScrollView {
+                    Text(model.text.replacingOccurrences(of: "\n\n", with: "\n"))
+                        .font(.subheadline)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 14).padding(.vertical, 10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .background(Color(uiColor: .secondarySystemFill), in: BubbleShape())
+                .clipShape(BubbleShape())
+                .frame(maxWidth: 300, alignment: .leading)
                 Spacer(minLength: 36)
             }
         }

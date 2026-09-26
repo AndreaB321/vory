@@ -244,8 +244,18 @@ public enum BotFace {
             layer.clip(to: body)
             // Specular: light pooling along the top, fading out a third of the way down.
             layer.fill(Path(box), with: .linearGradient(Gradient(colors: [.white.opacity(0.42), .white.opacity(0.05), .white.opacity(0)]), startPoint: CGPoint(x: 0, y: box.minY), endPoint: CGPoint(x: 0, y: box.maxY * 0.5)))
-            // Rim: bright where the light hits (top-left), dark on the underside.
-            layer.stroke(body, with: .linearGradient(Gradient(colors: [.white.opacity(0.9), .white.opacity(0.15), .black.opacity(0.28)]), startPoint: CGPoint(x: box.minX, y: box.minY), endPoint: CGPoint(x: box.maxX, y: box.maxY)), lineWidth: s * 0.045)
+        }
+        // Rim: bright where the light hits (top-left), dark on the underside. Not a stroke: the
+        // cloud is several overlapping pieces and a stroke draws every inner edge (the doubled
+        // cloud seen in the profile menu). Fill the body, then punch out the body shrunk a little
+        // about its centre, which leaves only the outline.
+        ctx.drawLayer { layer in
+            layer.fill(body, with: .linearGradient(Gradient(colors: [.white.opacity(0.9), .white.opacity(0.15), .black.opacity(0.28)]), startPoint: CGPoint(x: box.minX, y: box.minY), endPoint: CGPoint(x: box.maxX, y: box.maxY)))
+            layer.blendMode = .destinationOut
+            let b = body.boundingRect
+            let k = max(0, 1 - (s * 0.045) / max(b.width, 1))
+            let inner = body.applying(CGAffineTransform(translationX: b.midX, y: b.midY).scaledBy(x: k, y: k).translatedBy(x: -b.midX, y: -b.midY))
+            layer.fill(inner, with: .color(.black))
         }
     }
 

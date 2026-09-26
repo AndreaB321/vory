@@ -12,6 +12,11 @@ struct ConversationView: View {
     @State private var composerText = ""
     @State private var dockHeight: CGFloat = 60
     @State private var headerHeight: CGFloat = 96
+    /// The keyboard's height above the home-indicator area. Tracked by hand for the dock as the
+    /// transcript does for itself: SwiftUI's own avoidance hands the inset to any scroll view in
+    /// the dock (the command list) instead of lifting the dock, which left the composer under
+    /// the keyboard.
+    @State private var keyboardInset: CGFloat = 0
     @Namespace private var glassNamespace
     @Environment(\.dismiss) private var dismiss
 
@@ -28,6 +33,16 @@ struct ConversationView: View {
                     .overlay(alignment: .bottom) {
                         BottomDock(chat: chat, text: $composerText, namespace: glassNamespace)
                             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { if $0 < 400 { dockHeight = $0 } }
+                            .padding(.bottom, keyboardInset)
+                    }
+                    .ignoresSafeArea(.keyboard, edges: .bottom)
+                    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { n in
+                        guard let end = (n.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue else { return }
+                        let covered = max(0, UIScreen.main.bounds.maxY - end.minY)
+                        let safeBottom = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow?.safeAreaInsets.bottom }.first ?? 0
+                        withAnimation(.interpolatingSpring(mass: 3, stiffness: 1000, damping: 500, initialVelocity: 0)) {
+                            keyboardInset = max(0, covered - safeBottom)
+                        }
                     }
                     .overlay(alignment: .top) {
                         ChatHeader(chat: chat, onBack: { dismiss() }, onProfile: { showProfile = true }, onContext: { showContext = true },

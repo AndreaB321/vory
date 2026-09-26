@@ -66,7 +66,7 @@ struct SettingsView: View {
                     Section {
                         NavigationLink { GatewaysView() } label: {
                             HStack(spacing: 12) {
-                                Image(systemName: "network").font(.title2).foregroundStyle(.tint).frame(width: 36)
+                                GatewayTile()
                                 VStack(alignment: .leading) {
                                     Text(model.runtime?.connection.name ?? "No gateway").font(.headline)
                                     Text(model.runtime?.connection.gateway.description ?? "Add a gateway").font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -107,6 +107,17 @@ struct SettingsView: View {
     }
 }
 
+/// The gateway's icon in Settings: the Vory cloud on a tile like the other rows, since the
+/// gateway is where the bots live.
+struct GatewayTile: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.blue)
+            .frame(width: 29, height: 29)
+            .overlay { VoryOutlineIcon().foregroundStyle(.white).frame(width: 22, height: 19) }
+            .accessibilityHidden(true)
+    }
+}
+
 struct SettingsLabel: View {
     var title: String; var symbol: String; var color: Color
     init(_ t: String, _ s: String, _ c: Color) { title = t; symbol = s; color = c }
@@ -137,11 +148,10 @@ struct GatewaysView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(c.name).font(.body)
                                     Text(c.gateway.description).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                    HStack(spacing: 6) {
-                                        Text(c.authMode.title).font(.caption2).foregroundStyle(.tertiary)
-                                        if c.hasAccessHeaders { Text("· Cloudflare Access").font(.caption2).foregroundStyle(.tertiary) }
-                                        if let v = c.lastVersion { Text("· Hermes \(v)").font(.caption2).foregroundStyle(.tertiary) }
-                                    }
+                                    // One line of text, not three columns: side by side the parts
+                                    // each wrapped on their own.
+                                    Text(([c.authMode.title] + (c.hasAccessHeaders ? ["Cloudflare Access"] : []) + (c.lastVersion.map { ["Hermes \($0)"] } ?? [])).joined(separator: "  ·  "))
+                                        .font(.caption2).foregroundStyle(.tertiary).lineLimit(2)
                                 }
                             }
                         }

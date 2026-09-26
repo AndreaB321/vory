@@ -83,9 +83,11 @@ final class AppModel {
     var composeProfile: String?
     /// The custom tab bar hides while a chat is open on the Chats tab (path-driven, instant)…
     var chatsPathOpen = false
-    /// …and while any view marked `hidesTabBar()` is on screen on another tab.
-    var tabBarHiders = 0
-    var tabBarHidden: Bool { chatsPathOpen || tabBarHiders > 0 }
+    /// …and while any view marked `hidesTabBar()` is on screen on that tab. Counted per tab: a
+    /// tap on the bar as it slides away switches tabs, and the new tab must show it again while
+    /// the old one keeps its chat open.
+    var tabBarHiders: [AppTab: Int] = [:]
+    var tabBarHidden: Bool { (selectedTab == .chats && chatsPathOpen) || (tabBarHiders[selectedTab] ?? 0) > 0 }
 
     init() {
         NotificationCenter.default.addObserver(forName: .hermesPushRegistrationNeedsSync, object: nil, queue: .main) { [weak self] _ in

@@ -224,19 +224,19 @@ struct VoryOutlineIcon: View {
 /// begins, so this only counts on the other tabs.
 struct HidesTabBar: ViewModifier {
     @Environment(AppModel.self) private var model
-    @State private var counted = false
+    @State private var countedOn: AppModel.AppTab?
 
     func body(content: Content) -> some View {
         content
             .onAppear {
-                guard !counted, model.selectedTab != .chats else { return }
-                counted = true
-                model.tabBarHiders += 1
+                guard countedOn == nil, model.selectedTab != .chats else { return }
+                countedOn = model.selectedTab
+                model.tabBarHiders[model.selectedTab, default: 0] += 1
             }
             .onDisappear {
-                guard counted else { return }
-                counted = false
-                model.tabBarHiders = max(0, model.tabBarHiders - 1)
+                guard let tab = countedOn else { return }
+                countedOn = nil
+                model.tabBarHiders[tab] = max(0, (model.tabBarHiders[tab] ?? 0) - 1)
             }
     }
 }
