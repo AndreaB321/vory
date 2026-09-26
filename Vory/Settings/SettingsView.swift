@@ -695,7 +695,7 @@ struct SoftwareUpdateView: View {
                         CompanionUpdateRows(setup: setup, runtime: rt)
                     } else {
                         VStack(spacing: 8) {
-                            BotFaceView(spec: AboutView.voryBot, size: 56, mood: BotFaceView.Mood(profile: "vory-update", state: setup.checkingCompanion ? .thinking : .guide))
+                            BotFaceView(spec: AboutView.voryBot, size: 56, mood: BotFaceView.Mood(profile: "vory-update", state: .guide, squint: setup.checkingCompanion))
                             Text("Vory Companion \(PushSetupModel.bundledPluginVersion)").font(.headline)
                             Text(setup.checkingCompanion ? "Checking for updates…" : "Your gateway is up to date.").font(.subheadline).foregroundStyle(.secondary)
                                 .contentTransition(.numericText())

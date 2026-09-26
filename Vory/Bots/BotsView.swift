@@ -181,20 +181,26 @@ struct MotionDemoView: View {
         Cell(id: "idle · curious", spec: BotLookSpec(shape: "square", eyes: "curious", hex: "#30D158"), state: .idle, active: false),
     ]
     private let columns = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
+    /// Off: the state cells drop to idle (the bodies morph back); on again: they morph in.
+    @State private var holding = true
     var body: some View {
         ScrollView {
             VStack(spacing: 8) {
                 LazyVGrid(columns: columns, spacing: 18) {
                     ForEach(cells) { c in
+                        let state: BotFace.State = holding || c.state == .working || c.state == .guide ? c.state : .idle
                         VStack(spacing: 6) {
-                            BotFaceView(spec: c.spec, size: 72, active: c.active, mood: BotFaceView.Mood(profile: "demo-\(c.id)", state: c.state))
+                            BotFaceView(spec: c.spec, size: 72, active: c.active && (holding || c.state == .working), mood: BotFaceView.Mood(profile: "demo-\(c.id)", state: state))
                             Text(c.id).font(.caption2).foregroundStyle(.secondary)
                         }
                     }
                 }
                 .padding(16)
-                Button("Finish spin (all)") { for c in cells { BotAmbient.shared.turnFinished(profile: "demo-\(c.id)") } }
-                    .buttonStyle(.glass).padding(.bottom, 120)
+                HStack(spacing: 12) {
+                    Button(holding ? "Release states" : "Hold states") { holding.toggle() }.buttonStyle(.glass)
+                    Button("Finish spin (all)") { for c in cells { BotAmbient.shared.turnFinished(profile: "demo-\(c.id)") } }.buttonStyle(.glass)
+                }
+                .padding(.bottom, 120)
             }
         }
         .background(Color(.systemBackground))

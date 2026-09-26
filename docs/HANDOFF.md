@@ -199,6 +199,65 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
   showing the sparkle title + summary like session rows.
 - **Rename chat**: profile sheet › This chat › Name row → alert with a text field →
   `chat.rename(_:)` (`session.title`).
+- **Motion second cut** (user's follow-up brief, `docs/bot-motion-brief-2.md`): the named states
+  now HOLD a silhouette, morphed in place on the same view (never a swapped view — glass would
+  bloom). `BotFace.Motion` gained `morph` (0…1), `morphTarget` (`MorphTarget`: none /
+  exclamation / pebble / stem), `eyeOpacity`, `dim`. `bodyPath(morph:target:)` →
+  `morphedPath`: the rest outline and the target are sampled as 72-point radial rings from the
+  square's centre (`radialRing`: march out + bisect on `Path.contains`) and lerped point for
+  point; rings are cached per shape/size/target (`ringCache` + lock). Targets: `pebblePath`
+  (superellipse, mass in the lower half, same bounds), `stemmedPath` (body lowered to 80 % from
+  its base + rounded stem to the top of the square), exclamation = the rest ring clipped at 66 %
+  into two polygons (`clip`, Sutherland–Hodgman) each `resample`d (even spacing, start at the
+  topmost point) and paired with the stem / dot rings (`exclamationRects`). States: approval →
+  exclamation over 0.6 s, eyes fade with it, +8° roll (×0.75 on the cloud), nudge every 2.8 s;
+  thinking → pebble 0.55 s, 0.42 squint, blinks at 2.8 s; usingTool → stem 0.6 s, eyes
+  down-right frozen, one lean; error → eyes shut to dashes at the bottom, −4° roll, `dim`
+  (crown/sheen die; live glass darkens the colour layer under the plate and halves the tint);
+  reconnecting → `eyeX = 1.8·sin` (a visible sweep, 1.1 s a side); streaming → 0.55 squint and a
+  sheen every 2.2 s; guide → per 8 s a glance down at the bubble, one sheen, a 1.5 % nod (the
+  `VoryGuide` no longer passes a fixed gaze); working → **3.2 s blocks** (~1.1 s routine, ~2 s
+  rest). `BotFaceView.pose(now:)` morphs back over 0.4 s after a held state ends
+  (`exitTarget`/`exitAt` from `onChange(of: state)`); Reduce Motion jumps to the held pose.
+  `widgetPose` holds the same silhouettes for the Live Activity. Light bots (`isLight`, luminance
+  > 0.82): a 1 pt `#D0D0D5` @ 40 % inner stroke (`drawInnerStroke`, body minus body inset; live:
+  a masked ring) and a cool grey crown instead of white. Demo grid: "Release states" / "Hold
+  states" toggles the holds so the morph in/out can be watched.
+  **Review fixes** (an adversarial workflow — 5 lenses × 2 refuters per finding — ran over the
+  diff; 33 confirmed): held→held changes (thinking → tool, the commonest in a chat) popped to
+  rest — `BotFaceView.pose` now eases the OLD state's whole pose out over 0.4 s (`exitState`,
+  silhouette + roll + dim + eyes lerped) and delays the new state's clock by 0.4 s, so the path
+  is continuous held to held; taps/finish spins dropped the hold — `motion()` computes the
+  state pose first and overlays the one-shot in a `defer`; the sheen never painted on flat bots
+  — the Canvas twin gets `Motion.transformsStill` (yaw/roll/offsets zeroed, sheen kept) instead
+  of `bodyStill`; `drawGlassBody(dim:pale:)` kills the crown/rim with `dim` and paints the cool
+  crown for white bots; `BotFace.rimInner` insets each disjoint piece of a path toward its own
+  centre (the "!" no longer gets a lopsided rim; the cloud's overlapping bumps stay one group),
+  used by the painted rim/sheen/hairline and by `BotBodyShape(inset:)` for the live masks; the
+  pebble and "!" are built from the rest shape's bounds (base and width kept — no sinking into
+  the header pill); the blob's outline phase is continuous (`Motion.blobPhase` from
+  `blobOffset/blobFrozen/blobRunning`, `BotFace.blobRing` computes its live rest ring) so no pop
+  at working↔held; the guide never morphs (`Mood.squint` instead of `.thinking`); Reduce Motion
+  jumps eyeOpacity/dim to the end pose; streaming sheen fades to 0 at the seam; routine 5 is an
+  eyes-only look-up (no 5 s freezes); thinking blinks slowly (`blinkLength` 0.22); `draw()`
+  keeps the eye fade in its own layer; sleepy lids no longer double-apply roll/fade; rings are
+  cached relative to the box origin; bots under 32 pt hold their shape (eyes only).
+  **Pass 2** (the review re-run, cut short by the usage limit but with the key finds): the
+  ease-out still popped at its end (the new state's clock jumped 0 → 0.4 s) and read the old
+  state as fully held — replaced by a **snapshot blend**: `BotFaceView` records the pose it
+  rendered each frame (`shown`, a class box so no state changes mid-frame); on a state change
+  `exitPose = shown.pose`, `exitAt = now`, and `stateSince` is set 0.4 s AHEAD when the snapshot
+  holds a silhouette (so the old shape unwinds before the new grows); `pose()` then lerps
+  morph/roll/dim/eyeOpacity/eyeOpen/eyeX/eyeY from the snapshot to the new pose over 0.4 s.
+  Verified with a 30 fps harness (`scratchpad/cont`): every channel now moves ≤ one ease-step
+  per frame across idle→thinking→tool→thinking→working→idle, a state left mid-morph, a tap
+  during thinking, a finish spin during approval, reconnect and streaming entry/exit. Also:
+  Reduce Motion block runs before the < 32 pt gate (small bots stay eyes-only under RM), RM
+  keeps the held lean and freezes the blob (`onChange(of: wobble && !reduceMotion)`),
+  reconnecting eases in (`smooth(since/0.4)`), routine order interleaves eyes-only beats
+  (`order = [0,5,1,8,2,6,3,7,4,9]`) so the body never rests two blocks running, rings sample
+  144 rays, the "!" on a short body (pill) uses a mark ≥ 72 % of the square so stem and dot
+  clear by ~10 pt, `rimInner` groups pieces by ≥ 20 % area overlap (no flip as the "!" parts).
 
 ### 2026-09-26 (build 44, from the build-43 review)
 - **Light-mode bot colour everywhere painted**: `BotFace.draw(..., light:)` →

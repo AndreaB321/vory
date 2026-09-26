@@ -41,7 +41,8 @@ extension Color {
 }
 
 /// Vory at the top of a guided screen: the glass cloud, a full turn whenever `turnKey` changes
-/// (a new page or a finished step), a squint while `thinking`, and the typed bubble under it.
+/// (a new page or a finished step), a squint while `thinking` (never the thinking hold: the
+/// mascot keeps its shape), and the typed bubble under it.
 struct VoryGuide: View {
     var says: String
     var key: AnyHashable
@@ -53,8 +54,8 @@ struct VoryGuide: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            BotFaceView(spec: AboutView.voryBot, size: size, active: true, gaze: CGPoint(x: 0, y: 0.5),
-                        mood: BotFaceView.Mood(profile: "vory-guide", state: thinking ? .thinking : .guide))
+            BotFaceView(spec: AboutView.voryBot, size: size, active: true,
+                        mood: BotFaceView.Mood(profile: "vory-guide", state: .guide, squint: thinking))
             VoryTypedBubble(text: says, key: key, reduceMotion: reduceMotion,
                             tint: done ? Color.readableGreen : .primary,
                             fill: done ? Color.green.mix(with: Color(uiColor: .secondarySystemFill), by: 0.75) : Color(uiColor: .secondarySystemFill))

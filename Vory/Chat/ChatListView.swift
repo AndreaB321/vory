@@ -428,7 +428,7 @@ struct SessionRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Eyes only in the list: a squint while it writes, no body routines at this size.
+            // In the list: the eyes and the held pose (a squint, the pebble), no routines.
             if showBot { BotAvatar(profile: session.profile ?? "?", size: 34, active: live, mood: BotFaceView.Mood(state: live ? (thinking ? .thinking : .streaming) : .idle)) }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {

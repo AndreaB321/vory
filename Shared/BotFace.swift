@@ -52,7 +52,12 @@ public struct BotLookSpec: Hashable, Sendable {
 /// function of `time`, so a still frame is `time: 0` and the same code animates in a TimelineView.
 public enum BotFace {
     /// The body, filling the square with a little breathing room.
-    public static func bodyPath(_ shape: String, in box: CGRect, time t: Double, active: Bool) -> Path {
+    /// `phase`: the blob's outline phase, when the caller tracks it (BotFaceView keeps it
+    /// continuous across working and rest); otherwise it creeps with `t` while active.
+    public static func bodyPath(_ shape: String, in box: CGRect, time t: Double, active: Bool, morph: Double = 0, target: MorphTarget = .none, phase: Double? = nil) -> Path {
+        let blobPhase = phase ?? (active ? t * 0.19 : 0)
+        // A state hold: the rest silhouette blended toward the state's, one path on the same view.
+        if target != .none, morph > 0.001 { return morphedPath(shape, in: box, target: target, amount: morph, blobPhase: blobPhase) }
         let r = box.insetBy(dx: box.width * 0.04, dy: box.height * 0.04)
         let c = CGPoint(x: r.midX, y: r.midY)
         switch shape {
@@ -96,17 +101,20 @@ public enum BotFace {
             var p = Path()
             let base = min(r.width, r.height) / 2
             // The only shape whose outline moves: a slow creep while working, frozen at rest.
-            let phase = active ? t * 0.19 : 0
             let n = 96
             for i in 0...n {
                 let a = Double(i) / Double(n) * 2 * .pi
-                let wobble = 1 + 0.055 * sin(3 * a + 0.9 + phase) + 0.035 * sin(5 * a - 0.4 - phase * 0.7)
-                let pt = CGPoint(x: c.x + cos(a) * base * wobble, y: c.y + sin(a) * base * wobble)
+                let pt = CGPoint(x: c.x + cos(a) * base * blobWobble(a, phase: blobPhase), y: c.y + sin(a) * base * blobWobble(a, phase: blobPhase))
                 if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
             }
             p.closeSubpath()
             return p
         }
+    }
+
+    /// The blob's radius at angle `a` as a factor of its base radius.
+    static func blobWobble(_ a: Double, phase: Double) -> CGFloat {
+        CGFloat(1 + 0.055 * sin(3 * a + 0.9 + phase) + 0.035 * sin(5 * a - 0.4 - phase * 0.7))
     }
 
     static func roundedPolygon(sides: Int, in r: CGRect, rotation: Double, corner: CGFloat) -> Path {
@@ -190,15 +198,52 @@ public enum BotFace {
         public var eyeY: Double = 0
         /// The eyes stop wandering on their own (they still blink): the asking pose.
         public var freezeGlance = false
-        /// Blink cadence in seconds: 4.3 at rest, 2.8 while thinking or asking.
+        /// Blink cadence in seconds: 4.3 at rest, 2.8 while thinking or asking; and how long a
+        /// blink takes (0.15; thinking's is a slower 0.22).
         public var blinkPeriod: Double = 4.3
+        public var blinkLength: Double = 0.15
+        /// The blob's outline phase, kept continuous by the view; nil = derive from the clock.
+        public var blobPhase: Double? = nil
         /// Light travelling the rim: strength 0…1 centred at `sheenAngle` degrees (0 = right,
         /// clockwise; −130 is the lit top-left corner).
         public var sheen: Double = 0
         public var sheenAngle: Double = -130
+        /// The silhouette a state holds and how far into it (0 rest … 1 held), lerped inside one
+        /// path on the same view — never a second view, so the glass never rebuilds.
+        public var morph: Double = 0
+        public var morphTarget: MorphTarget = .none
+        /// The eyes fade out for the exclamation (0 … 1).
+        public var eyeOpacity: Double = 1
+        /// The crown light and rim die away (0 … 1): the error pose.
+        public var dim: Double = 0
         public static let still = Motion()
-        /// The same pose with the body at rest (Reduce Motion): the eyes keep theirs.
-        public var bodyStill: Motion { var m = self; m.yaw = 0; m.roll = 0; m.dx = 0; m.dy = 0; m.sheen = 0; return m }
+        /// The same pose with the body's transforms at rest and no light on the rim (Reduce
+        /// Motion, painted renders): the eyes and the held silhouette keep theirs.
+        public var bodyStill: Motion { var m = transformsStill; m.sheen = 0; return m }
+        /// The transforms the view applies itself (yaw, roll, offsets) zeroed, for the painted
+        /// twin drawn inside that view — everything else, the sheen included, stays.
+        public var transformsStill: Motion { var m = self; m.yaw = 0; m.roll = 0; m.dx = 0; m.dy = 0; return m }
+    }
+
+    /// The silhouettes a state can hold: the ask's exclamation, thinking's heavier pebble, a
+    /// tool's stem out of the top. Idle, working and the guide never morph.
+    public enum MorphTarget: String, Equatable, Sendable { case none, exclamation, pebble, stem }
+
+    public static func morphTarget(for state: State) -> MorphTarget {
+        switch state {
+        case .awaitingApproval: return .exclamation
+        case .thinking: return .pebble
+        case .usingTool: return .stem
+        default: return .none
+        }
+    }
+
+    /// Whether a colour is light enough (a white or cream bot) to vanish on a light background.
+    public static func isLight(_ hex: String) -> Bool {
+        var h = hex.trimmingCharacters(in: .whitespaces); if h.hasPrefix("#") { h.removeFirst() }
+        guard h.count == 6, let v = UInt32(h, radix: 16) else { return false }
+        let r = Double((v >> 16) & 0xFF) / 255, g = Double((v >> 8) & 0xFF) / 255, b = Double(v & 0xFF) / 255
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.82
     }
 
     static func smooth(_ x: Double) -> Double { let u = min(1, max(0, x)); return u * u * (3 - 2 * u) }
@@ -221,48 +266,59 @@ public enum BotFace {
         var m = Motion()
 
         // The finish: one full turn, a blink as the face goes edge-on, then a glance down at the
-        // new bubble. Plays over anything else.
-        if let f = finishedAt, t - f >= 0, t - f < 1.75 {
-            let u = t - f
-            if u < 1.15 {
-                let k = stroke(u / 1.15)
-                m.yaw = k * 2 * .pi
-                m.sheen = 0.7 * sin(k * .pi); m.sheenAngle = -130 + k * 360
-                if abs(u - 0.575) < 0.08 { m.eyeOpen = 0.1 }
-            } else {
-                m.eyeY = 0.5 * sin((u - 1.15) / 0.6 * .pi)
+        // new bubble. A tap: a small turn and back with a blink and a tick of light on the rim —
+        // pressing a physical chip, not a button. Both play on top of whatever the state holds:
+        // a "!" spins as a "!".
+        var finishing: Double? = nil, tapping: Double? = nil
+        if let f = finishedAt, t - f >= 0, t - f < 1.75 { finishing = t - f }
+        else if let tp = tappedAt, t - tp >= 0, t - tp < 0.55 { tapping = (t - tp) / 0.55 }
+        defer {
+            if let u = finishing {
+                if u < 1.15 {
+                    let k = stroke(u / 1.15)
+                    m.yaw = k * 2 * .pi
+                    m.sheen = 0.7 * sin(k * .pi); m.sheenAngle = -130 + k * 360
+                    if abs(u - 0.575) < 0.08 { m.eyeOpen = min(m.eyeOpen, 0.1) }
+                } else if !m.freezeGlance {
+                    m.eyeY += 0.5 * sin((u - 1.15) / 0.6 * .pi)
+                }
+            } else if let u = tapping {
+                m.yaw = 0.314 * (u < 0.5 ? stroke(u * 2) : stroke((1 - u) * 2))
+                m.sheen = 0.6 * sin(u * .pi); m.sheenAngle = -130 + 90 * u
+                if u > 0.42, u < 0.68 { m.eyeOpen = min(m.eyeOpen, 0.12) }
             }
-            return m
         }
-        // A tap: a small turn and back with a blink, and a tick of light on the rim — pressing a
-        // physical chip, not a button.
-        if let tp = tappedAt, t - tp >= 0, t - tp < 0.55 {
-            let u = (t - tp) / 0.55
-            m.yaw = 0.314 * (u < 0.5 ? stroke(u * 2) : stroke((1 - u) * 2))
-            m.sheen = 0.6 * sin(u * .pi); m.sheenAngle = -130 + 90 * u
-            if u > 0.42, u < 0.68 { m.eyeOpen = 0.12 }
-            return m
-        }
+        if finishing != nil || tapping != nil, state == .working { return m }
 
         switch state {
         case .idle:
             break
         case .guide:
-            // Vory on a guided screen: idle eyes and, once in eight seconds, light across the rim.
+            // Vory on a guided screen — not a working bot. In every eight seconds: one glance
+            // down toward the speech bubble, one light across the rim, one tiny nod. Idle eyes
+            // otherwise; the flat bottom never leaves the shelf.
             let l = (t + Double(seed % 7)).truncatingRemainder(dividingBy: 8)
-            if l > 2.0, l < 2.9 { let u = (l - 2.0) / 0.9; m.sheen = 0.7 * sin(u * .pi); m.sheenAngle = -130 + u * 140 }
+            if l > 1.0, l < 2.6 { m.eyeY = 0.7 * (l < 1.3 ? smooth((l - 1.0) / 0.3) : l > 2.3 ? 1 - smooth((l - 2.3) / 0.3) : 1) }
+            if l > 3.4, l < 4.3 { let u = (l - 3.4) / 0.9; m.sheen = 0.7 * sin(u * .pi); m.sheenAngle = -130 + u * 140 }
+            if l > 5.6, l < 6.2 { m.dy = 0.015 * CGFloat(sin((l - 5.6) / 0.6 * .pi)) }
         case .streaming:
-            // Beside a bubble, too small for the body: a squint and the occasional glance.
+            // Tokens arriving: a held squint and light going round the rim every 2.2 s. The
+            // shape does not change.
             m.eyeOpen = 0.55
+            let u = t.truncatingRemainder(dividingBy: 2.2) / 2.2
+            m.sheen = 0.7 * sin(u * .pi); m.sheenAngle = -130 + u * 160
         case .thinking:
-            // Eyes narrow, a hair of roll, blinks come sooner. No turn: that is for the finish.
+            // The body settles into a shorter, heavier pebble (same bounds, the mass low) and
+            // holds; eyes narrow, a hair of roll, blinks come sooner. No turn: that is for the finish.
+            m.morphTarget = .pebble; m.morph = smooth(since / 0.55)
             m.eyeOpen = 0.42
             m.roll = roll(0.026 * sign) * smooth(since / 0.3)
-            m.blinkPeriod = 2.8
+            m.blinkPeriod = 2.8; m.blinkLength = 0.22
         case .usingTool:
-            // A look down toward where the tool is, and one lean that way as it starts: in,
-            // hold, back. Never a spin.
-            m.eyeX = 0.8; m.eyeY = 0.6
+            // A stem grows out of the top (a key, a lollipop) and holds; the eyes look down
+            // toward where the tool is and stay there; one lean that way as it starts.
+            m.morphTarget = .stem; m.morph = smooth(since / 0.6)
+            m.eyeX = 0.8; m.eyeY = 0.6; m.freezeGlance = true
             if spec.eyes == "classic" || spec.eyes == "bold" { m.eyeOpen = 0.92 }
             if since < 0.9 {
                 let e = since < 0.25 ? smooth(since / 0.25) : since < 0.65 ? 1 : 1 - smooth((since - 0.65) / 0.25)
@@ -270,31 +326,37 @@ public enum BotFace {
                 m.dx = 0.012 * CGFloat(e)
             }
         case .awaitingApproval:
-            // The ask: eyes open and steady, a lean held to one side, and every 2.8 s a blink
-            // then a small nudge toward the person. "Well?"
+            // The ask: the body becomes a bold rounded exclamation and holds, leaning 8°, the
+            // eyes gone with the morph; every 2.8 s a small nudge toward the person. "Well?"
+            m.morphTarget = .exclamation; m.morph = smooth(since / 0.6)
+            m.eyeOpacity = 1 - m.morph
             m.freezeGlance = true
-            m.blinkPeriod = 2.8
-            m.roll = roll((spec.shape == "drop" ? 0.07 : 0.105) * sign) * smooth(since / 0.35)
+            m.roll = 0.14 * sign * rollAmp * smooth(since / 0.5)
             let l = (t + Double(seed % 17) * 0.37).truncatingRemainder(dividingBy: 2.8)
             if l > 0.15, l < 0.6 { m.dx = 0.02 * CGFloat(sin((l - 0.15) / 0.45 * .pi)) * CGFloat(sign) }
         case .error:
-            // Eyes low and lowered, one slow blink, then hold. No turn.
-            m.eyeOpen = 0.35; m.eyeY = 0.8; m.freezeGlance = true
-            if since > 0.3, since < 0.52 { m.eyeOpen = min(m.eyeOpen, 1 - 0.92 * sin((since - 0.3) / 0.22 * .pi)) }
+            // Broken, not asleep: the eyes drop and shut to dashes and stay shut, the body rolls
+            // back 4°, the light on the rim dies. No turn.
+            m.eyeOpen = 0.08; m.eyeY = 1.0; m.freezeGlance = true
+            m.roll = roll(-0.07) * smooth(since / 0.5)
+            m.dim = smooth(since / 0.6)
         case .reconnecting:
-            // A metronome: the eyes swing left, right, left, 1.1 s a swing. Body still.
-            m.eyeX = 0.9 * sin(t * 2 * .pi / 2.2); m.freezeGlance = true
+            // A metronome the eye can see at any size: the eyes swing a side every 1.1 s. Body still.
+            m.eyeX = 1.8 * sin(t * 2 * .pi / 2.2) * smooth(since / 0.4); m.freezeGlance = true
         case .working:
-            // Five-second blocks; the first second or so plays one routine, the rest is still.
+            // Blocks of 3.2 s: about a second of one routine, two of rest — lively, not frantic.
             // In a group the clock is shared and the bots take turns; alone, each bot's blocks
             // are offset by its seed.
-            let block = 5.0
+            let block = 3.2
             let tt = group == nil ? t + Double(seed % 47) * 0.31 : t
             let index = Int(tt / block)
             let u = tt.truncatingRemainder(dividingBy: block)
             if let g = group, g.count > 1, index % g.count != g.index { break }
             // Swift's % keeps the sign: fold to 0…9 so a negative seed cannot pin one routine.
-            var kind = (((index &+ seed) % 10) + 10) % 10
+            // The order interleaves the eyes-only and rim-only beats (5 look-up, 6 squint, 8 sheen)
+            // with body ones, so the body is never still for two blocks running.
+            let order = [0, 5, 1, 8, 2, 6, 3, 7, 4, 9]
+            var kind = order[(((index &+ seed) % 10) + 10) % 10]
             if spec.shape == "triangle", kind == 3 { kind = 4 }   // the triangle leans rather than nods
             switch kind {
             case 0: // the full turn on the spot, the light riding the rim with it
@@ -317,8 +379,9 @@ public enum BotFace {
                 let e = sin(u / 0.9 * .pi)
                 m.roll = roll(0.061 * e * sign)
                 m.dx = 0.012 * CGFloat(e) * CGFloat(sign)
-            case 5: // rest
-                break
+            case 5: // a look up and back, eyes only
+                guard u < 0.9 else { break }
+                m.eyeY = -0.7 * sin(u / 0.9 * .pi)
             case 6: // a squint and settle: narrow, hold, open most of the way
                 if u < 0.18 { m.eyeOpen = 1 - 0.58 * smooth(u / 0.18) }
                 else if u < 0.58 { m.eyeOpen = 0.42 }
@@ -352,13 +415,246 @@ public enum BotFace {
     /// the held lean of one asking, the lowered eyes of an error.
     public static func widgetPose(phase: String, attention: Bool) -> Motion {
         var m = Motion()
-        if attention { m.roll = 0.105; return m }
+        if attention { m.morphTarget = .exclamation; m.morph = 1; m.eyeOpacity = 0; m.roll = 0.14; return m }
         switch phase {
-        case "thinking", "streaming", "tool", "working": m.eyeOpen = 0.42
-        case "error", "failed": m.eyeOpen = 0.35; m.eyeY = 0.8
+        case "thinking", "working": m.morphTarget = .pebble; m.morph = 1; m.eyeOpen = 0.42
+        case "streaming": m.eyeOpen = 0.55
+        case "tool": m.morphTarget = .stem; m.morph = 1; m.eyeX = 0.8; m.eyeY = 0.6
+        case "error", "failed": m.eyeOpen = 0.08; m.eyeY = 1.0; m.roll = -0.07; m.dim = 1
         default: break
         }
         return m
+    }
+
+    // MARK: Morph — a state's silhouette as one continuous path on the same view
+
+    nonisolated(unsafe) private static var ringCache: [String: [([CGPoint], [CGPoint])]] = [:]
+    private static let ringLock = NSLock()
+
+    /// The rest silhouette blended `amount` of the way to `target`. Both are rings of points,
+    /// paired point for point and lerped, so the result is always one path (two subpaths for the
+    /// exclamation) that only changes shape — the plate is never swapped for another view.
+    static func morphedPath(_ shape: String, in box: CGRect, target: MorphTarget, amount: Double, blobPhase: Double = 0) -> Path {
+        // Rings are cached relative to the square's origin, per shape, size and target. The
+        // blob's rest ring is not cached: its outline is wherever its creep has taken it, and
+        // the morph must start and end exactly there.
+        let key = "\(shape)|\(Int(box.width.rounded()))|\(Int(box.height.rounded()))|\(target.rawValue)"
+        let origin = CGRect(origin: .zero, size: box.size)
+        ringLock.lock(); var pairs = ringCache[key]; ringLock.unlock()
+        if pairs == nil {
+            let built = buildMorph(shape, in: origin, target: target)
+            ringLock.lock(); ringCache[key] = built; ringLock.unlock()
+            pairs = built
+        }
+        var rings = pairs ?? []
+        if shape == "blob", !rings.isEmpty {
+            let live = blobRing(in: origin, phase: blobPhase)
+            if target == .exclamation, rings.count == 2 {
+                let split = origin.minY + origin.height * 0.66, n = rings[0].0.count
+                rings[0].0 = resample(clip(live, y: split, keepAbove: true), steps: n)
+                rings[1].0 = resample(clip(live, y: split, keepAbove: false), steps: n)
+            } else {
+                rings[0].0 = live
+            }
+        }
+        let k = CGFloat(min(1, max(0, amount)))
+        var p = Path()
+        for (a, b) in rings {
+            for i in a.indices {
+                let pt = CGPoint(x: box.minX + a[i].x + (b[i].x - a[i].x) * k, y: box.minY + a[i].y + (b[i].y - a[i].y) * k)
+                if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
+            }
+            p.closeSubpath()
+        }
+        return p
+    }
+
+    private static func buildMorph(_ shape: String, in box: CGRect, target: MorphTarget) -> [([CGPoint], [CGPoint])] {
+        let rest = bodyPath(shape, in: box, time: 0, active: false, phase: 0)
+        let bounds = rest.boundingRect
+        let restRing = shape == "blob" ? blobRing(in: box, phase: 0) : radialRing(rest, box: box)
+        switch target {
+        case .pebble:
+            return [(restRing, radialRing(pebblePath(in: bounds), box: box))]
+        case .stem:
+            return [(restRing, radialRing(stemmedPath(rest, in: box), box: box))]
+        case .exclamation:
+            // The rest outline split at two thirds: the upper part becomes the stem, the lower
+            // the dot. Overlapping along the split they fill as the whole; apart they read "!".
+            let split = bounds.minY + bounds.height * 0.66
+            let n = restRing.count
+            let top = resample(clip(restRing, y: split, keepAbove: true), steps: n)
+            let bottom = resample(clip(restRing, y: split, keepAbove: false), steps: n)
+            // A short body (the pill) gets a taller "!" than itself, so the dot clears the stem.
+            var mark = bounds
+            if mark.height < box.height * 0.72 {
+                let h = box.height * 0.72
+                mark = CGRect(x: mark.minX, y: min(max(box.minY, mark.midY - h / 2), box.maxY - h), width: mark.width, height: h)
+            }
+            let (stem, dot) = exclamationRects(in: mark)
+            let stemRing = resample(radialRing(Path(roundedRect: stem, cornerRadius: stem.width / 2), box: stem), steps: n)
+            let dotRing = resample(radialRing(Path(ellipseIn: dot), box: dot), steps: n)
+            return [(top, stemRing), (bottom, dotRing)]
+        case .none:
+            return [(restRing, restRing)]
+        }
+    }
+
+    /// The blob's outline as a ring, straight from its formula (no ray marching), at `phase`.
+    static func blobRing(in box: CGRect, phase: Double, steps: Int = 144) -> [CGPoint] {
+        let r = box.insetBy(dx: box.width * 0.04, dy: box.height * 0.04)
+        let c = CGPoint(x: r.midX, y: r.midY)
+        let base = min(r.width, r.height) / 2
+        return (0..<steps).map { i in
+            let a = Double(i) / Double(steps) * 2 * .pi - .pi / 2
+            let w = blobWobble(a, phase: phase)
+            return CGPoint(x: c.x + CGFloat(cos(a)) * base * w, y: c.y + CGFloat(sin(a)) * base * w)
+        }
+    }
+
+    /// The outline as points on rays from the square's centre (clockwise from the top). Every
+    /// rest shape, the pebble and the stemmed body are star-shaped from there, so each ray
+    /// meets the outline once: march out for the last inside sample, then bisect.
+    static func radialRing(_ path: Path, box: CGRect, steps: Int = 144) -> [CGPoint] {
+        let c = CGPoint(x: box.midX, y: box.midY)
+        let reach = hypot(box.width, box.height) / 2
+        let march = 48
+        return (0..<steps).map { i in
+            let a = Double(i) / Double(steps) * 2 * .pi - .pi / 2
+            let dx = CGFloat(cos(a)), dy = CGFloat(sin(a))
+            func inside(_ r: CGFloat) -> Bool { path.contains(CGPoint(x: c.x + dx * r, y: c.y + dy * r)) }
+            var lastIn: CGFloat = 0
+            for k in 1...march { let r = reach * CGFloat(k) / CGFloat(march); if inside(r) { lastIn = r } }
+            var lo = lastIn, hi = min(reach, lastIn + reach / CGFloat(march))
+            for _ in 0..<8 { let mid = (lo + hi) / 2; if inside(mid) { lo = mid } else { hi = mid } }
+            return CGPoint(x: c.x + dx * lo, y: c.y + dy * lo)
+        }
+    }
+
+    /// The polygon on one side of a horizontal line (Sutherland–Hodgman against a half-plane).
+    private static func clip(_ poly: [CGPoint], y: CGFloat, keepAbove: Bool) -> [CGPoint] {
+        var out: [CGPoint] = []
+        func inside(_ p: CGPoint) -> Bool { keepAbove ? p.y <= y : p.y >= y }
+        for i in poly.indices {
+            let a = poly[i], b = poly[(i + 1) % poly.count]
+            let ia = inside(a), ib = inside(b)
+            if ia { out.append(a) }
+            if ia != ib, b.y != a.y { out.append(CGPoint(x: a.x + (b.x - a.x) * (y - a.y) / (b.y - a.y), y: y)) }
+        }
+        return out
+    }
+
+    /// `steps` points at even spacing along the polygon, starting from the point most directly
+    /// above its centroid, so two rings pair up top to top and never twist while they blend.
+    private static func resample(_ poly: [CGPoint], steps: Int) -> [CGPoint] {
+        guard poly.count >= 3 else { return Array(repeating: poly.first ?? .zero, count: steps) }
+        var lengths: [CGFloat] = [0]
+        for i in poly.indices { let a = poly[i], b = poly[(i + 1) % poly.count]; lengths.append(lengths[lengths.count - 1] + hypot(b.x - a.x, b.y - a.y)) }
+        let total = max(lengths[lengths.count - 1], 0.001)
+        var out: [CGPoint] = []
+        var seg = 0
+        for k in 0..<steps {
+            let d = total * CGFloat(k) / CGFloat(steps)
+            while seg < poly.count - 1, lengths[seg + 1] < d { seg += 1 }
+            let a = poly[seg], b = poly[(seg + 1) % poly.count]
+            let u = (d - lengths[seg]) / max(lengths[seg + 1] - lengths[seg], 0.0001)
+            out.append(CGPoint(x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u))
+        }
+        let cx = out.reduce(0) { $0 + $1.x } / CGFloat(out.count), cy = out.reduce(0) { $0 + $1.y } / CGFloat(out.count)
+        var best = 0, bestAngle = CGFloat.greatestFiniteMagnitude
+        for (i, p) in out.enumerated() { let ang = abs(atan2(p.x - cx, -(p.y - cy))); if ang < bestAngle { bestAngle = ang; best = i } }
+        return Array(out[best...] + out[..<best])
+    }
+
+    /// Thinking's hold: a shorter, heavier pebble in the same bounds — the mass sits in the lower
+    /// half, the underside flatter than the crown. Not a smaller body: a different one.
+    /// `box` is the rest shape's own bounds: the pebble keeps that width and base, and its crown
+    /// comes down to a quarter of the way from the top.
+    static func pebblePath(in box: CGRect) -> Path {
+        let ryBottom = box.height * 0.30, ryTop = box.height * 0.44
+        let c = CGPoint(x: box.midX, y: box.maxY - ryBottom)
+        let rx = box.width * 0.49
+        var p = Path()
+        let n = 96
+        for i in 0...n {
+            let a = Double(i) / Double(n) * 2 * .pi - .pi / 2
+            let co = cos(a), si = sin(a)
+            let e = si > 0 ? 2.0 / 2.8 : 2.0 / 2.15
+            let x = c.x + rx * CGFloat(co < 0 ? -pow(-co, e) : pow(co, e))
+            let y = c.y + (si > 0 ? ryBottom : ryTop) * CGFloat(si < 0 ? -pow(-si, e) : pow(si, e))
+            if i == 0 { p.move(to: CGPoint(x: x, y: y)) } else { p.addLine(to: CGPoint(x: x, y: y)) }
+        }
+        p.closeSubpath()
+        return p
+    }
+
+    /// Using a tool: the body keeps its base and lets its crown down a fifth, and a rounded stem
+    /// rises from the top to just under the square's edge — a key, a lollipop. One path.
+    static func stemmedPath(_ rest: Path, in box: CGRect) -> Path {
+        let b = rest.boundingRect
+        // The crown comes down a seventh (the base stays put) to make room for the stem.
+        let lowered = rest.applying(CGAffineTransform(translationX: 0, y: b.maxY).scaledBy(x: 1, y: 0.86).translatedBy(x: 0, y: -b.maxY))
+        let top = lowered.boundingRect.minY
+        let w = box.width * 0.15
+        let stemTop = box.minY + box.height * 0.03
+        var p = lowered
+        p.addPath(Path(roundedRect: CGRect(x: box.midX - w / 2, y: stemTop, width: w, height: max(w, top + box.height * 0.14 - stemTop)), cornerRadius: w / 2))
+        return p
+    }
+
+    /// The ask: a thick rounded stem and, apart from it, a dot — inside the same square.
+    /// `box` is the rest shape's own bounds, so the "!" keeps the bot's footprint: as tall as the
+    /// body was, the dot on its base.
+    static func exclamationRects(in box: CGRect) -> (stem: CGRect, dot: CGRect) {
+        let stem = CGRect(x: box.midX - box.width * 0.12, y: box.minY + box.height * 0.05, width: box.width * 0.24, height: box.height * 0.52)
+        let d = min(box.width * 0.24, box.height * 0.26)
+        let dot = CGRect(x: box.midX - d / 2, y: box.maxY - d, width: d, height: d)
+        return (stem, dot)
+    }
+
+    /// The body inset by `d` for a rim: each separate piece of the path (the "!"'s stem and
+    /// dot) shrinks toward its own centre, by `d` on every side; pieces that overlap (the
+    /// cloud's bumps) shrink together so no inner edge appears.
+    static func rimInner(_ body: Path, inset d: CGFloat) -> Path {
+        var pieces: [Path] = []
+        var current = Path()
+        body.cgPath.applyWithBlock { el in
+            let e = el.pointee
+            switch e.type {
+            case .moveToPoint:
+                if !current.isEmpty { pieces.append(current) }
+                current = Path(); current.move(to: e.points[0])
+            case .addLineToPoint: current.addLine(to: e.points[0])
+            case .addQuadCurveToPoint: current.addQuadCurve(to: e.points[1], control: e.points[0])
+            case .addCurveToPoint: current.addCurve(to: e.points[2], control1: e.points[0], control2: e.points[1])
+            case .closeSubpath: current.closeSubpath()
+            @unknown default: break
+            }
+        }
+        if !current.isEmpty { pieces.append(current) }
+        var groups: [(box: CGRect, path: Path)] = []
+        // Pieces that overlap by a fifth of the smaller one's area belong together (the cloud's
+        // bumps, the stem in the body); pieces that merely touch (the "!" as it parts) do not, so
+        // the grouping never flips mid-morph.
+        func overlaps(_ a: CGRect, _ b: CGRect) -> Bool {
+            let i = a.intersection(b)
+            guard !i.isNull else { return false }
+            return i.width * i.height >= 0.2 * min(a.width * a.height, b.width * b.height)
+        }
+        for piece in pieces {
+            let b = piece.boundingRect
+            if let i = groups.firstIndex(where: { overlaps($0.box, b) }) {
+                groups[i].box = groups[i].box.union(b); groups[i].path.addPath(piece)
+            } else {
+                groups.append((b, piece))
+            }
+        }
+        var out = Path()
+        for g in groups {
+            let sx = max(0, 1 - 2 * d / max(g.box.width, 1)), sy = max(0, 1 - 2 * d / max(g.box.height, 1))
+            out.addPath(g.path.applying(CGAffineTransform(translationX: g.box.midX, y: g.box.midY).scaledBy(x: sx, y: sy).translatedBy(x: -g.box.midX, y: -g.box.midY)))
+        }
+        return out
     }
 
     /// Where each shape's bottom edge sits, as a fraction of the square (the blob reaches
@@ -429,37 +725,59 @@ public enum BotFace {
             ctx.translateBy(x: -size.width / 2, y: -size.height * 0.96)
         }
 
-        let body = bodyPath(spec.shape, in: box, time: t, active: active)
+        let body = bodyPath(spec.shape, in: box, time: t, active: active, morph: motion.morph, target: motion.morphTarget, phase: motion.blobPhase)
+        let pale = isLight(spec.hex)
         if part != .eyes {
             if spec.isGlass {
-                drawGlassBody(body, tint: tint, in: &ctx, box: box, s: s, light: light)
+                drawGlassBody(body, tint: tint, in: &ctx, box: box, s: s, light: light, dim: motion.dim, pale: pale)
             } else {
                 ctx.fill(body, with: .linearGradient(Gradient(colors: [tint.opacity(1), tint.opacity(0.84)]), startPoint: CGPoint(x: 0, y: 0), endPoint: CGPoint(x: 0, y: size.height)))
                 // A soft light across the top, clipped to the body so shapes made of several pieces (the
-                // cloud) show no seams: just the shape and its colour.
+                // cloud) show no seams: just the shape and its colour. On a white bot the crown is
+                // a cool grey instead, so it still shows on a light background.
                 ctx.drawLayer { layer in
                     layer.clip(to: body)
-                    layer.fill(Path(box), with: .linearGradient(Gradient(colors: [.white.opacity(0.22), .white.opacity(0)]), startPoint: .zero, endPoint: CGPoint(x: 0, y: size.height * 0.55)))
+                    let crown: Color = pale ? Color(red: 0.72, green: 0.76, blue: 0.86).opacity(0.5 * (1 - motion.dim)) : .white.opacity(0.22 * (1 - motion.dim))
+                    layer.fill(Path(box), with: .linearGradient(Gradient(colors: [crown, crown.opacity(0)]), startPoint: .zero, endPoint: CGPoint(x: 0, y: size.height * 0.55)))
+                }
+            }
+            // A light bot gets a hairline inside its edge so it does not vanish on a light page.
+            if pale { drawInnerStroke(body, in: &ctx, s: s) }
+            if motion.dim > 0.01 {
+                ctx.drawLayer { layer in layer.clip(to: body); layer.fill(Path(box), with: .color(.black.opacity(0.22 * motion.dim))) }
+            }
+        }
+        if part != .eyes, motion.sheen > 0.01 { drawSheen(body, in: &ctx, box: box, s: s, sheen: motion.sheen * (1 - motion.dim), angle: motion.sheenAngle, glass: spec.isGlass) }
+        guard part != .body else { return }
+
+        // Eyes: black shapes, blinking by squashing to a line, glancing by sliding. In their own
+        // layer so their fade (the "!") never leaks into what a caller draws next.
+        let eyes = eyePaths(spec, size: size, time: t, active: active || idleEyes, gaze: gaze, strain: strain, glanceFree: glanceFree, motion: motion)
+        let eyeInk = spec.isGlass ? ink.opacity(0.9) : ink
+        ctx.drawLayer { eyeLayer in
+            eyeLayer.opacity = motion.eyeOpacity
+            if eyes.stroked {
+                eyeLayer.stroke(eyes.path, with: .color(eyeInk), style: StrokeStyle(lineWidth: s * 0.045, lineCap: .round))
+            } else {
+                eyeLayer.fill(eyes.path, with: .color(eyeInk))
+                if spec.isGlass {
+                    // The rim of a dark glass eye: a hair of light along its top edge.
+                    eyeLayer.drawLayer { layer in
+                        layer.clip(to: eyes.path)
+                        layer.stroke(eyes.path, with: .linearGradient(Gradient(colors: [.white.opacity(0.55), .white.opacity(0)]), startPoint: CGPoint(x: 0, y: eyes.path.boundingRect.minY), endPoint: CGPoint(x: 0, y: eyes.path.boundingRect.maxY)), lineWidth: s * 0.03)
+                    }
                 }
             }
         }
-        if part != .eyes, motion.sheen > 0.01 { drawSheen(body, in: &ctx, box: box, s: s, sheen: motion.sheen, angle: motion.sheenAngle, glass: spec.isGlass) }
-        guard part != .body else { return }
+    }
 
-        // Eyes: black shapes, blinking by squashing to a line, glancing by sliding.
-        let eyes = eyePaths(spec, size: size, time: t, active: active || idleEyes, gaze: gaze, strain: strain, glanceFree: glanceFree, motion: motion)
-        let eyeInk = spec.isGlass ? ink.opacity(0.9) : ink
-        if eyes.stroked {
-            ctx.stroke(eyes.path, with: .color(eyeInk), style: StrokeStyle(lineWidth: s * 0.045, lineCap: .round))
-        } else {
-            ctx.fill(eyes.path, with: .color(eyeInk))
-            if spec.isGlass {
-                // The rim of a dark glass eye: a hair of light along its top edge.
-                ctx.drawLayer { layer in
-                    layer.clip(to: eyes.path)
-                    layer.stroke(eyes.path, with: .linearGradient(Gradient(colors: [.white.opacity(0.55), .white.opacity(0)]), startPoint: CGPoint(x: 0, y: eyes.path.boundingRect.minY), endPoint: CGPoint(x: 0, y: eyes.path.boundingRect.maxY)), lineWidth: s * 0.03)
-                }
-            }
+    /// One point of `#D0D0D5` at 40 % just inside the edge (the body minus the body inset), for
+    /// white and cream bots.
+    static func drawInnerStroke(_ body: Path, in ctx: inout GraphicsContext, s: CGFloat) {
+        ctx.drawLayer { layer in
+            layer.fill(body, with: .color(Color(red: 0.816, green: 0.816, blue: 0.835).opacity(0.4)))
+            layer.blendMode = .destinationOut
+            layer.fill(rimInner(body, inset: 1), with: .color(.black))
         }
     }
 
@@ -469,7 +787,10 @@ public enum BotFace {
     /// `light`: match the live glass on a light background — the live version lays the colour
     /// down at 62 % plus a light glass tint, so the painted one stays airy: no dark rim, a
     /// lighter shadow, the colour itself a touch lifted. Dark mode keeps the deeper version.
-    static func drawGlassBody(_ body: Path, tint: Color, in ctx: inout GraphicsContext, box: CGRect, s: CGFloat, light: Bool = false) {
+    /// `dim`: the light dies (the error pose). `pale`: a white bot gets a cool grey crown so it
+    /// still shows on a light page.
+    static func drawGlassBody(_ body: Path, tint: Color, in ctx: inout GraphicsContext, box: CGRect, s: CGFloat, light: Bool = false, dim: Double = 0, pale: Bool = false) {
+        let lit = 1 - dim
         ctx.drawLayer { layer in
             layer.addFilter(.shadow(color: .black.opacity(light ? 0.12 : 0.28), radius: s * 0.05, y: s * 0.03))
             let top = light ? tint.opacity(0.82) : tint.opacity(0.92)
@@ -479,20 +800,18 @@ public enum BotFace {
         ctx.drawLayer { layer in
             layer.clip(to: body)
             // Specular: light pooling along the top, fading out a third of the way down.
-            layer.fill(Path(box), with: .linearGradient(Gradient(colors: [.white.opacity(light ? 0.5 : 0.42), .white.opacity(0.05), .white.opacity(0)]), startPoint: CGPoint(x: 0, y: box.minY), endPoint: CGPoint(x: 0, y: box.maxY * 0.5)))
+            let crown: Color = pale ? Color(red: 0.72, green: 0.76, blue: 0.86).opacity(0.5 * lit) : .white.opacity((light ? 0.5 : 0.42) * lit)
+            layer.fill(Path(box), with: .linearGradient(Gradient(colors: [crown, crown.opacity(0.1), crown.opacity(0)]), startPoint: CGPoint(x: 0, y: box.minY), endPoint: CGPoint(x: 0, y: box.maxY * 0.5)))
         }
         let rimDark: Color = light ? .black.opacity(0.10) : .black.opacity(0.28)
         // Rim: bright where the light hits (top-left), dark on the underside. Not a stroke: the
         // cloud is several overlapping pieces and a stroke draws every inner edge (the doubled
-        // cloud seen in the profile menu). Fill the body, then punch out the body shrunk a little
-        // about its centre, which leaves only the outline.
+        // cloud seen in the profile menu). Fill the body, then punch out the body inset a little
+        // (each separate piece toward its own centre), which leaves only the outline.
         ctx.drawLayer { layer in
-            layer.fill(body, with: .linearGradient(Gradient(colors: [.white.opacity(0.9), .white.opacity(0.15), rimDark]), startPoint: CGPoint(x: box.minX, y: box.minY), endPoint: CGPoint(x: box.maxX, y: box.maxY)))
+            layer.fill(body, with: .linearGradient(Gradient(colors: [.white.opacity(0.9 * lit), .white.opacity(0.15 * lit), rimDark]), startPoint: CGPoint(x: box.minX, y: box.minY), endPoint: CGPoint(x: box.maxX, y: box.maxY)))
             layer.blendMode = .destinationOut
-            let b = body.boundingRect
-            let k = max(0, 1 - (s * 0.045) / max(b.width, 1))
-            let inner = body.applying(CGAffineTransform(translationX: b.midX, y: b.midY).scaledBy(x: k, y: k).translatedBy(x: -b.midX, y: -b.midY))
-            layer.fill(inner, with: .color(.black))
+            layer.fill(rimInner(body, inset: s * 0.0225), with: .color(.black))
         }
     }
 
@@ -505,9 +824,7 @@ public enum BotFace {
             let stops: [Gradient.Stop] = [.init(color: .clear, location: 0), .init(color: .clear, location: 0.34), .init(color: peak, location: 0.5), .init(color: .clear, location: 0.66), .init(color: .clear, location: 1)]
             layer.fill(body, with: .conicGradient(Gradient(stops: stops), center: CGPoint(x: box.midX, y: box.midY), angle: .degrees(angle - 180)))
             layer.blendMode = .destinationOut
-            let b = body.boundingRect
-            let k = max(0, 1 - (s * 0.05) / max(b.width, 1))
-            layer.fill(body.applying(CGAffineTransform(translationX: b.midX, y: b.midY).scaledBy(x: k, y: k).translatedBy(x: -b.midX, y: -b.midY)), with: .color(.black))
+            layer.fill(rimInner(body, inset: s * 0.025), with: .color(.black))
         }
     }
 
@@ -521,7 +838,7 @@ public enum BotFace {
         let seed = spec.shape.utf8.reduce(0) { $0 + Int($1) } + spec.eyes.utf8.reduce(0) { $0 + Int($1) }
         // Tiny eyes blink faster (they are already small) and skip the double blink when small.
         let tiny = spec.eyes == "tiny"
-        let live = liveliness(time: active ? t : 0, seed: seed, blinkPeriod: motion.blinkPeriod, blinkLength: tiny ? 0.09 : 0.15, doubleBlinks: !(tiny && s < 32), rare: motion.blinkPeriod == 4.3)
+        let live = liveliness(time: active ? t : 0, seed: seed, blinkPeriod: motion.blinkPeriod, blinkLength: tiny ? 0.09 : motion.blinkLength, doubleBlinks: !(tiny && s < 32), rare: motion.blinkPeriod == 4.3)
         let anchor = eyeAnchor(spec.shape)
         let dx = s * anchor.spread
         let wander = glanceFree && !motion.freezeGlance
@@ -621,8 +938,18 @@ public struct BotBodyShape: Shape {
     public var spec: BotLookSpec
     public var time: Double
     public var active: Bool
-    public init(spec: BotLookSpec, time: Double, active: Bool) { self.spec = spec; self.time = time; self.active = active }
-    public func path(in rect: CGRect) -> Path { BotFace.bodyPath(spec.shape, in: rect, time: time, active: active) }
+    public var morph: Double = 0
+    public var target: BotFace.MorphTarget = .none
+    public var phase: Double? = nil
+    /// > 0: the body inset by this much for a rim mask (each piece toward its own centre).
+    public var inset: CGFloat = 0
+    public init(spec: BotLookSpec, time: Double, active: Bool, morph: Double = 0, target: BotFace.MorphTarget = .none, phase: Double? = nil, inset: CGFloat = 0) {
+        self.spec = spec; self.time = time; self.active = active; self.morph = morph; self.target = target; self.phase = phase; self.inset = inset
+    }
+    public func path(in rect: CGRect) -> Path {
+        let p = BotFace.bodyPath(spec.shape, in: rect, time: time, active: active, morph: morph, target: target, phase: phase)
+        return inset > 0 ? BotFace.rimInner(p, inset: inset) : p
+    }
 }
 
 /// The bot's eyes as a Shape (filled styles only; sleepy lids stay painted).
@@ -657,6 +984,21 @@ public struct BotFaceView: View {
     /// When the current state began: the one-shots at a state's start (the lean as a tool
     /// starts, the slow blink of an error) count from here.
     @State private var stateSince: Date = Date()
+    /// The state just left and when: for 0.4 s its held pose (silhouette, roll, eyes, dim) eases
+    /// out before the new state's eases in — one continuous path, even held to held.
+    /// The pose that was on screen when the state last changed, and when: for 0.4 s the frame
+    /// blends from it to the new state's pose, so a change never jumps — however far the old
+    /// pose had got, held to held included.
+    @State private var exitPose: BotFace.Motion = .still
+    @State private var exitAt: Date = .distantPast
+    /// The last pose rendered, kept in a box so recording it during a frame changes no state.
+    @State private var shown = ShownPose()
+    private final class ShownPose { var pose: BotFace.Motion = .still }
+    /// The blob's outline phase runs while it works and freezes where it stopped, so the outline
+    /// never jumps when the routines start or end.
+    @State private var blobOffset: Double = 0
+    @State private var blobFrozen: Double = 0
+    @State private var blobRunning = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var ambient: BotAmbient { BotAmbient.shared }
     /// Per-bot phase: shape, eyes and name, folded to a small non-negative number (the name's
@@ -684,9 +1026,11 @@ public struct BotFaceView: View {
         public var groupCount = 1
         /// No eye life at all: the bots behind the front one in a stack.
         public var still = false
-        public init(thinking: Bool = false, profile: String? = nil, followsTilt: Bool = false, state: BotFace.State = .idle, groupIndex: Int = 0, groupCount: Int = 1, still: Bool = false) {
+        /// A squint on top of any state without the thinking hold (the guide while it waits).
+        public var squint = false
+        public init(thinking: Bool = false, profile: String? = nil, followsTilt: Bool = false, state: BotFace.State = .idle, groupIndex: Int = 0, groupCount: Int = 1, still: Bool = false, squint: Bool = false) {
             self.thinking = thinking; self.profile = profile; self.followsTilt = followsTilt
-            self.state = state; self.groupIndex = groupIndex; self.groupCount = groupCount; self.still = still
+            self.state = state; self.groupIndex = groupIndex; self.groupCount = groupCount; self.still = still; self.squint = squint
         }
     }
     public var mood: Mood
@@ -720,55 +1064,101 @@ public struct BotFaceView: View {
         return d.timeIntervalSinceReferenceDate
     }
 
-    /// The frame's pose. Reduce Motion and painted renders keep the body still; the eyes act.
-    private func pose(time t: Double, since: Double, finished: Double?, tapped: Double?) -> BotFace.Motion {
+    /// The frame's pose. For 0.4 s after a state change the frame blends from the pose that was
+    /// on screen (`exitPose`) to the new state's, so nothing jumps — whatever the old state had
+    /// got to, held to held included. When the old pose held a silhouette the new state's clock
+    /// starts 0.4 s late (`stateSince` is set ahead), so the old shape is back at rest before the
+    /// new one grows. Reduce Motion jumps to the end pose with the body frozen (a held lean stays;
+    /// it does not move); painted renders keep the transforms still. Under 32 pt (beside a bubble,
+    /// on the toolbar) the body keeps its shape: eyes, and a lean or nudge, only.
+    private func pose(time t: Double, now: Date, since: Double, finished: Double?, tapped: Double?) -> BotFace.Motion {
         let group: (index: Int, count: Int)? = mood.groupCount > 1 ? (mood.groupIndex, mood.groupCount) : nil
-        let m = BotFace.motion(time: t, seed: seed, spec: spec, state: state, since: since, finishedAt: finished, tappedAt: tapped, group: group)
-        return (reduceMotion || drawn) ? m.bodyStill : m
+        var m = BotFace.motion(time: t, seed: seed, spec: spec, state: state, since: since, finishedAt: finished, tappedAt: tapped, group: group)
+        let back = now.timeIntervalSince(exitAt)
+        if back < 0.4, !reduceMotion {
+            let ex = exitPose
+            let k = 1 - BotFace.smooth(back / 0.4)
+            func lerp(_ a: Double, _ b: Double) -> Double { a + (b - a) * k }
+            if ex.morph > 0.001 { m.morphTarget = ex.morphTarget; m.morph = ex.morph * k }
+            m.roll = lerp(m.roll, ex.roll)
+            m.dim = lerp(m.dim, ex.dim)
+            m.eyeOpacity = lerp(m.eyeOpacity, ex.eyeOpacity)
+            m.eyeOpen = lerp(m.eyeOpen, ex.eyeOpen)
+            m.eyeX = lerp(m.eyeX, ex.eyeX); m.eyeY = lerp(m.eyeY, ex.eyeY)
+            if k > 0.5 { m.freezeGlance = ex.freezeGlance }
+        }
+        if mood.squint { m.eyeOpen = min(m.eyeOpen, 0.42); m.blinkPeriod = 2.8; m.blinkLength = 0.22 }
+        m.blobPhase = blobRunning ? t * 0.19 + blobOffset : blobFrozen
+        if reduceMotion {
+            let end = BotFace.motion(time: t, seed: seed, spec: spec, state: state, since: 10, group: group)
+            m = m.bodyStill
+            m.morphTarget = end.morphTarget; m.morph = end.morphTarget == .none ? 0 : 1
+            m.eyeOpacity = end.morphTarget == .exclamation ? 0 : 1
+            m.dim = state == .error ? 1 : 0
+            m.roll = end.roll
+        } else if drawn {
+            m = m.bodyStill
+        }
+        if size < 32 { m.yaw = 0; m.dy = 0; m.morph = 0; m.morphTarget = .none; m.eyeOpacity = 1 }
+        return m
     }
 
     /// The glass bot as the icon is built: the body a tinted piece of glass, the eyes a darker
     /// piece in front, each in its own container (in one container they would merge into a
     /// single shape). Sleepy lids are strokes, so they stay painted. The rim sheen is a ring
     /// (the body minus the body shrunk) lit along a short arc.
-    @ViewBuilder private func liveGlass(time t: Double, gaze g: CGPoint, glanceFree: Bool, motion m: BotFace.Motion, morph: Bool) -> some View {
+    @ViewBuilder private func liveGlass(time t: Double, gaze g: CGPoint, glanceFree: Bool, motion m: BotFace.Motion, wobble: Bool) -> some View {
         let tint = Color(botHex: spec.hex) ?? Color(red: 0.49, green: 0.36, blue: 1)
+        // One shape for every layer: the same plate, morphing in place, never re-created.
+        let plate = BotBodyShape(spec: spec, time: t, active: wobble, morph: m.morph, target: m.morphTarget, phase: m.blobPhase)
+        // The plate inset for the rim masks: each piece toward its own centre (the "!").
+        let hairline = BotBodyShape(spec: spec, time: t, active: wobble, morph: m.morph, target: m.morphTarget, phase: m.blobPhase, inset: 1)
+        let ring = BotBodyShape(spec: spec, time: t, active: wobble, morph: m.morph, target: m.morphTarget, phase: m.blobPhase, inset: size * 0.025)
+        let pale = BotFace.isLight(spec.hex)
         ZStack {
             // The colour itself under the glass: tinted glass alone reads dark on a light
             // background (a sky-blue bot came out navy), so the hue is laid down first and the
             // glass adds its rim and refraction on top.
-            BotBodyShape(spec: spec, time: t, active: morph)
-                .fill(tint.opacity(colorScheme == .light ? 0.62 : 0.28))
+            plate.fill(tint.opacity(colorScheme == .light ? 0.62 : 0.28))
+            // The error's dimming goes under the glass, so the plate darkens as one piece and its
+            // rim dies with it, rather than a dark shape sitting inside a lit one.
+            if m.dim > 0.01 { plate.fill(.black.opacity(0.30 * m.dim)) }
             GlassEffectContainer {
                 Color.clear
-                    .glassEffect(.regular.tint(tint.opacity(colorScheme == .light ? 0.45 : 0.72)), in: BotBodyShape(spec: spec, time: t, active: morph))
+                    .glassEffect(.regular.tint(tint.opacity((colorScheme == .light ? 0.45 : 0.72) * (1 - 0.5 * m.dim))), in: plate)
                     // No materialize bloom when a glass bot appears or changes look.
                     .glassEffectTransition(.identity)
             }
-            if m.sheen > 0.01 {
-                let stops: [Gradient.Stop] = [.init(color: .clear, location: 0), .init(color: .clear, location: 0.34), .init(color: .white.opacity(m.sheen), location: 0.5), .init(color: .clear, location: 0.66), .init(color: .clear, location: 1)]
-                BotBodyShape(spec: spec, time: t, active: morph)
-                    .fill(AngularGradient(gradient: Gradient(stops: stops), center: .center, angle: .degrees(m.sheenAngle - 180)))
-                    .mask {
-                        ZStack {
-                            BotBodyShape(spec: spec, time: t, active: morph).fill(.white)
-                            BotBodyShape(spec: spec, time: t, active: morph).fill(.black).scaleEffect(0.95).blendMode(.destinationOut)
-                        }
-                        .compositingGroup()
-                    }
+            // A light bot: a hairline inside the edge, and a cool crown so it reads on white.
+            if pale {
+                plate.fill(Color(red: 0.816, green: 0.816, blue: 0.835).opacity(0.4))
+                    .mask { ZStack { plate.fill(.white); hairline.fill(.black).blendMode(.destinationOut) }.compositingGroup() }
+                    .allowsHitTesting(false)
+                plate.fill(LinearGradient(colors: [Color(red: 0.72, green: 0.76, blue: 0.86).opacity(0.45 * (1 - m.dim)), .clear], startPoint: .top, endPoint: .center))
                     .allowsHitTesting(false)
             }
-            if spec.eyes == "sleepy" {
-                Canvas(opaque: false, rendersAsynchronously: false) { ctx, sz in
-                    BotFace.draw(spec, in: &ctx, size: sz, time: t, active: morph, gaze: g, part: .eyes, breathe: false, idleEyes: !mood.still, move: false, glanceFree: glanceFree, motion: m)
-                }
-            } else {
-                GlassEffectContainer {
-                    Color.clear
-                        .glassEffect(.clear.tint(BotFace.ink.opacity(0.92)), in: BotEyesShape(spec: spec, time: t, active: !mood.still, gaze: g, glanceFree: glanceFree, motion: m))
-                        .glassEffectTransition(.identity)
+            if m.sheen > 0.01 {
+                let stops: [Gradient.Stop] = [.init(color: .clear, location: 0), .init(color: .clear, location: 0.34), .init(color: .white.opacity(m.sheen * (1 - m.dim)), location: 0.5), .init(color: .clear, location: 0.66), .init(color: .clear, location: 1)]
+                plate.fill(AngularGradient(gradient: Gradient(stops: stops), center: .center, angle: .degrees(m.sheenAngle - 180)))
+                    .mask { ZStack { plate.fill(.white); ring.fill(.black).blendMode(.destinationOut) }.compositingGroup() }
+                    .allowsHitTesting(false)
+            }
+            Group {
+                if spec.eyes == "sleepy" {
+                    // The lids are painted; the roll and the fade are applied by the view, once.
+                    let lids: BotFace.Motion = { var e = m.transformsStill; e.eyeOpacity = 1; return e }()
+                    Canvas(opaque: false, rendersAsynchronously: false) { ctx, sz in
+                        BotFace.draw(spec, in: &ctx, size: sz, time: t, active: wobble, gaze: g, part: .eyes, breathe: false, idleEyes: !mood.still, move: false, glanceFree: glanceFree, motion: lids)
+                    }
+                } else {
+                    GlassEffectContainer {
+                        Color.clear
+                            .glassEffect(.clear.tint(BotFace.ink.opacity(0.92)), in: BotEyesShape(spec: spec, time: t, active: !mood.still, gaze: g, glanceFree: glanceFree, motion: m))
+                            .glassEffectTransition(.identity)
+                    }
                 }
             }
+            .opacity(m.eyeOpacity)
         }
     }
 
@@ -786,9 +1176,11 @@ public struct BotFaceView: View {
         let finished = finishedAt
         let tapped = tappedAt
         let state = state
+        // The frame blends from the last pose for 0.4 s after a state change.
+        let leaving = Date().timeIntervalSince(exitAt) < 0.5
         // Any state but idle keeps the clock running: the poses are functions of time.
-        let animating = (active || state != .idle || finished != nil || tapped != nil) && !drawn
-        let morph = state == .working || state == .thinking
+        let animating = (active || state != .idle || finished != nil || tapped != nil || leaving) && !drawn
+        let wobble = state == .working
         let _ = spinTick
         TimelineView(.animation(minimumInterval: animating ? 1 / 30 : 1 / 24, paused: !animating && !eyesBusy && gaze == shownGaze)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
@@ -796,13 +1188,16 @@ public struct BotFaceView: View {
             let ease = u * u * (3 - 2 * u)
             let g0 = CGPoint(x: gazeFrom.x + (gaze.x - gazeFrom.x) * ease, y: gazeFrom.y + (gaze.y - gazeFrom.y) * ease)
             let g = CGPoint(x: max(-1, min(1, g0.x + ambientGaze.x)), y: max(-1, min(1, g0.y + ambientGaze.y)))
-            let m = pose(time: t, since: timeline.date.timeIntervalSince(stateSince), finished: finished, tapped: tapped)
+            let m = pose(time: t, now: timeline.date, since: timeline.date.timeIntervalSince(stateSince), finished: finished, tapped: tapped)
+            let _ = { shown.pose = m }()
             Group {
                 if spec.isGlass && BotFace.liveGlass && !drawn && scenePhase == .active {
-                    liveGlass(time: t, gaze: g, glanceFree: !held, motion: m, morph: morph)
+                    liveGlass(time: t, gaze: g, glanceFree: !held, motion: m, wobble: wobble)
                 } else {
+                    // The painted twin: the view applies the transforms, so it gets them zeroed;
+                    // the sheen, the hold and the dimming it paints itself.
                     Canvas(opaque: false, rendersAsynchronously: false) { ctx, sz in
-                        BotFace.draw(spec, in: &ctx, size: sz, time: t, active: morph, gaze: g, breathe: false, idleEyes: !drawn && !mood.still, move: false, glanceFree: !held, light: colorScheme == .light, motion: m.bodyStill)
+                        BotFace.draw(spec, in: &ctx, size: sz, time: t, active: wobble, gaze: g, breathe: false, idleEyes: !drawn && !mood.still, move: false, glanceFree: !held, light: colorScheme == .light, motion: m.transformsStill)
                     }
                 }
             }
@@ -819,7 +1214,25 @@ public struct BotFaceView: View {
         .onChange(of: gaze) { old, new in
             gazeFrom = old; shownGaze = new; gazeChangedAt = Date()
         }
-        .onChange(of: state) { _, _ in stateSince = Date() }
+        .onChange(of: state) { _, _ in
+            let now = Date()
+            exitPose = shown.pose; exitAt = now
+            // A silhouette on screen unwinds first: the new state starts 0.4 s later.
+            stateSince = exitPose.morph > 0.01 ? now.addingTimeInterval(0.4) : now
+        }
+        // The blob's creep: the phase runs from where it froze, and freezes where it is. Reduce
+        // Motion keeps it frozen.
+        .onChange(of: wobble && !reduceMotion, initial: true) { _, running in
+            let now = Date().timeIntervalSinceReferenceDate * 0.19
+            if running { blobOffset = blobFrozen - now } else if blobRunning { blobFrozen = now + blobOffset }
+            blobRunning = running
+        }
+        // Once the blend has played, a nudge re-evaluates the body so the timeline pauses.
+        .task(id: exitAt) {
+            guard exitAt != .distantPast else { return }
+            try? await Task.sleep(for: .milliseconds(600))
+            spinTick += 1
+        }
         // A tap on the bot: the small turn. Simultaneous, so the row or link it sits in still gets it.
         .simultaneousGesture(TapGesture().onEnded { if let p = mood.profile, !drawn { ambient.tap(profile: p) } })
         // Once a finish spin or a tap has played, a nudge re-evaluates the body so the timeline
