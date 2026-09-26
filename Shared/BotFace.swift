@@ -328,6 +328,9 @@ public struct BotFaceView: View {
 
     /// Paint the glass finish even in the app (for offscreen renders such as menu icons).
     public var drawn: Bool
+    /// The app switcher's snapshot is taken with the glass effects stripped (the bots went
+    /// grey), so once the scene is no longer active the painted glass stands in.
+    @Environment(\.scenePhase) private var scenePhase
 
     public init(spec: BotLookSpec, size: CGFloat, active: Bool = false, gaze: CGPoint = .zero, drawn: Bool = false) {
         self.spec = spec
@@ -368,7 +371,7 @@ public struct BotFaceView: View {
             let u = min(1, max(0, timeline.date.timeIntervalSince(gazeChangedAt) / 0.35))
             let ease = u * u * (3 - 2 * u)
             let g = CGPoint(x: gazeFrom.x + (gaze.x - gazeFrom.x) * ease, y: gazeFrom.y + (gaze.y - gazeFrom.y) * ease)
-            if spec.isGlass && BotFace.liveGlass && !drawn {
+            if spec.isGlass && BotFace.liveGlass && !drawn && scenePhase == .active {
                 liveGlass(time: t, gaze: g)
             } else {
                 Canvas(opaque: false, rendersAsynchronously: false) { ctx, sz in
