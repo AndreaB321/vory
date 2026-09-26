@@ -191,8 +191,16 @@ struct BotDetailView: View {
         }
         .navigationTitle(profile.label)
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { model.composeProfile = profile.name }
-        .onDisappear { if model.composeProfile == profile.name { model.composeProfile = nil } }
+        .overlay(alignment: .bottomTrailing) {
+            NavigationLink(value: ChatRoute(storedID: nil, title: nil, profile: profile.name)) {
+                Image(systemName: "square.and.pencil").font(.title3.weight(.semibold))
+                    .frame(width: 50, height: 50)
+                    .glassEffect(.regular.interactive(), in: .circle)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("New chat with \(profile.label)")
+            .padding(.trailing, 20).padding(.bottom, 8)
+        }
         .refreshable { await load() }
         .task { await load() }
         .alert("Delete chat?", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })) {

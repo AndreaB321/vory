@@ -395,12 +395,12 @@ struct AboutView: View {
                             .offset(y: lifted ? -30 : 0)
                         if relieved {
                             SpeechBubble(text: "Ahhhh…that's better.")
-                                .offset(x: 118, y: -4)
-                                .transition(.scale(scale: 0.2, anchor: .bottomLeading).combined(with: .opacity))
+                                .offset(y: -46)
+                                .transition(.scale(scale: 0.2, anchor: .bottom).combined(with: .opacity))
                         }
                     }
                     .frame(height: 140, alignment: .top)
-                    .padding(.top, 30)
+                    .padding(.top, 50)
                     .contentShape(Rectangle())
                     .onTapGesture { tapped() }
                     Text("Vory").font(.title.weight(.bold))
@@ -453,7 +453,7 @@ struct AboutView: View {
     }
 }
 
-/// A little speech bubble with its tail at the bottom-left, pointing at whoever said it.
+/// A little speech bubble with its tail at the bottom centre, pointing down at whoever said it.
 struct SpeechBubble: View {
     var text: String
     var body: some View {
@@ -463,16 +463,16 @@ struct SpeechBubble: View {
             .background {
                 let fill = Color(uiColor: .secondarySystemFill)
                 RoundedRectangle(cornerRadius: 16, style: .continuous).fill(fill)
-                    .overlay(alignment: .bottomLeading) {
+                    .overlay(alignment: .bottom) {
                         Path { p in
-                            p.move(to: CGPoint(x: 14, y: 0))
-                            p.addQuadCurve(to: CGPoint(x: -4, y: 9), control: CGPoint(x: 6, y: 5))
-                            p.addQuadCurve(to: CGPoint(x: 6, y: -6), control: CGPoint(x: 4, y: 2))
+                            p.move(to: CGPoint(x: 0, y: 0))
+                            p.addQuadCurve(to: CGPoint(x: 9, y: 10), control: CGPoint(x: 6, y: 3))
+                            p.addQuadCurve(to: CGPoint(x: 18, y: 0), control: CGPoint(x: 12, y: 3))
                             p.closeSubpath()
                         }
                         .fill(fill)
-                        .frame(width: 20, height: 12)
-                        .offset(x: 4, y: 6)
+                        .frame(width: 18, height: 10)
+                        .offset(y: 9)
                     }
             }
             .fixedSize()

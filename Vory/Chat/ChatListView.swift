@@ -41,9 +41,18 @@ struct ChatListView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { profileMenu }
             }
-            .onChange(of: model.newChatRequest) { _, r in
-                guard r != nil, model.selectedTab == .chats, runtime != nil else { return }
-                path.append(ChatRoute(storedID: nil, title: nil))
+            // Like Messages: compose is a detached glass circle, fixed just above the tab bar.
+            .overlay(alignment: .bottomTrailing) {
+                Button { path.append(ChatRoute(storedID: nil, title: nil)) } label: {
+                    Image(systemName: "square.and.pencil").font(.title3.weight(.semibold))
+                        .frame(width: 50, height: 50)
+                        .glassEffect(.regular.interactive(), in: .circle)
+                }
+                .buttonStyle(.plain)
+                .disabled(runtime == nil)
+                .accessibilityLabel("New Chat")
+                .accessibilityIdentifier("chats.new")
+                .padding(.trailing, 20).padding(.bottom, 8)
             }
             .navigationDestination(for: ChatRoute.self) { route in ConversationView(route: route) }
             .searchable(text: $searchText, prompt: "Search chats")
