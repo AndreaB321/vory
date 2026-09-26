@@ -9,11 +9,13 @@ at a time, ship a TestFlight build, wait for their verdict.
 
 - **Latest TestFlight build: 1.0.1 (43)** (42 before it), uploaded 2026-09-26 ~15:05 (31–41 earlier that day),
   companion 1.0.26.
-- **Build 44 in progress (2026-09-26 evening)** — the build-43 review list, all done and committed
-  (`0c4473e` + follow-ups); sim-verified in light mode. **Not uploaded yet**: the user picks a
-  chat-row variant (a/b/c screenshots sent) and says "ship it" first. Phone-only checks: LA
-  glass phase glyphs, test notification (no reply, glass cloud), group send on the real gateway,
-  attachment bubble after send, Software Update "Checking…" + Vory turn, summaries scroll.
+- **Build 44 uploaded 2026-09-26 ~14:40** (user: "Okay ship it" after the motion demo videos) —
+  the build-43 review list plus the motion system v2, attachment cards, bot beside replies, group
+  chat send/empty state. What-to-Test notes posted by `scratchpad/post-notes44.sh` (poll until
+  VALID, then PATCH/POST betaBuildLocalizations). Awaiting the user's verdict; phone-only checks:
+  Preview motion page (Settings › Bots), header states on a real reply (thinking / tool / approval
+  ask), LA poses + glass phase discs, test notification (no reply, glass cloud), attachment card +
+  "Attach as file", group send on the real gateway, Software Update squint + turn, summaries scroll.
 - Build 43 (2026-09-26 ~15:50) reviewed: approvals work, summaries "look amazing".
 - **Public beta rule (user, 2026-09-26):** nothing user-specific in notes, setup copy, sample data
   or docs — no bot names, gateway names or hostnames. Write for strangers.
@@ -265,7 +267,7 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
     `.streaming`; Bots grid cards `groupIndex/groupCount`; room empty-state stack `still` for the
     back bots; `VoryGuide` `.guide` (sheen every 8 s) / `.thinking`; Software Update `.thinking`
     while checking, turn on the falling edge.
-- **HOLD**: do not upload until the user reviews the motion and says "ship it".
+- Shipped as build 44 after the user reviewed the motion demo ("Okay ship it").
 
 ### 2026-09-26 (build 43, from the build-42 review)
 - **Tilt** is its own switch (Settings › Bots › "Tilt with the phone", BETA, `bots.tilt`, off by
