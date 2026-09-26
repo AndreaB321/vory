@@ -59,7 +59,7 @@ struct BotsView: View {
             .overlay {
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("-vory-shape-grid") { ShapeSeatGrid() }
-                if ProcessInfo.processInfo.arguments.contains("-vory-motion-demo") { MotionDemoGrid() }
+                if ProcessInfo.processInfo.arguments.contains("-vory-motion-demo") { MotionDemoView() }
                 #endif
             }
             .toolbar {
@@ -158,10 +158,10 @@ private struct ShapeSeatGrid: View {
 }
 #endif
 
-#if DEBUG
 /// Every pose the bots know, side by side: the working routines on a few shapes and finishes,
-/// then each state held. Tap a bot for the tap turn. `-vory-motion-demo`.
-private struct MotionDemoGrid: View {
+/// then each state held. Tap a bot for the tap turn. Settings › Bots › Preview motion, and
+/// DEBUG `-vory-motion-demo` over the Bots tab.
+struct MotionDemoView: View {
     private struct Cell: Identifiable { let id: String; let spec: BotLookSpec; let state: BotFace.State; let active: Bool }
     private let cells: [Cell] = [
         Cell(id: "working · blob", spec: BotLookSpec(shape: "blob", eyes: "curious", hex: "#E07A5F"), state: .working, active: true),
@@ -198,9 +198,10 @@ private struct MotionDemoGrid: View {
             }
         }
         .background(Color(.systemBackground))
+        .navigationTitle("Preview motion")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
-#endif
 
 struct RoomCard: View {
     var room: Room

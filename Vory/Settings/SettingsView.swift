@@ -349,6 +349,11 @@ struct BotsSettingsView: View {
                 Text("Bots look where you scroll. With tilt on, they also lean with the phone and, on the Bots page, follow its angle with their eyes.")
             }
             Section {
+                NavigationLink { MotionDemoView() } label: { Label("Preview motion", systemImage: "play.circle") }
+            } footer: {
+                Text("Every pose the bots know, side by side: working, thinking, using a tool, waiting for a yes, and the rest. Tap one to see its tap.")
+            }
+            Section {
                 Toggle(isOn: $glassAll) {
                     HStack(spacing: 6) {
                         Text("Liquid Glass for all bots")

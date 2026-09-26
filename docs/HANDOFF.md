@@ -256,8 +256,9 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
   - **Bug found on the way**: `BotFaceView.seed` folded the profile name with `&*`, which wraps
     negative, and Swift's `%` keeps the sign, so bots with longer names picked one routine
     forever (before this build: never moved). Seed is now `UInt(bitPattern:) % 1_000_003`.
-  - DEBUG `-vory-motion-demo`: a grid on the Bots tab of every state on six hero looks plus a
-    "Finish spin (all)" button; `Tools`: `ffmpeg … fps=10,tile=` strips from
+  - `MotionDemoView` — Settings › Bots › **Preview motion** (in Release too, so the user can
+    review every pose on the phone) and DEBUG `-vory-motion-demo` over the Bots tab: every
+    state on six hero looks plus a "Finish spin (all)" button; `Tools`: `ffmpeg … fps=10,tile=` strips from
     `simctl io recordVideo` are how the motion was checked.
   - Callers: header `Mood(state: chat.botState)`; chat list rows `.streaming`/`.thinking` while
     live (eyes only, no body routines at 34 pt); bubble bot `.thinking` until text, then
