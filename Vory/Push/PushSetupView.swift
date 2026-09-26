@@ -73,30 +73,33 @@ struct PushSetupView: View {
         setup.installing || setup.updating || setup.restarting || (rt?.maintenance.isBusy ?? false)
     }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var forward = true
     /// Measured from whichever page is showing; the next page starts from it instead of a guess.
     @State private var headerHeight: CGFloat = 230
     /// True a moment after the last step completes, once the bot has finished its hop.
     @State private var doneSettled = false
 
+    /// What Vory says: the step's guidance, or a nudge onward once it is done.
+    private var says: String {
+        if isDone(step) { return step == .overview ? "That's it! Notifications, Live Activities and approval cards are all yours." : "That's done — tap Continue." }
+        return hint(for: step)
+    }
+    /// A turn on each new step, and again the moment a step completes.
+    private var turnKey: String { "\(step.rawValue)-\(isDone(step))" }
+
     var body: some View {
         ZStack {
-            StepPage(step: step, done: isDone(step), isCurrent: true, hint: hint(for: step), headerHeight: $headerHeight) {
+            StepPage(step: step, done: isDone(step), headerHeight: $headerHeight) {
                 if let rt { content(for: step, runtime: rt) } else { Text("Connect a gateway first.").foregroundStyle(.secondary) }
+            } header: {
+                VoryGuide(says: says, key: turnKey, turnKey: turnKey, thinking: locked || awaitingCompanion, done: isDone(step), reduceMotion: reduceMotion, size: 88)
             }
             .id(step)
             .transition(.asymmetric(insertion: .move(edge: forward ? .trailing : .leading).combined(with: .opacity),
                                     removal: .move(edge: forward ? .leading : .trailing).combined(with: .opacity)))
         }
         .overlay(alignment: .bottom) { bottomBar }
-        .overlay(alignment: .topTrailing) {
-            Button {
-                if let rt, !setup.isCompleted(for: rt), !isDone(.overview) { confirmQuit = true } else { dismiss() }
-            } label: { Image(systemName: "xmark").font(.subheadline.weight(.semibold)).frame(width: 32, height: 32) }
-                .buttonStyle(.glass).buttonBorderShape(.circle)
-                .padding(.trailing, 20).padding(.top, 10)
-                .accessibilityLabel("Close")
-        }
         .background(Color(.systemGroupedBackground))
         .toolbar(.hidden, for: .navigationBar)
         .hidesTabBar()
@@ -107,11 +110,11 @@ struct PushSetupView: View {
         .sheet(isPresented: $showCompanionSignIn) {
             if let rt { CompanionSignInSheet(runtime: rt) { secrets in setup.companionSecrets = secrets; setup.rememberCompanionSecrets(for: rt) } }
         }
-        .alert("Leave setup?", isPresented: $confirmQuit) {
-            Button("Leave and start over", role: .destructive) { if let rt { setup.startOver(runtime: rt) }; dismiss() }
+        .alert("Cancel setup?", isPresented: $confirmQuit) {
+            Button("Cancel setup", role: .destructive) { if let rt { setup.startOver(runtime: rt) }; dismiss() }
             Button("Keep going", role: .cancel) {}
         } message: {
-            Text("The setup isn't finished. Leaving now clears the address, the companion sign-in and your progress on this phone; you'll start from the first step next time.")
+            Text("This clears the address, the companion sign-in and your progress on this phone. Nothing on the gateway changes. You'll start from the first step next time.")
         }
         .alert("Start over?", isPresented: $confirmStartOver) {
             Button("Start over", role: .destructive) { if let rt { setup.startOver(runtime: rt); withAnimation(.snappy) { step = .apple } } }
@@ -180,62 +183,48 @@ struct PushSetupView: View {
         step == .start && !isDone(.start) && setup.installedOnGateway && !setup.restartPending && (setup.restarting || setup.heartbeat != nil)
     }
 
-    /// Back and forward as small glass buttons in the corners, the step marks floating between them.
+    /// Continue, and under it Exit (on the first step) or Cancel setup (after that, which wipes
+    /// this phone's progress). Like the first-run tour: no step marks, no arrows.
     private var bottomBar: some View {
-        Group {
-            HStack(spacing: 12) {
-                Button { if let p = step.previous { go(to: p) } } label: {
-                    Image(systemName: "chevron.left").font(.body.weight(.semibold)).frame(width: 38, height: 38)
+        VStack(spacing: 10) {
+            if step == .overview {
+                Button { if let rt { setup.markCompleted(for: rt) }; dismiss() } label: {
+                    Text("Done").font(.headline).frame(maxWidth: .infinity).padding(.vertical, 6)
                 }
-                .buttonStyle(.glass).buttonBorderShape(.circle)
-                .disabled(step.previous == nil || locked)
-                .accessibilityLabel("Back")
-                Spacer(minLength: 0)
-                HStack(spacing: 0) {
-                    ForEach(SetupStep.allCases) { s in
-                        let done = s.rawValue <= step.rawValue && isDone(s)
-                        Button { go(to: s) } label: {
-                            ZStack {
-                                Circle().fill(done ? Color.green : s == step ? Color.accentColor : Color.clear)
-                                if done { Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(.white).transition(.scale) }
-                                else if s == step { Circle().fill(.white).frame(width: 5, height: 5) }
-                            }
-                            .frame(width: 20, height: 20)
-                        }
-                        .buttonStyle(.plain)
-                        .glassEffect(.regular, in: .circle)
-                        .scaleEffect(s == step ? 1.15 : 1)
-                        .disabled(locked)
-                        .accessibilityLabel("Step \(s.rawValue + 1): \(s.title)")
-                        if s.next != nil {
-                            // The link between beads turns green once the step before it is done.
-                            Capsule().fill(done ? Color.green : Color.secondary.opacity(0.3)).frame(width: 10, height: 2)
-                        }
+                .buttonStyle(.glassProminent)
+                .disabled(locked || !isDone(.overview) || !doneSettled)
+                .accessibilityIdentifier("setup.done")
+            } else {
+                Button { if let n = step.next { go(to: n) } } label: {
+                    ZStack {
+                        Text("Continue").font(.headline).opacity(locked || awaitingCompanion ? 0 : 1)
+                        if locked || awaitingCompanion { ProgressView().tint(.white) }
                     }
+                    .frame(maxWidth: .infinity).padding(.vertical, 6)
                 }
-                Spacer(minLength: 0)
-                if step == .overview {
-                    Button { if let rt { setup.markCompleted(for: rt) }; dismiss() } label: {
-                        Image(systemName: "checkmark").font(.body.weight(.semibold)).frame(width: 38, height: 38)
-                    }
-                    .buttonStyle(.glassProminent).buttonBorderShape(.circle)
-                    .disabled(locked || !isDone(.overview) || !doneSettled)
-                    .accessibilityLabel("Done")
-                } else {
-                    Button { if let n = step.next { go(to: n) } } label: {
-                        ZStack {
-                            if locked || awaitingCompanion { ProgressView().tint(.white) }
-                            else { Image(systemName: "chevron.right").font(.body.weight(.semibold)) }
-                        }
-                        .frame(width: 38, height: 38)
-                    }
-                    .buttonStyle(.glassProminent).buttonBorderShape(.circle)
-                    .disabled(!isDone(step) || locked)
-                    .accessibilityLabel("Next")
-                }
+                .buttonStyle(.glassProminent)
+                .disabled(!isDone(step) || locked)
+                .accessibilityIdentifier("setup.continue")
+            }
+            if step == .apple {
+                Button("Exit") { dismiss() }
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("setup.exit")
+            } else if step != .overview {
+                Button("Cancel setup") { confirmQuit = true }
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .disabled(locked)
+                    .accessibilityIdentifier("setup.cancel")
+            } else {
+                Text(" ").font(.subheadline)
             }
         }
-        .padding(.horizontal, 20).padding(.bottom, 6)
+        .padding(.horizontal, 24).padding(.top, 28).padding(.bottom, 16)
+        .background(
+            // Solid behind the buttons, fading out above them so the form scrolls under.
+            LinearGradient(stops: [.init(color: Color(.systemGroupedBackground).opacity(0), location: 0), .init(color: Color(.systemGroupedBackground), location: 0.3)], startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
+        )
         .animation(.snappy, value: step)
     }
 
@@ -604,62 +593,35 @@ struct RestartCountdownRows: View {
 
 /// One step: a floating glass card (step, title, and the bot's message bubble) with the step's
 /// rows scrolling underneath it.
-struct StepPage<Content: View>: View {
+struct StepPage<Content: View, Header: View>: View {
     var step: PushSetupView.SetupStep
     var done: Bool
-    var isCurrent: Bool
-    var hint: String
     @Binding var headerHeight: CGFloat
     @ViewBuilder var content: () -> Content
-    @State private var hop = false
-    @State private var bubbleShown = false
+    @ViewBuilder var header: () -> Header
 
     var body: some View {
         Form { content() }
             .scrollContentBackground(.hidden)
             .listSectionSpacing(24)
             .contentMargins(.top, headerHeight - 2, for: .scrollContent)
-            .contentMargins(.bottom, 72, for: .scrollContent)
-            .overlay(alignment: .top) { header }
-            .onAppear {
-                Task { try? await Task.sleep(for: .milliseconds(250)); withAnimation(.spring(response: 0.45, dampingFraction: 0.7)) { bubbleShown = true } }
-            }
-            .onChange(of: done) { _, now in
-                // The bubble ducks back into the bot and pops out again with the new line.
-                withAnimation(.easeIn(duration: 0.15)) { bubbleShown = false }
-                Task {
-                    try? await Task.sleep(for: .milliseconds(180))
-                    if now { hop = true }
-                    withAnimation(.spring(response: 0.45, dampingFraction: 0.7)) { bubbleShown = true }
-                    try? await Task.sleep(for: .milliseconds(380)); hop = false
-                }
-            }
+            .contentMargins(.bottom, 120, for: .scrollContent)
+            .overlay(alignment: .top) { top }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Step \(step.rawValue + 1) of \(PushSetupView.SetupStep.allCases.count)")
-                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
-                Text(step.title).font(.title2.weight(.bold))
-            }
-            HStack(alignment: .center, spacing: 12) {
-                BotFaceView(spec: BotLookSpec.from(choice: "animated:\(step.avatar)", hex: (done ? Color.green : Color(red: 0.24, green: 0.77, blue: 0.93)).hexString), size: 56, active: isCurrent)
-                    .offset(y: hop ? -12 : 0)
-                    .rotationEffect(.degrees(hop ? -8 : 0))
-                    .animation(.spring(response: 0.35, dampingFraction: 0.45), value: hop)
-                // The bot's message: guidance while working, a nudge onward once the step is done.
-                TypingBubble(text: done ? (step == .overview ? "That's it! Your notifications are configured." : "That's done — tap › to continue.") : hint,
-                             tint: done ? Color.green : Color.primary,
-                             fill: done ? Color.green.mix(with: Color(.systemBackground), by: 0.8) : Color.secondary.mix(with: Color(.systemBackground), by: 0.82),
-                             shown: bubbleShown)
-                Spacer(minLength: 0)
-            }
+    /// Vory and the step's title, over the form; the form scrolls under it.
+    private var top: some View {
+        VStack(spacing: 10) {
+            header()
+            Text(step.title).font(.title2.weight(.bold)).multilineTextAlignment(.center)
+                .contentTransition(.numericText())
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .padding(.horizontal, 12).padding(.top, 74)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 14).padding(.bottom, 12)
+        .background(
+            LinearGradient(colors: [Color(.systemGroupedBackground), Color(.systemGroupedBackground), Color(.systemGroupedBackground).opacity(0)], startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
+        )
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
     }
 }

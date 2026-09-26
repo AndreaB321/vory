@@ -31,14 +31,8 @@ struct OnboardingView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 // Vory, talking. A full turn on every page; a squint on the page about waiting.
-                VStack(spacing: 6) {
-                    BotFaceView(spec: AboutView.voryBot, size: 96, active: true, gaze: CGPoint(x: 0, y: 0.5),
-                                mood: BotFaceView.Mood(thinking: pages[page].demo == .approval, profile: "vory-tour"))
-                        .padding(.top, 8)
-                    TypedBubble(text: pages[page].says, pageID: page, reduceMotion: reduceMotion)
-                        .padding(.horizontal, 24)
-                }
-                .padding(.top, 6)
+                VoryGuide(says: pages[page].says, key: page, turnKey: page, thinking: pages[page].demo == .approval, reduceMotion: reduceMotion)
+                    .padding(.top, 14)
 
                 TabView(selection: $page) {
                     ForEach(Array(pages.enumerated()), id: \.offset) { i, p in
@@ -55,7 +49,6 @@ struct OnboardingView: View {
                 .tabViewStyle(.page(indexDisplayMode: .always))
                 .indexViewStyle(.page(backgroundDisplayMode: .always))
                 .animation(reduceMotion ? nil : .snappy, value: page)
-                .onChange(of: page) { _, _ in BotAmbient.shared.turnFinished(profile: "vory-tour") }
 
                 VStack(spacing: 10) {
                     Button {
@@ -82,38 +75,6 @@ struct OnboardingView: View {
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(isPresented: $showForm) { GatewayFormView() }
         }
-    }
-}
-
-/// The speech bubble, typed out a few characters at a time whenever the text changes.
-private struct TypedBubble: View {
-    var text: String
-    var pageID: Int
-    var reduceMotion: Bool
-    @State private var shown = ""
-
-    var body: some View {
-        // The About page's bubble is one line; this one wraps, and keeps the full text's height
-        // so the page does not grow line by line while it types.
-        ZStack {
-            Text(text).hidden()
-            Text(shown)
-        }
-        .font(.subheadline.weight(.medium))
-        .multilineTextAlignment(.center)
-        .padding(.horizontal, 14).padding(.vertical, 9)
-        .padding(.bottom, 8)
-        .background(Color(uiColor: .secondarySystemFill), in: SpeechBubbleShape())
-        .frame(maxWidth: 340)
-        .task(id: pageID) {
-                if reduceMotion { shown = text; return }
-                shown = ""
-                for ch in text {
-                    guard !Task.isCancelled else { return }
-                    shown.append(ch)
-                    try? await Task.sleep(for: .milliseconds(ch == " " ? 12 : 22))
-                }
-            }
     }
 }
 

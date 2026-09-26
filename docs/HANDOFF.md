@@ -197,6 +197,12 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
   Finished → notification drops in; repeats), `StudioDemo` (a body, then a colour, then eyes are
   "tapped" in turn), `ConnectDemo`. All copy generic; the sample bot is "Ada". The 3D turn uses
   `perspective: 0` — any perspective stretched the glass body near edge-on.
+- **Companion setup restyled like the tour** (`PushSetupView`): `VoryGuide` (Vory + typed bubble,
+  shared in `Vory/Connect/VoryTalk.swift` with the tour) over each step's form; the bubble says the
+  step's hint, then "That's done — tap Continue."; Vory turns on each step and again when a step
+  completes (`turnKey`), squints while installing/waiting. Buttons: Continue (Done on the last
+  step), and under it Exit on step 1 / "Cancel setup" after that (confirm → `startOver` wipes the
+  phone's progress). No step marks, no arrows, no X. DEBUG arg `-vory-show-setup` opens it.
 - Compose chips wrap (`FlowLayout`); `GroupChats.create` takes the room from `groups.list` (by the
   returned id, else newest by name) — the real gateway's create response is not the room.
 

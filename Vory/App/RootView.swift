@@ -33,6 +33,7 @@ struct RootView: View {
         .onAppear {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-vory-show-companion-prompt") { showCompanionPrompt = true }
+            if ProcessInfo.processInfo.arguments.contains("-vory-show-setup") { showInstaller = true }
             #endif
         }
         .onChange(of: model.hasConnections) { had, has in
