@@ -376,6 +376,8 @@ struct AboutView: View {
     @State private var taps = 0
     @State private var lastTap = Date.distantPast
     @State private var raining = false
+    @State private var lifted = false
+    @State private var relieved = false
 
     private var appVersion: String { (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") + " (" + (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?") + ")" }
     static let voryBot = BotLookSpec(shape: "cloud", eyes: "classic", hex: "#3B7BFF")
@@ -383,15 +385,24 @@ struct AboutView: View {
     var body: some View {
         List {
             Section {
-                VStack(spacing: 10) {
+                VStack(spacing: 6) {
                     ZStack(alignment: .top) {
                         if raining {
                             // Falls from under the cloud, not out of its middle.
-                            RainOverlay().frame(width: 150, height: 110).offset(y: 118).allowsHitTesting(false).transition(.opacity)
+                            RainOverlay().frame(width: 150, height: 96).offset(y: 118 - 56).allowsHitTesting(false).transition(.opacity)
                         }
                         BotFaceView(spec: Self.voryBot, size: 132, active: true, gaze: CGPoint(x: 0, y: raining ? 1 : 0))
+                            .offset(y: lifted ? -56 : 0)
+                        if relieved {
+                            Text("Ahhhh…that's better.")
+                                .font(.subheadline.weight(.medium))
+                                .padding(.horizontal, 12).padding(.vertical, 7)
+                                .background(Color(uiColor: .secondarySystemFill), in: Capsule())
+                                .offset(x: 96, y: -8)
+                                .transition(.scale(scale: 0.4, anchor: .bottomLeading).combined(with: .opacity))
+                        }
                     }
-                    .frame(height: 230, alignment: .top)
+                    .frame(height: 140, alignment: .top)
                     .contentShape(Rectangle())
                     .onTapGesture { tapped() }
                     Text("Vory").font(.title.weight(.bold))
@@ -416,6 +427,8 @@ struct AboutView: View {
             }
         }
         .animation(.smooth, value: raining)
+        .animation(.spring(response: 0.6, dampingFraction: 0.7), value: lifted)
+        .animation(.spring(response: 0.4, dampingFraction: 0.6), value: relieved)
         .task { await model.refreshCompanionUpdateFlag() }
     }
 
@@ -424,10 +437,21 @@ struct AboutView: View {
         let now = Date()
         taps = now.timeIntervalSince(lastTap) < 1.5 ? taps + 1 : 1
         lastTap = now
-        guard taps >= 5, !raining else { return }
+        guard taps >= 5, !raining, !lifted else { return }
         taps = 0
-        raining = true
-        Task { try? await Task.sleep(for: .seconds(5)); raining = false }
+        lifted = true
+        Task {
+            try? await Task.sleep(for: .milliseconds(650))
+            raining = true
+            try? await Task.sleep(for: .seconds(5))
+            raining = false
+            try? await Task.sleep(for: .milliseconds(350))
+            lifted = false
+            try? await Task.sleep(for: .milliseconds(500))
+            relieved = true
+            try? await Task.sleep(for: .seconds(3))
+            relieved = false
+        }
     }
 }
 

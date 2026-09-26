@@ -22,7 +22,6 @@ struct ChatListView: View {
     @AppStorage("chats.allBots") private var allBots = false
     /// Mirrors the tab bar's minimize-on-scroll so the compose circle drops beside the collapsed bar.
     @State private var barCollapsed = false
-    @State private var lastScrollY: CGFloat = 0
 
     private var runtime: GatewayRuntime? { model.runtime }
 
@@ -43,17 +42,22 @@ struct ChatListView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { profileMenu }
             }
-            // Like Messages: compose is a glass circle beside the tab bar. As a bottom toolbar item
-            // the system moves it with the tab bar's own minimize/expand, at the same moment.
-            .toolbar {
-                ToolbarItem(placement: .bottomBar) {
-                    Button { path.append(ChatRoute(storedID: nil, title: nil)) } label: {
-                        Image(systemName: "square.and.pencil")
-                    }
-                    .disabled(runtime == nil)
-                    .accessibilityLabel("New Chat")
-                    .accessibilityIdentifier("chats.new")
+            // Like Messages: compose is a detached glass circle beside the tab bar. It drops level
+            // with the bar the moment the bar itself starts to minimize, and rises as it expands.
+            .overlay(alignment: .bottomTrailing) {
+                Button { path.append(ChatRoute(storedID: nil, title: nil)) } label: {
+                    Image(systemName: "square.and.pencil").font(.title3.weight(.semibold))
+                        .frame(width: 50, height: 50)
+                        .glassEffect(.regular.interactive(), in: .circle)
                 }
+                .buttonStyle(.plain)
+                .disabled(runtime == nil)
+                .accessibilityLabel("New Chat")
+                .accessibilityIdentifier("chats.new")
+                .padding(.trailing, 20).padding(.bottom, 8)
+                .offset(y: barCollapsed ? 62 : 0)
+                .animation(.snappy(duration: 0.3), value: barCollapsed)
+                .background(TabBarMinimizeObserver(minimized: $barCollapsed).frame(width: 0, height: 0))
             }
             .navigationDestination(for: ChatRoute.self) { route in ConversationView(route: route) }
             .searchable(text: $searchText, prompt: "Search chats")
@@ -145,14 +149,6 @@ struct ChatListView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, y in
-            // Same rule the system uses: scrolling down collapses, scrolling up (or the top) restores.
-            defer { lastScrollY = y }
-            if y <= 8 { if barCollapsed { barCollapsed = false }; return }
-            let dy = y - lastScrollY
-            if dy > 6, !barCollapsed { barCollapsed = true }
-            else if dy < -6, barCollapsed { barCollapsed = false }
-        }
         .overlay { if loading && sessions.isEmpty { ProgressView() } }
         .safeAreaInset(edge: .top, spacing: 0) {
             if let msg = runtime.restartRequired {

@@ -93,6 +93,7 @@ struct BottomDock: View {
                     }
                     .padding(12)
                     .glassEffect(.regular, in: .rect(cornerRadius: 16))
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
                 if !chat.queue.isEmpty { QueueStrip(chat: chat) }
                 if let card = chat.firstCard {
@@ -116,6 +117,7 @@ struct BottomDock: View {
             .padding(.bottom, 8)
         }
         .animation(.snappy, value: chat.firstCard?.id)
+        .animation(.snappy, value: chat.banner)
     }
 }
 

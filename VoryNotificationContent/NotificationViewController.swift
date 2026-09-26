@@ -62,7 +62,7 @@ final class NotificationViewController: UIViewController, UNNotificationContentE
     private func fittedHeight(width: CGFloat) -> CGFloat {
         let a = measured?.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height ?? 120
         let b = measuredThread?.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height ?? 0
-        let h = max(a, b) + (measuredThread == nil ? 0 : 22)   // page dots
+        let h = max(a, b) + (measuredThread == nil ? 0 : 26)   // page dots
         // iOS fixes the expanded notification's height while the keyboard is up and clips anything
         // taller; the Lock Screen (clock and widgets above) gives less room than the Home Screen.
         let cap = max(200, UIScreen.main.bounds.height * 0.29)
@@ -95,8 +95,8 @@ struct ReplyPane: View {
             ReplyCard(model: model, page: .reply)
         } else {
             TabView(selection: $page) {
-                ReplyCard(model: model, page: .thread).tag(0)
-                ReplyCard(model: model, page: .reply).tag(1)
+                ReplyCard(model: model, page: .thread).frame(maxHeight: .infinity, alignment: .top).tag(0)
+                ReplyCard(model: model, page: .reply).frame(maxHeight: .infinity, alignment: .top).tag(1)
             }
             .tabViewStyle(.page(indexDisplayMode: .always))
             .indexViewStyle(.page(backgroundDisplayMode: .never))
