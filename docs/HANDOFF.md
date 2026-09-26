@@ -7,8 +7,10 @@ at a time, ship a TestFlight build, wait for their verdict.
 
 ## Where things stand
 
-- **Latest TestFlight build: 1.0.1 (30)**, uploaded 2026-09-25 21:25. Companion plugin **1.0.25**.
-  Builds 20 and 22 were superseded cuts and are expired. Build 30 is untested by the user.
+- **Latest TestFlight build: 1.0.1 (31)**, uploaded 2026-09-26 ~10:20. Companion plugin **1.0.25**.
+  Builds 20 and 22 were superseded cuts and are expired. Build 31 is untested by the user; their
+  verdict on build 30 was: bar too small and not uniform between tabs, Settings search over the
+  bar, gap under the Chats search — all addressed in 31.
 - **Versioning plan (user's decision):** marketing version stays `1.0.1` through the beta, then
   `1.2`, `1.3`…; `2.0` is the real App Store release. Build numbers are small iteration numbers.
   `Tools/release/testflight.sh` picks the next one from App Store Connect automatically (override
@@ -84,8 +86,12 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
 
 ## Architecture map (what changed where)
 
-- `Vory/App/VoryTabBar.swift` — **our own tab bar** (build 30): glass capsule of icon-only tabs, label
-  and sliding pill under the selected one, detached glass compose circle. `MainTabView` in
+- `Vory/App/VoryTabBar.swift` — **our own tab bar** (builds 30–31), drawn to the native iOS 27 UITabBar's
+  measurements (dumped from a throwaway native TabView on the simulator: capsule 62 pt, 4 pt inset,
+  equal 54 pt slots with icon over a 10 pt label, 21 pt side margins, bottom edge 13 pt into the
+  home-indicator area, 48 pt compose circle). Press-and-hold/slide drags the selection pill and
+  switches pages as it passes tabs (one DragGesture on the capsule; slots are plain views with
+  button accessibility). Detached glass compose circle. `MainTabView` in
   `RootView.swift` is a ZStack of pages + `.safeAreaInset(.bottom)` with the bar. Hidden by
   `AppModel.chatsPathOpen` (Chats path, instant) and `tabBarHiders` (`.hidesTabBar()` on
   `ConversationView` and `PushSetupView`). Compose raises `AppModel.newChatRequest`; `ChatListView`
@@ -135,6 +141,14 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
   `hermes.text` (≤1200) and `hermes.title`; payload trimmed under Apple's 4 KB.
 
 ## Change log
+
+### 2026-09-26 (build 31)
+- 31: tab bar to the native measurements (equal slots, labels on every tab, lower and taller),
+  press-and-hold drag of the selection pill, Settings (+ Config/Env/MCP/Skills) search under the
+  title (`.navigationBarDrawer(displayMode: .always)`; iOS 27 then forces the title inline — the
+  `.automatic` mode keeps the large title but hides the search until pulled), no gap under the
+  Chats search (`.contentMargins(.top, 0, for: .scrollContent)`). The `testflight.sh` upload is
+  denied by the permission classifier unless the user asks to deploy in so many words.
 
 ### 2026-09-25 (builds 25–30)
 - 30: custom tab bar (Messages layout), Vory-cloud Bots icon, search pinned under the title.
