@@ -7,9 +7,9 @@ at a time, ship a TestFlight build, wait for their verdict.
 
 ## Where things stand
 
-- **Latest TestFlight build: 1.0.1 (41)**, uploaded 2026-09-26 ~14:05 (31–40 earlier that day),
-  with companion 1.0.26. User verdict on 41: approval cards work; everything else approved apart
-  from the build-42 list below. **Build 42 is built and committed, awaiting the user's "ship it".**
+- **Latest TestFlight build: 1.0.1 (42)**, uploaded 2026-09-26 ~15:05 (31–41 earlier that day),
+  companion 1.0.26 unchanged. Build 42 = the build-41 review list plus the animated tour, the
+  restyled Companion setup, one-piece bubble tails and the no-bloom bots. Awaiting the user's verdict.
 - **Public beta rule (user, 2026-09-26):** nothing user-specific in notes, setup copy, sample data
   or docs — no bot names, gateway names or hostnames. Write for strangers.
   Build 39 (shipped on the user's "ship it"): dark-mode icon blue lighter
@@ -203,6 +203,12 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
   completes (`turnKey`), squints while installing/waiting. Buttons: Continue (Done on the last
   step), and under it Exit on step 1 / "Cancel setup" after that (confirm → `startOver` wipes the
   phone's progress). No step marks, no arrows, no X. DEBUG arg `-vory-show-setup` opens it.
+- **No materialize bloom on bots**: `BotFaceView` no longer changes identity on a look change
+  (it nudges `eyesBusy` to un-pause the timeline instead) and both glass layers carry
+  `.glassEffectTransition(.identity)`. The chat header bot fades in (no spring from 0.3). The
+  Chats profile button draws the bot `drawn: true` — glass on the toolbar's glass went murky.
+- **Bubbles**: `SpeechBubbleShape` (tour, wizard, About) and the reply window's `BubbleShape` are
+  single continuous outlines with the tail in the stroke; the wizard's `TypingBubble` is gone.
 - Compose chips wrap (`FlowLayout`); `GroupChats.create` takes the room from `groups.list` (by the
   returned id, else newest by name) — the real gateway's create response is not the room.
 
