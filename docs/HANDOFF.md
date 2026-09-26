@@ -18,9 +18,16 @@ at a time, ship a TestFlight build, wait for their verdict.
   bot as sender and its avatar, replying from the notification (the answer comes back as a new
   notification), the long-press reply window, the Software Update page for the companion, the Creator
   Studio bots, the Messages-style chat header, swipe-back from anywhere.
-- **Open feedback backlog** is in the memory file `vory-feedback-backlog.md` (pinned chats, blank
-  chats, Watch spacing, mic crash, layout items #7–#12, animation items #13–#16, features #17–#23, and
-  the gateway's "session could not be re-attached" reconnect error).
+- **Open feedback backlog** (full text with what is already closed: `docs/agent-memory/
+  vory-feedback-backlog.md`). Still open, in the user's numbering: #3 pinned chats disappear; #5 chats
+  open blank until scrolled; #6 Watch scroll-to-bottom spacing; extra space under the last message when
+  a chat opens (unreproduced); older mic-button crash; the gateway's "session could not be re-attached"
+  reconnect error; #7 profile picker layout; #8 a menu item's title padding; #10 refresh icon inside the
+  search bar; #13 bot animates everywhere while working (and still when idle); #14 animate the "…"
+  thinking indicator; #15 active bot's avatar in the menu item; #16 motion-style setting (ask if still
+  wanted after the Creator Studio); #17 Stop button becomes a grey Send while typing (queue/steer);
+  #18 in-chat iMessage-style reply UI (the notification reply window part is done); #20 notifications
+  on/off toggle; #21 plain-language status screen; #22 general plugins list; #23 @mention bot picker.
 
 ## Build, install, ship
 
