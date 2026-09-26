@@ -167,6 +167,9 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
 
 ## Change log
 
+### 2026-09-26 (build 45, from the build-44 review — in progress)
+- Group chat: `RoomView` gets `.hidesTabBar()` so the composer is not under the tab bar.
+
 ### 2026-09-26 (build 44, from the build-43 review)
 - **Light-mode bot colour everywhere painted**: `BotFace.draw(..., light:)` →
   `drawGlassBody(light:)` uses the live glass's light recipe (lighter shadow 0.12, fill 0.82→0.68,

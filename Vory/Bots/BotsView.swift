@@ -471,6 +471,8 @@ struct RoomView: View {
                     .transition(.opacity)
                 }
             }
+            // A chat: the tab bar steps aside so the composer sits at the bottom, as in a single chat.
+            .hidesTabBar()
             .safeAreaInset(edge: .bottom) {
                 HStack {
                     TextField("Message the group", text: $text, axis: .vertical).lineLimit(1...4).padding(.vertical, 6)
