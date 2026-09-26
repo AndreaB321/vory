@@ -92,13 +92,13 @@ struct SettingsView: View {
                 }
                 Section("Hermes") {
                     ForEach(filtered(hermesRows)) { row in
-                        NavigationLink { row.destination.navigationTitle(row.title) } label: { SettingsLabel(row.title, row.symbol, row.color) }
+                        NavigationLink { row.destination.navigationTitle("").navigationBarTitleDisplayMode(.inline) } label: { SettingsLabel(row.title, row.symbol, row.color) }
                     }
                 }
                 .disabled(model.runtime == nil)
                 Section("App") {
                     ForEach(filtered(appRows)) { row in
-                        NavigationLink { row.destination.navigationTitle(row.title) } label: {
+                        NavigationLink { row.destination.navigationTitle("").navigationBarTitleDisplayMode(.inline) } label: {
                             HStack {
                                 SettingsLabel(row.title, row.symbol, row.color)
                                 Spacer(minLength: 8)
@@ -126,6 +126,28 @@ struct GatewayTile: View {
     }
 }
 
+/// The header card at the top of every Settings sub-page, like iOS's own: the icon on a large
+/// tile, the page's name and one line on what lives here. Scrolls with the list.
+struct SettingsHeaderSection: View {
+    var title: String
+    var symbol: String
+    var color: Color
+    var description: String
+    var body: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 12) {
+                Image(systemName: symbol).font(.system(size: 30, weight: .medium)).foregroundStyle(.white)
+                    .frame(width: 60, height: 60).background(color.gradient, in: .rect(cornerRadius: 14))
+                Text(title).font(.title.weight(.bold))
+                Text(description).font(.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 6)
+        }
+        .listRowBackground(Color(uiColor: .secondarySystemGroupedBackground))
+    }
+}
+
 struct SettingsLabel: View {
     var title: String; var symbol: String; var color: Color
     init(_ t: String, _ s: String, _ c: Color) { title = t; symbol = s; color = c }
@@ -149,6 +171,7 @@ struct GatewaysView: View {
 
     var body: some View {
         List {
+            SettingsHeaderSection(title: "Gateways", symbol: "network", color: .blue, description: "The gateways this phone can reach, and which one is active.")
             Section {
                 ForEach(model.store.connections) { c in
                     HStack {
@@ -185,7 +208,7 @@ struct GatewaysView: View {
                 }
             }
         }
-        .navigationTitle("Gateways")
+        .navigationTitle("").navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showAdd) { NavigationStack { GatewayFormView() } }
         .alert("Remove gateway?", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })) {
             Button("Remove", role: .destructive) { if let c = pendingDelete { Task { await model.deleteConnection(c.id) } } }
@@ -205,6 +228,7 @@ struct ProfileView: View {
 
     var body: some View {
         List {
+            SettingsHeaderSection(title: "Profile", symbol: "person.crop.circle", color: .indigo, description: "Which bot the Settings screens read and write, and new bots on this gateway.")
             if let rt = model.runtime {
                 Section("Active profile in this app") {
                     ForEach(rt.profiles) { p in
@@ -259,6 +283,7 @@ struct NotificationsView: View {
     var body: some View {
         let push = model.push
         List {
+            SettingsHeaderSection(title: "Notifications", symbol: "bell.badge", color: .red, description: "Permission, Live Activities and haptics on this phone.")
             Section("Permission") {
                 LabeledContent("Status", value: statusText(push.authorization))
                 if push.authorization == .notDetermined {
@@ -288,6 +313,7 @@ struct SecurityView: View {
     @Environment(AppModel.self) private var model
     var body: some View {
         List {
+            SettingsHeaderSection(title: "Security", symbol: "faceid", color: .green, description: "Face ID lock and how this phone keeps its credentials.")
             Section {
                 Toggle("Require \(model.lock.biometryName)", isOn: Binding(get: { model.lock.isEnabled }, set: { model.lock.isEnabled = $0 }))
             } footer: { Text("Locks the app after it has been in the background. Gateway credentials are stored in the iOS Keychain (device-only).") }
@@ -305,6 +331,7 @@ struct BotsSettingsView: View {
 
     var body: some View {
         List {
+            SettingsHeaderSection(title: "Bots", symbol: "cloud.fill", color: .indigo, description: "What applies to every bot at once: glass, motion and tilt.")
             Section {
                 Toggle("Motion effects", isOn: $motion)
                     .onChange(of: motion) { _, _ in BotMotionSource.shared.apply() }
@@ -365,6 +392,7 @@ struct AppearanceView: View {
     @AppStorage(ChatStyle.headerShowsTitle) private var headerShowsTitle = false
     var body: some View {
         List {
+            SettingsHeaderSection(title: "Appearance", symbol: "circle.lefthalf.filled", color: .black, description: "Theme, tabs, the chat header and what the transcript shows.")
             Section {
                 Picker("Chat header shows", selection: $headerShowsTitle) {
                     Text("Bot name").tag(false)
@@ -469,6 +497,7 @@ struct AboutView: View {
 
     var body: some View {
         List {
+            SettingsHeaderSection(title: "About", symbol: "info.circle", color: .blue, description: "Version, the Vory cloud, and what is installed.")
             Section {
                 VStack(spacing: 6) {
                     ZStack(alignment: .top) {
@@ -616,6 +645,7 @@ struct SoftwareUpdateView: View {
 
     var body: some View {
         List {
+            SettingsHeaderSection(title: "Software Update", symbol: "arrow.down.circle", color: .gray, description: "The Companion version on the gateway, updated in place.")
             if let rt = model.runtime {
                 Section {
                     if setup.companionCheckedAt == nil {

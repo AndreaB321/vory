@@ -717,6 +717,7 @@ struct CompanionView: View {
 
     var body: some View {
         List {
+            SettingsHeaderSection(title: "Companion", symbol: "puzzlepiece.extension.fill", color: .blue, description: "The plugin on your gateway that brings notifications, Live Activities and approval cards to this phone.")
             if let rt {
                 let push = model.push
                 Section {
@@ -797,7 +798,7 @@ struct CompanionView: View {
                 Text("Connect a gateway first.").foregroundStyle(.secondary)
             }
         }
-        .navigationTitle("Companion")
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .listSectionSpacing(28)
         .animation(.smooth, value: setup.updateOutcome == nil)

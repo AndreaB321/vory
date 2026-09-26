@@ -120,6 +120,7 @@ struct SystemView: View {
 
     var body: some View {
         List {
+            SettingsHeaderSection(title: "System", symbol: "server.rack", color: .secondary, description: "Gateway health, logs, restarts and updates.")
             if let s = status {
                 Section {
                     LabeledContent("Hermes", value: s["version"]?.stringValue ?? "?")

@@ -14,6 +14,7 @@ struct ModelSettingsView: View {
 
     var body: some View {
         List {
+            SettingsHeaderSection(title: "Model", symbol: "cpu", color: .blue, description: "The default model and provider for this bot.")
             if let o = options {
                 Section {
                     LabeledContent("Current", value: o.model?.isEmpty == false ? "\(o.provider ?? "")/\(o.model!)" : "not set")
@@ -102,6 +103,7 @@ struct ConfigFormView: View {
 
     var body: some View {
         List {
+            SettingsHeaderSection(title: "Config", symbol: "slider.horizontal.3", color: .gray, description: "Every setting in this bot's config, grouped the way the gateway reports them.")
             if let error { Text(error).foregroundStyle(.red).font(.footnote) }
             ForEach(categories, id: \.0) { cat, fields in
                 Section(cat.capitalized) {
@@ -212,6 +214,7 @@ struct EnvView: View {
 
     var body: some View {
         List {
+            SettingsHeaderSection(title: "API Keys & Environment", symbol: "key.fill", color: .orange, description: "Provider keys and environment variables the gateway uses.")
             if let error { Text(error).foregroundStyle(.red).font(.footnote) }
             ForEach(grouped, id: \.0) { cat, keys in
                 Section(cat) {
@@ -286,6 +289,7 @@ struct ToolsView: View {
 
     var body: some View {
         List {
+            SettingsHeaderSection(title: "Tools", symbol: "wrench.and.screwdriver", color: .teal, description: "What the bot may do: each tool on or off.")
             if let error { Text(error).foregroundStyle(.red).font(.footnote) }
             ForEach(toolsets) { t in
                 Toggle(isOn: Binding(get: { t.enabled }, set: { v in Task { await toggle(t, v) } })) {
@@ -325,6 +329,7 @@ struct SkillsView: View {
 
     var body: some View {
         List {
+            SettingsHeaderSection(title: "Skills", symbol: "sparkles", color: .purple, description: "The skills installed for this bot and what they add.")
             if let error { Text(error).foregroundStyle(.red).font(.footnote) }
             ForEach(skills.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }) { s in
                 Toggle(isOn: Binding(get: { s.enabled ?? true }, set: { v in Task { await toggle(s, v) } })) {
@@ -365,6 +370,7 @@ struct MCPView: View {
 
     var body: some View {
         List {
+            SettingsHeaderSection(title: "MCP Servers", symbol: "point.3.connected.trianglepath.dotted", color: .mint, description: "External tool servers the bot can call, and whether each is on.")
             if let error { Text(error).foregroundStyle(.red).font(.footnote) }
             if let testResult { Text(testResult).font(.footnote) }
             ForEach(servers) { s in
@@ -447,6 +453,7 @@ struct ApprovalsView: View {
 
     var body: some View {
         List {
+            SettingsHeaderSection(title: "Approvals", symbol: "checkmark.shield", color: .green, description: "How commands get approved — manual, smart or off — and what is always allowed.")
             Section {
                 Picker("Mode", selection: $mode) {
                     Text("Smart").tag("smart"); Text("Manual").tag("manual"); Text("Off").tag("off")
@@ -494,6 +501,7 @@ struct CronView: View {
 
     var body: some View {
         List {
+            SettingsHeaderSection(title: "Scheduled Tasks", symbol: "calendar.badge.clock", color: .pink, description: "Prompts your bots run on a schedule.")
             if let error { Text(error).foregroundStyle(.red).font(.footnote) }
             if jobs.isEmpty, error == nil { ContentUnavailableView("No cron jobs", systemImage: "clock", description: Text("Jobs scheduled on any profile of this gateway appear here.")) }
             ForEach(jobs, id: \.identity) { j in
@@ -767,6 +775,7 @@ struct SessionsView: View {
 
     var body: some View {
         List {
+            SettingsHeaderSection(title: "Sessions", symbol: "list.bullet.rectangle", color: .cyan, description: "Every conversation on the gateway, with search and storage.")
             if let error { Text(error).foregroundStyle(.red).font(.footnote) }
             Section {
                 ForEach(sessions) { s in
@@ -823,6 +832,7 @@ struct ChannelsView: View {
 
     var body: some View {
         List {
+            SettingsHeaderSection(title: "Channels", symbol: "antenna.radiowaves.left.and.right", color: .brown, description: "Messaging platforms the gateway is connected to.")
             if let error { Text(error).foregroundStyle(.red).font(.footnote) }
             ForEach(Array(platforms.enumerated()), id: \.offset) { _, p in
                 HStack {

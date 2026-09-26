@@ -197,7 +197,10 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
   `chats.aiSummaries` in Appearance (disabled with the reason when the model is unavailable);
   `SessionRow(summary:)` shows title + summary with a sparkle; a tour page (inserted before
   Connect) with the switch, only when the model is available. The simulator has no model.
-- Settings tiles: one symbol size (15 pt medium) centred in 28 pt.
+- Settings tiles: one symbol size (15 pt medium) centred in 28 pt. Every Settings sub-page starts
+  with `SettingsHeaderSection` (60 pt tile, title, one-line description; the bar title is "") —
+  inserted as the first section of each page's List by struct name (see `b43e.py` in the session
+  scratchpad for the list of pages; add one to any new page).
 
 ### 2026-09-26 (build 42, from the build-41 review)
 - **Motion, gentle**: `BotFace.Motion` is now {yaw, roll, dx, dy} — no scale anywhere (breathing
