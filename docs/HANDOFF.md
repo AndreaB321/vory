@@ -7,11 +7,12 @@ at a time, ship a TestFlight build, wait for their verdict.
 
 ## Where things stand
 
-- **Latest TestFlight build: 1.0.1 (38)**, uploaded 2026-09-26 ~12:00 (31–37 earlier that day).
-  **Build 39 is built and committed, awaiting the user's "ship it":** dark-mode icon blue lighter
+- **Latest TestFlight build: 1.0.1 (39)**, uploaded 2026-09-26 ~12:20 (31–38 earlier that day).
+  Build 39 (shipped on the user's "ship it"): dark-mode icon blue lighter
   (layer `fill-specializations` for dark, light unchanged), cloud 1.21× and up 20 pt, slash-command
   list in the composer, bottom lock in the transcript, glass bots redraw on change, darker glass
-  eyes, grey steer bubbles, no banners while the app is in front, composer morph id on the capsule. Companion plugin **1.0.25**.
+  eyes, grey steer bubbles, no banners while the app is in front, composer morph id on the capsule, profile menu rebuilds on look changes, painted glass
+  while the scene is inactive (switcher snapshot), composer drafts per session (`ComposerDrafts`). Companion plugin **1.0.25**.
   Builds 20 and 22 were superseded cuts and are expired. Build 38 = 37 + the icon's cloud 10 % larger (layer `position.scale` 1.1). Build 37 = 36 + Settings › Bots with "Liquid Glass for all bots" (greys out the per-bot
   switch with a note). Build 36 = 35 + Liquid Glass bots (beta toggle in the Creator Studio), bots in the profile
   switcher, bigger Bots tab icon, more room above the bar. Build 35 = 34 + the new app icon
