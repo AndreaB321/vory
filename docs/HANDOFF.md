@@ -7,8 +7,8 @@ at a time, ship a TestFlight build, wait for their verdict.
 
 ## Where things stand
 
-- **Latest TestFlight build: 1.0.1 (34)**, uploaded 2026-09-26 ~11:30 (31–33 earlier that morning). Companion plugin **1.0.25**.
-  Builds 20 and 22 were superseded cuts and are expired. Build 34 = 33 + capsule 56 pt (user: 62 felt tall; bottom edge kept) and the lens refracting the
+- **Latest TestFlight build: 1.0.1 (35)**, uploaded 2026-09-26 ~11:20 (31–34 earlier that morning). Companion plugin **1.0.25**.
+  Builds 20 and 22 were superseded cuts and are expired. Build 35 = 34 + the new app icon (user approved 34: "looks fucking amazing, that's set"). Build 34 = 33 + capsule 56 pt (user: 62 felt tall; bottom edge kept) and the lens refracting the
   icons while dragged. Compose glyph centred on its square (user approved the zoom). Verdict on 31: not
   aligned like the system bar, no refracting glass lens, list rows cut off under the bar, labels
   should show only under the selected tab, compose circle should be the bar's height and its
@@ -144,7 +144,15 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
 
 ## Change log
 
-### 2026-09-26 (builds 31–34)
+### 2026-09-26 (builds 31–35)
+- 35: **new app icon** — the Vory cloud as layered Liquid Glass (`Shared/AppIcon.icon`): cloud in the
+  brand cyan→navy gradient (glass, 72 % translucent, max refraction), classic eyes in front (glass,
+  65 % translucent, dark), white tile in light mode, near-black in dark. Chosen by the user from ~20
+  rendered variants (a V-shaped mark is gone; the app's face is the cloud). Lessons: `groups` are
+  listed FRONT to back; dark details as glass must be listed in front or they vanish; Icon Composer
+  ignores SVG clip-paths (rasterise to PNG for clipped layers); glass only reads as glass with
+  something behind it. Generator scripts were in the session scratchpad (`icon/gen*.py`,
+  `sheet.swift` contact sheet, `streak.swift` clipped streak) — not kept in the repo.
 - 34: capsule 56 pt (reserved 43 + 13 overhang), icons 25/21 pt; while dragged the lens moves ABOVE
   the icons (zIndex) and a second copy of the icon row rides on top of it, masked to the lens minus
   a 4 pt rim, so the icon inside stays crisp and only the rim refracts — the system bar draws its

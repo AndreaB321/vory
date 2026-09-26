@@ -1,60 +1,80 @@
 {
   "fill": {
-    "solid": "srgb:1.0000,1.0000,1.0000,1"
+    "solid": "srgb:1,1,1,1"
   },
   "fill-specializations": [
     {
       "appearance": "dark",
       "value": {
-        "solid": "srgb:0.1060,0.1060,0.1180,1"
+        "solid": "srgb:0.0500,0.0550,0.0800,1"
       }
     }
   ],
   "groups": [
     {
-      "name": "Ring",
+      "name": "Eyes",
       "layers": [
         {
-          "name": "Ring",
-          "image-name": "Ring.svg",
+          "name": "Eyes",
+          "image-name": "Eyes.svg",
           "glass": true,
           "position": {
-            "scale": 0.94,
-            "translation-in-points": [0, 0]
+            "scale": 1,
+            "translation-in-points": [
+              0,
+              0
+            ]
           }
         }
       ],
-      "shadow": { "kind": "neutral", "opacity": 0.45 },
-      "translucency": { "enabled": false, "value": 0.0 },
-      "specular": true,
-      "blur-material": 0.5,
-      "refractivity-strength": 0.6,
-      "refractivity-depth": 0.5
-    },
-    {
-      "name": "V",
-      "layers": [
-        {
-          "name": "V",
-          "image-name": "V.svg",
-          "glass": true,
-          "position": {
-            "scale": 0.94,
-            "translation-in-points": [0, 0]
-          }
-        }
-      ],
-      "shadow": { "kind": "neutral", "opacity": 0.75 },
-      "translucency": { "enabled": false, "value": 0.0 },
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.6
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.65
+      },
       "specular": true,
       "specular-highlight-placement": "inside",
-      "blur-material": 0.25,
-      "refractivity-strength": 0.9,
-      "refractivity-depth": 0.8
+      "blur-material": 0.4,
+      "refractivity-strength": 1.0,
+      "refractivity-depth": 0.9
+    },
+    {
+      "name": "Cloud",
+      "layers": [
+        {
+          "name": "Cloud",
+          "image-name": "Cloud.svg",
+          "glass": true,
+          "position": {
+            "scale": 1,
+            "translation-in-points": [
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.7
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.72
+      },
+      "specular": true,
+      "blur-material": 0.5,
+      "refractivity-strength": 1.0,
+      "refractivity-depth": 1.0
     }
   ],
   "supported-platforms": {
-    "circles": ["watchOS"],
+    "circles": [
+      "watchOS"
+    ],
     "squares": "shared"
   }
 }
