@@ -212,7 +212,16 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
 - Conversation with a resume error: placeholder hidden, `ContentUnavailableView` padded above
   the dock + keyboard, composer disabled until the chat opens.
 - **Chat rows**: `ChatRowStyle` — card inset 8 (was 16), row leading inset 12, preview 2 lines;
-  DEBUG `-vory-row-style a|b|c` (a = old, b = default, c = 3-line preview). User to pick.
+  DEBUG `-vory-row-style a|b|c` (a = old, b = default, c = 3-line preview). User picked **B**.
+- **Bot beside replies** (user ask after seeing the group chat): `TranscriptRow(profile:botShown:)`
+  puts a 28 pt `BotAvatar` (active while streaming, squint while empty) at the bottom-left of a
+  reply bubble; `TranscriptRowModel.lastOfRun` so a run of replies (tool cards between them
+  allowed) shows the bot once, the others keep a 28 pt margin. Toggle "Bot beside replies"
+  (`chat.showBots`, on) in Appearance and the chat's display sheet.
+- **Group chat empty state**: the room's bots overlapped + names + "Say something to the group".
+- **HOLD**: the user wants the bot animations reworked before build 44 ships — they are
+  collecting ideas from another model using `scratchpad/vory-bots-brief.md` (a copy is in
+  `docs/bots-brief.md`). Do not upload until they say "ship it".
 
 ### 2026-09-26 (build 43, from the build-42 review)
 - **Tilt** is its own switch (Settings › Bots › "Tilt with the phone", BETA, `bots.tilt`, off by

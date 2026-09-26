@@ -57,6 +57,7 @@ struct ProfileCardView: View {
     @AppStorage(ChatStyle.showReasoning) private var showReasoning = true
     @AppStorage(ChatStyle.showTurnStats) private var showTurnStats = true
     @AppStorage(ChatStyle.showSystemNotes) private var showSystemNotes = true
+    @AppStorage(ChatStyle.showBots) private var showBots = true
 
     private var rt: GatewayRuntime? { model.runtime }
     private var profile: ProfileInfo? { rt?.profiles.first { $0.name == profileName } }
@@ -114,6 +115,7 @@ struct ProfileCardView: View {
                     Toggle("Show reasoning", isOn: $showReasoning)
                     Toggle("Show tokens per second", isOn: $showTurnStats)
                     Toggle("Show system notes", isOn: $showSystemNotes)
+                    Toggle("Bot beside replies", isOn: $showBots)
                 } header: { Text("Show in chats") } footer: { Text("Also under Settings › Appearance.") }
             }
             Section {

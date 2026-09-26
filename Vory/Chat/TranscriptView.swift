@@ -29,6 +29,7 @@ struct TranscriptView: View {
     @AppStorage(ChatStyle.showReasoning) private var showReasoning = true
     @AppStorage(ChatStyle.showTurnStats) private var showTurnStats = true
     @AppStorage(ChatStyle.showSystemNotes) private var showSystemNotes = true
+    @AppStorage(ChatStyle.showBots) private var showBots = true
 
     private var visibleItems: [TranscriptItem] {
         chat.items.filter { item in
@@ -58,7 +59,8 @@ struct TranscriptView: View {
                             Text(sep).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity).padding(.vertical, 6)
                         }
-                        TranscriptRow(item: row.item, showReasoning: showReasoning, showStats: showTurnStats, onEdit: onEditMessage,
+                        TranscriptRow(item: row.item, profile: showBots ? chat.profileName : nil, botShown: row.lastOfRun,
+                                      showReasoning: showReasoning, showStats: showTurnStats, onEdit: onEditMessage,
                                       reasoningOpen: Binding(get: { openReasoning.contains(row.item.id) },
                                                              set: { if $0 { openReasoning.insert(row.item.id) } else { openReasoning.remove(row.item.id) } }),
                                       onSelectText: { selectText = $0 })
@@ -161,6 +163,8 @@ enum ChatStyle {
     static let showReasoning = "chat.showReasoning"
     static let showTurnStats = "chat.showTurnStats"
     static let showSystemNotes = "chat.showSystemNotes"
+    /// The bot beside each reply bubble.
+    static let showBots = "chat.showBots"
 }
 
 /// A transcript item plus the "Tue, Sep 22 at 6:30 PM" separator that precedes it when the
@@ -168,6 +172,8 @@ enum ChatStyle {
 struct TranscriptRowModel: Identifiable {
     var item: TranscriptItem
     var separator: String?
+    /// The last reply before something that is not a reply (the bot sits beside this one).
+    var lastOfRun = true
     var id: String { item.id }
 
     static let gap: TimeInterval = 15 * 60
@@ -182,6 +188,13 @@ struct TranscriptRowModel: Identifiable {
             }
             last = item.timestamp
             out.append(TranscriptRowModel(item: item, separator: sep))
+        }
+        // A run of replies (with tool cards between them) shows the bot once, on the last one.
+        for i in out.indices {
+            guard case .assistant = out[i].item.kind else { continue }
+            var next = i + 1
+            while next < out.count, case .tool = out[next].item.kind { next += 1 }
+            if next < out.count, case .assistant = out[next].item.kind { out[i].lastOfRun = false }
         }
         return out
     }
@@ -200,6 +213,10 @@ struct SelectTextItem: Identifiable { let text: String; var id: String { text } 
 
 struct TranscriptRow: View {
     var item: TranscriptItem
+    /// The bot beside its bubble, as in a group chat; nil for none. Only the last bubble of a
+    /// run of replies gets the bot (`botShown`); the others keep the same left margin.
+    var profile: String? = nil
+    var botShown = true
     var showReasoning = true
     var showStats = true
     var onEdit: (String) -> Void = { _ in }
@@ -230,7 +247,14 @@ struct TranscriptRow: View {
                 }
             }
         case .assistant(let text, let reasoning, let streaming):
-            HStack {
+            HStack(alignment: .bottom, spacing: 8) {
+                if let profile {
+                    if botShown {
+                        BotAvatar(profile: profile, size: 28, active: streaming, mood: BotFaceView.Mood(thinking: streaming && text.isEmpty, profile: profile))
+                    } else {
+                        Color.clear.frame(width: 28, height: 1)
+                    }
+                }
                 VStack(alignment: .leading, spacing: 6) {
                     if showReasoning, let reasoning, !reasoning.isEmpty { ReasoningDisclosure(text: reasoning, open: reasoningOpen) }
                     MarkdownView(text: text)
