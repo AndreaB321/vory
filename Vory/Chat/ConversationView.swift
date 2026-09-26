@@ -40,6 +40,9 @@ struct ConversationView: View {
                     .sheet(isPresented: $showProfile) { ProfileInfoSheet(chat: chat, profileName: chat.profileName) }
                     .onChange(of: model.pendingRoute) { _, r in handle(route: r, chat: chat) }
                     .onAppear { handle(route: model.pendingRoute, chat: chat) }
+                    // Whatever was typed survives leaving the chat: saved per session as it changes,
+                    // restored when the chat opens, cleared by a send (the composer empties the text).
+                    .onChange(of: composerText) { _, t in ComposerDrafts.save(t, for: chat) }
             } else if let loadError {
                 ContentUnavailableView("Could not open chat", systemImage: "exclamationmark.triangle", description: Text(loadError))
             } else {
@@ -60,6 +63,7 @@ struct ConversationView: View {
             // Stored chats return at once with the cached transcript and sync behind the header.
             if let sid = route.storedID { chat = try await runtime.openChat(storedID: sid, title: route.title) }
             else { chat = try await runtime.newChat() }
+            if let chat, composerText.isEmpty, let draft = ComposerDrafts.load(for: chat) { composerText = draft }
         } catch {
             loadError = error.localizedDescription
         }
@@ -262,5 +266,21 @@ struct InteractivePopEnabler: UIViewControllerRepresentable {
         }
 
         func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { false }
+    }
+}
+
+/// Unsent composer text, per session, so leaving a chat and coming back does not lose it.
+@MainActor
+enum ComposerDrafts {
+    private static func key(for chat: ChatSession) -> String { "composerDraft." + (chat.storedID ?? chat.runtimeID) }
+
+    static func load(for chat: ChatSession) -> String? {
+        let t = UserDefaults.standard.string(forKey: key(for: chat)) ?? ""
+        return t.isEmpty ? nil : t
+    }
+
+    static func save(_ text: String, for chat: ChatSession) {
+        if text.isEmpty { UserDefaults.standard.removeObject(forKey: key(for: chat)) }
+        else { UserDefaults.standard.set(text, forKey: key(for: chat)) }
     }
 }
