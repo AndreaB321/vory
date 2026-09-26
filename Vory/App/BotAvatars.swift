@@ -199,6 +199,8 @@ struct CreatorStudio: View {
                     Button { setColour(h) } label: {
                         Circle().fill(Color(hex: h) ?? .gray)
                             .frame(width: 34, height: 34)
+                            // A hairline so the white swatch shows on a white card.
+                            .overlay(Circle().stroke(Color.primary.opacity(0.18), lineWidth: 1))
                             .overlay(Circle().stroke(Color.primary.opacity(hex.uppercased() == h.uppercased() ? 0.9 : 0), lineWidth: 2.5).padding(-4))
                     }
                     .buttonStyle(.plain)

@@ -501,7 +501,7 @@ struct CronView: View {
 
     var body: some View {
         List {
-            SettingsHeaderSection(title: "Scheduled Tasks", symbol: "calendar.badge.clock", color: .pink, description: "Prompts your bots run on a schedule.")
+            SettingsHeaderSection(title: "Scheduled Tasks", symbol: "timer", color: .pink, description: "Prompts your bots run on a schedule.")
             if let error { Text(error).foregroundStyle(.red).font(.footnote) }
             if jobs.isEmpty, error == nil { ContentUnavailableView("No cron jobs", systemImage: "clock", description: Text("Jobs scheduled on any profile of this gateway appear here.")) }
             ForEach(jobs, id: \.identity) { j in

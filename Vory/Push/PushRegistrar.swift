@@ -185,7 +185,8 @@ enum LocalNotifier {
         let turn = UNNotificationCategory(identifier: turnCategory, actions: [reply], intentIdentifiers: [], options: [])
         let err = UNNotificationCategory(identifier: errorCategory, actions: [], intentIdentifiers: [], options: [])
         let enc = UNNotificationCategory(identifier: "HERMES_ENC", actions: [], intentIdentifiers: [], options: [])
-        UNUserNotificationCenter.current().setNotificationCategories([approval, clarify, turn, err, enc])
+        let test = UNNotificationCategory(identifier: "HERMES_TEST", actions: [], intentIdentifiers: [], options: [])
+        UNUserNotificationCenter.current().setNotificationCategories([approval, clarify, turn, err, enc, test])
     }
 
     @MainActor

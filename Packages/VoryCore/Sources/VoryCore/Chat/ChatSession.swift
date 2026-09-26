@@ -202,8 +202,17 @@ public final class ChatSession: @MainActor Identifiable, ChatIdentity {
         info = try? r["info"]?.decode(SessionLiveInfo.self)
         if let t = info?.title, !t.isEmpty { title = t }
         let history = (try? r["messages"]?.decode([TranscriptMessage].self)) ?? []
+        // The gateway's transcript has no attachments; keep the ones this app sent (a photo in
+        // the bubble vanished when the snapshot replaced the items).
+        var keptAttachments: [String: [AttachmentPreview]] = [:]
+        for it in items { if case .user(let t, let a) = it.kind, !a.isEmpty { keptAttachments[t] = a } }
         var built: [TranscriptItem] = []
-        for (i, m) in history.enumerated() { if let item = TranscriptItem.fromHistory(m, index: i) { built.append(item) } }
+        for (i, m) in history.enumerated() {
+            if var item = TranscriptItem.fromHistory(m, index: i) {
+                if case .user(let t, let a) = item.kind, a.isEmpty, let k = keptAttachments[t] { item.kind = .user(text: t, attachments: k) }
+                built.append(item)
+            }
+        }
         items = built
         toolIndex = [:]
         cards = []
@@ -211,7 +220,7 @@ public final class ChatSession: @MainActor Identifiable, ChatIdentity {
         if let inflight = r["inflight"], !inflight.isNull {
             let user = inflight["user"]?.stringValue ?? ""
             if !user.isEmpty, !(items.last.map { if case .user(let t, _) = $0.kind { return t == user }; return false } ?? false) {
-                items.append(TranscriptItem(id: "inflight-user", kind: .user(text: user, attachments: [])))
+                items.append(TranscriptItem(id: "inflight-user", kind: .user(text: user, attachments: keptAttachments[user] ?? [])))
             }
             let partial = inflight["assistant"]?.stringValue ?? ""
             let streaming = inflight["streaming"]?.boolValue ?? false

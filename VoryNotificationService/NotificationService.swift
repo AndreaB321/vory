@@ -65,10 +65,12 @@ final class NotificationService: UNNotificationServiceExtension {
         var looks = BotLooks.load()
         var profile = profile
         if kind == "test" {
-            // The test notification comes from no bot in particular: Vory's own little cloud.
+            // The test notification comes from no bot in particular: Vory's own little cloud, the
+            // same glass one the app shows. No reply action or reply window for a test.
             profile = "vory"
-            looks.avatars["vory"] = "studio:cloud:classic"
+            looks.avatars["vory"] = "studio:cloud:classic:glass"
             looks.colors["vory"] = "#3B7BFF"
+            content.categoryIdentifier = "HERMES_TEST"
         }
         // The title is "<bot>" or "<bot> · approval needed": the sender is the part before the dot.
         let bot = content.title.components(separatedBy: " · ").first ?? content.title

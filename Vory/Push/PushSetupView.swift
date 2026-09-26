@@ -76,7 +76,7 @@ struct PushSetupView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var forward = true
     /// Measured from whichever page is showing; the next page starts from it instead of a guess.
-    @State private var headerHeight: CGFloat = 230
+    @State private var headerHeight: CGFloat = 270
     /// True a moment after the last step completes, once the bot has finished its hop.
     @State private var doneSettled = false
 
@@ -359,7 +359,7 @@ struct PushSetupView: View {
             if let e = setup.error { Label(e, systemImage: "xmark.octagon").font(.footnote).foregroundStyle(.red) }
             if setup.installedOnGateway, let at = setup.installedAt {
                 Label("Installed at \(at.formatted(date: .omitted, time: .shortened)): companion v\(PushSetupModel.bundledPluginVersion), config and plugin are on the gateway and the plugin is enabled.", systemImage: "checkmark.circle.fill")
-                    .font(.footnote).foregroundStyle(.green)
+                    .font(.footnote).foregroundStyle(Color.readableGreen)
                     .transition(.scale(scale: 0.9).combined(with: .opacity))
             }
         } header: { sectionHeader("Install") } footer: {
@@ -616,7 +616,7 @@ struct StepPage<Content: View, Header: View>: View {
         Form { content() }
             .scrollContentBackground(.hidden)
             .listSectionSpacing(24)
-            .contentMargins(.top, headerHeight - 2, for: .scrollContent)
+            .contentMargins(.top, headerHeight + 10, for: .scrollContent)
             .contentMargins(.bottom, 120, for: .scrollContent)
             .overlay(alignment: .top) { top }
     }
@@ -717,9 +717,23 @@ struct CompanionView: View {
 
     var body: some View {
         List {
-            SettingsHeaderSection(title: "Companion", symbol: "puzzlepiece.extension.fill", color: .blue, description: "The plugin on your gateway that brings notifications, Live Activities and approval cards to this phone.")
+            SettingsHeaderSection(title: "Companion", symbol: "puzzlepiece.fill", color: .blue, description: "The plugin on your gateway that brings notifications, Live Activities and approval cards to this phone.")
             if let rt {
                 let push = model.push
+                Section {
+                    NavigationLink { PushSetupView(setup: setup) } label: {
+                        Label(setup.isCompleted(for: rt) ? "Configure" : "Configure the Companion", systemImage: "wand.and.stars")
+                    }
+                    NavigationLink { SoftwareUpdateView() } label: {
+                        HStack {
+                            Label("Software Update", systemImage: "arrow.down.circle")
+                            Spacer(minLength: 8)
+                            if setup.updateAvailable { CountBadge(1) }
+                        }
+                    }
+                } footer: {
+                    Text(setup.isCompleted(for: rt) ? "Configure walks through the setup again — address, sign-in, install, test." : "Guided setup: permission, address, sign-in, install, start, test.")
+                }
                 Section {
                     if setup.companionCheckedAt == nil {
                         Label { Text("Checking…") } icon: { ProgressView() }.foregroundStyle(.secondary)
@@ -736,20 +750,6 @@ struct CompanionView: View {
                     }
                     LabeledContent("Device file on gateway", value: push.registeredAt.map { "published " + $0.formatted(date: .omitted, time: .shortened) } ?? "not published")
                 } header: { sectionHeader("This phone") }
-                Section {
-                    NavigationLink { PushSetupView(setup: setup) } label: {
-                        Label(setup.isCompleted(for: rt) ? "Configure" : "Configure the Companion", systemImage: "wand.and.stars")
-                    }
-                    NavigationLink { SoftwareUpdateView() } label: {
-                        HStack {
-                            Label("Software Update", systemImage: "arrow.down.circle")
-                            Spacer(minLength: 8)
-                            if setup.updateAvailable { CountBadge(1) }
-                        }
-                    }
-                } footer: {
-                    Text(setup.isCompleted(for: rt) ? "Configure walks through the setup again — address, sign-in, install, test." : "Guided setup: permission, address, sign-in, install, start, test.")
-                }
                 if setup.isCompleted(for: rt) || setup.installedVersion != nil {
                     Section {
                         Button(role: .destructive) { confirmReset = true } label: {

@@ -32,13 +32,17 @@ struct NewBotSheet: View {
         NavigationStack {
             List {
                 Section {
-                    VStack(spacing: 8) {
-                        BotAvatar(profile: draftKey, size: 96, active: true, override: choice)
+                    VStack(spacing: 6) {
+                        BotAvatar(profile: draftKey, size: 84, active: true, override: choice)
                         Text(cleanName.isEmpty ? "New bot" : cleanName).font(.title3.weight(.semibold))
                     }
-                    .frame(maxWidth: .infinity).padding(.vertical, 6)
+                    .frame(maxWidth: .infinity)
                     .listRowBackground(Color.clear).listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                 }
+                Section {
+                    CreatorStudio(profile: draftKey, choice: $choice)
+                } header: { Text("Creator Studio") }
                 Section {
                     TextField("Name", text: $name)
                         .focused($nameFocused)
@@ -63,12 +67,11 @@ struct NewBotSheet: View {
                         ForEach(runtime.profiles) { Text($0.label).tag($0.name) }
                     }
                 } header: { Text("Model") } footer: { Text("Starting from another bot copies its config, skills and instructions.") }
-                Section {
-                    CreatorStudio(profile: draftKey, choice: $choice)
-                } header: { Text("Creator Studio") }
                 if let error { Section { Text(error).font(.footnote).foregroundStyle(.red) } }
             }
             .navigationTitle("New Bot")
+            // The preview starts right under the bar; the studio is the first thing to touch.
+            .contentMargins(.top, 6, for: .scrollContent)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -77,7 +80,6 @@ struct NewBotSheet: View {
                 }
             }
             .task {
-                nameFocused = true
                 options = try? await runtime.api.get("/api/model/options", profile: runtime.selectedProfile)
             }
         }

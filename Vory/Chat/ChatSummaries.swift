@@ -23,6 +23,9 @@ final class ChatSummarizer {
 
     private(set) var summaries: [String: Summary] = [:]
     private var inFlight: Set<String> = []
+    /// One generation at a time, at utility priority: several at once stuttered the list.
+    private var pending: [(StoredSession, GatewayRuntime, String?)] = []
+    private var draining = false
     private static let cacheKey = "chats.aiSummaries.cache"
 
     init() {
@@ -57,22 +60,36 @@ final class ChatSummarizer {
         guard enabled, Self.isAvailable, !inFlight.contains(session.id) else { return }
         if let s = summaries[session.id], s.stamp == (session.lastActive ?? 0) { return }
         inFlight.insert(session.id)
-        Task {
-            defer { inFlight.remove(session.id) }
+        pending.append((session, runtime, profile))
+        drain()
+    }
+
+    private func drain() {
+        guard !draining, !pending.isEmpty else { return }
+        draining = true
+        let (session, runtime, profile) = pending.removeFirst()
+        Task(priority: .utility) {
+            await generate(session, runtime: runtime, profile: profile)
+            inFlight.remove(session.id)
+            draining = false
+            drain()
+        }
+    }
+
+    private func generate(_ session: StoredSession, runtime: GatewayRuntime, profile: String?) async {
+        do {
             let messages = await recentMessages(session, runtime: runtime, profile: profile)
             guard !messages.isEmpty else { return }
             let transcript = messages.map { "\($0.role == "user" ? "User" : "Assistant"): \(($0.text ?? "").prefix(600))" }.joined(separator: "\n")
-            do {
-                let ai = LanguageModelSession(instructions: "You summarize a conversation between a user and an AI assistant for a chat list. Be concrete and neutral. Do not mention that it is a conversation or a summary.")
-                let draft = try await ai.respond(to: "Conversation:\n\(transcript)", generating: Draft.self).content
-                let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: ".\"'"))
-                let text = draft.summary.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !title.isEmpty || !text.isEmpty else { return }
-                summaries[session.id] = Summary(title: title.isEmpty ? session.displayTitle : title, summary: text, stamp: session.lastActive ?? 0)
-                save()
-            } catch {
-                // The model can refuse or time out; the row keeps the gateway's own text.
-            }
+            let ai = LanguageModelSession(instructions: "You summarize a conversation between a user and an AI assistant for a chat list. Be concrete and neutral. Do not mention that it is a conversation or a summary.")
+            let draft = try await ai.respond(to: "Conversation:\n\(transcript)", generating: Draft.self).content
+            let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: ".\"'"))
+            let text = draft.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty || !text.isEmpty else { return }
+            summaries[session.id] = Summary(title: title.isEmpty ? session.displayTitle : title, summary: text, stamp: session.lastActive ?? 0)
+            save()
+        } catch {
+            // The model can refuse or time out; the row keeps the gateway's own text.
         }
     }
 

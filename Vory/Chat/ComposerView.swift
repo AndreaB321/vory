@@ -1,4 +1,5 @@
 import PhotosUI
+import QuickLook
 import SwiftUI
 import UniformTypeIdentifiers
 import VoryCore
@@ -19,6 +20,7 @@ struct ComposerView: View {
     @State private var historyCursor: Int?
     @State private var catalog: CommandsCatalog?
     @State private var dictation = DictationController()
+    @State private var stagedPreview: URL?
     /// Re-created after a send: with a pending autocorrect suggestion the vertical TextField keeps
     /// drawing the old text even though the binding is empty; a fresh identity forces the redraw.
     @State private var fieldID = UUID()
@@ -71,19 +73,36 @@ struct ComposerView: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
             }
             if !chat.staged.isEmpty {
+                // Photos as thumbnails you can tap to look at before sending; other files as chips.
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 10) {
                         ForEach(chat.staged) { a in
-                            HStack(spacing: 4) {
-                                Image(systemName: a.kind == .image ? "photo" : a.kind == .pdf ? "doc.richtext" : a.kind == .audio ? "waveform" : a.kind == .video ? "video" : "doc")
-                                Text(a.name).lineLimit(1).font(.caption)
-                                Button { chat.removeStaged(a.id) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.plain)
+                            ZStack(alignment: .topTrailing) {
+                                Button { stagedPreview = a.localURL } label: {
+                                    if a.kind == .image, let u = a.localURL, let img = UIImage(contentsOfFile: u.path) {
+                                        Image(uiImage: img).resizable().scaledToFill().frame(width: 64, height: 64).clipShape(.rect(cornerRadius: 12))
+                                    } else {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: a.kind == .pdf ? "doc.richtext" : a.kind == .audio ? "waveform" : a.kind == .video ? "video" : "doc")
+                                            Text(a.name).lineLimit(1).font(.caption)
+                                        }
+                                        .padding(.horizontal, 10).padding(.vertical, 6)
+                                        .glassEffect(.regular, in: .capsule)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                                Button { chat.removeStaged(a.id) } label: {
+                                    Image(systemName: "xmark.circle.fill").font(.body).foregroundStyle(.white, .black.opacity(0.55))
+                                }
+                                .buttonStyle(.plain)
+                                .offset(x: 6, y: -6)
+                                .accessibilityLabel("Remove \(a.name)")
                             }
-                            .padding(.horizontal, 10).padding(.vertical, 6)
-                            .glassEffect(.regular, in: .capsule)
                         }
                     }
+                    .padding(.top, 6).padding(.trailing, 6)
                 }
+                .quickLookPreview($stagedPreview)
             }
             // Same shape as the Messages app: a round attach button outside the field, and one
             // thin capsule holding the text with the mic or send control inside its trailing edge.

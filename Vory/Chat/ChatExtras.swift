@@ -31,7 +31,7 @@ enum SessionCache {
 
 /// A bot avatar rendered to a UIImage, for places SwiftUI cannot draw a view — menu item icons.
 enum BotAvatarImage {
-    @MainActor static func make(profile: String, size: CGFloat = 28) -> UIImage {
+    @MainActor static func make(profile: String, size: CGFloat = 28, scheme: ColorScheme = .light) -> UIImage {
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
         if BotAvatarStore.choice(for: profile) == .photo, let photo = BotAvatarStore.photo(for: profile) {
             return renderer.image { ctx in
@@ -41,7 +41,7 @@ enum BotAvatarImage {
         }
         // The studio bot itself, painted (glass cannot render offscreen), at 3x for the menu.
         let spec = BotAvatarStore.choice(for: profile).spec(hex: BotColors.hex(for: profile))
-        let r = ImageRenderer(content: BotFaceView(spec: spec, size: size, active: false, drawn: true))
+        let r = ImageRenderer(content: BotFaceView(spec: spec, size: size, active: false, drawn: true).environment(\.colorScheme, scheme))
         r.scale = 3
         r.isOpaque = false
         return (r.uiImage ?? renderer.image { _ in }).withRenderingMode(.alwaysOriginal)

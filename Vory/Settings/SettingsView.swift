@@ -19,7 +19,7 @@ struct SettingsView: View {
             Row(id: "skills", title: "Skills", symbol: "sparkles", color: .purple, destination: AnyView(SkillsView())),
             Row(id: "mcp", title: "MCP Servers", symbol: "point.3.connected.trianglepath.dotted", color: .mint, destination: AnyView(MCPView())),
             Row(id: "approvals", title: "Approvals", symbol: "checkmark.shield", color: .green, destination: AnyView(ApprovalsView())),
-            Row(id: "cron", title: "Scheduled Tasks", symbol: "calendar.badge.clock", color: .pink, destination: AnyView(CronView())),
+            Row(id: "cron", title: "Scheduled Tasks", symbol: "timer", color: .pink, destination: AnyView(CronView())),
             Row(id: "sessions", title: "Sessions", symbol: "list.bullet.rectangle", color: .cyan, destination: AnyView(SessionsView())),
             Row(id: "channels", title: "Channels", symbol: "antenna.radiowaves.left.and.right", color: .brown, destination: AnyView(ChannelsView())),
             Row(id: "system", title: "System", symbol: "server.rack", color: .secondary, destination: AnyView(SystemView())),
@@ -31,7 +31,7 @@ struct SettingsView: View {
             Row(id: "security", title: "Security", symbol: "faceid", color: .green, destination: AnyView(SecurityView())),
             Row(id: "bots", title: "Bots", symbol: "cloud.fill", color: .indigo, destination: AnyView(BotsSettingsView())),
             Row(id: "appearance", title: "Appearance", symbol: "circle.lefthalf.filled", color: .black, destination: AnyView(AppearanceView())),
-            Row(id: "companion", title: "Companion", symbol: "puzzlepiece.extension.fill", color: .blue, destination: AnyView(CompanionView())),
+            Row(id: "companion", title: "Companion", symbol: "puzzlepiece.fill", color: .blue, destination: AnyView(CompanionView())),
             Row(id: "about", title: "About", symbol: "info.circle", color: .blue, destination: AnyView(AboutView())),
         ]
     }
@@ -40,6 +40,7 @@ struct SettingsView: View {
     @AppStorage(BotColors.storageKey) private var botColorsRaw = ""
     @AppStorage(BotAvatarStore.storageKey) private var botAvatarsRaw = ""
     @AppStorage(BotAvatarStore.glassAllKey) private var glassAll = false
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         NavigationStack {
@@ -82,11 +83,11 @@ struct SettingsView: View {
                         if let rt = model.runtime, !rt.profiles.isEmpty {
                             Picker("Profile", selection: Binding(get: { rt.selectedProfile ?? "" }, set: { rt.selectedProfile = $0 })) {
                                 ForEach(rt.profiles) { p in
-                                    Label { Text(p.label) } icon: { Image(uiImage: BotAvatarImage.make(profile: p.name, size: 24)) }.tag(p.name)
+                                    Label { Text(p.label) } icon: { Image(uiImage: BotAvatarImage.make(profile: p.name, size: 24, scheme: colorScheme)).renderingMode(.original) }.tag(p.name)
                                 }
                             }
                             // The menu's icons are rendered images; a new identity redraws them when a look changes.
-                            .id("profile-picker|\(botColorsRaw)|\(botAvatarsRaw)|\(glassAll)")
+                            .id("profile-picker|\(botColorsRaw)|\(botAvatarsRaw)|\(glassAll)|\(colorScheme == .light)")
                         }
                     } header: { Text("Gateway") }
                 }
@@ -585,8 +586,31 @@ struct SpeechBubble: View {
 /// centre drawn in the same stroke, so there is no seam where they meet. The bottom 8 points of
 /// the frame belong to the tail.
 struct SpeechBubbleShape: Shape {
+    /// The tail points up (the speaker is above the bubble) instead of down.
+    var tailOnTop = false
     func path(in r: CGRect) -> Path {
         let tailH: CGFloat = 8, tailW: CGFloat = 16
+        if tailOnTop {
+            // Same outline, mirrored: the tail rises from the top edge.
+            let body = CGRect(x: r.minX, y: r.minY + tailH, width: r.width, height: r.height - tailH)
+            let radius = min(16, body.height / 2)
+            let cx = r.midX
+            var p = Path()
+            p.move(to: CGPoint(x: body.minX + radius, y: body.minY))
+            p.addLine(to: CGPoint(x: cx - tailW / 2, y: body.minY))
+            p.addQuadCurve(to: CGPoint(x: cx, y: r.minY), control: CGPoint(x: cx - tailW * 0.22, y: body.minY - tailH * 0.55))
+            p.addQuadCurve(to: CGPoint(x: cx + tailW / 2, y: body.minY), control: CGPoint(x: cx + tailW * 0.22, y: body.minY - tailH * 0.55))
+            p.addLine(to: CGPoint(x: body.maxX - radius, y: body.minY))
+            p.addArc(center: CGPoint(x: body.maxX - radius, y: body.minY + radius), radius: radius, startAngle: .degrees(-90), endAngle: .degrees(0), clockwise: false)
+            p.addLine(to: CGPoint(x: body.maxX, y: body.maxY - radius))
+            p.addArc(center: CGPoint(x: body.maxX - radius, y: body.maxY - radius), radius: radius, startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false)
+            p.addLine(to: CGPoint(x: body.minX + radius, y: body.maxY))
+            p.addArc(center: CGPoint(x: body.minX + radius, y: body.maxY - radius), radius: radius, startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false)
+            p.addLine(to: CGPoint(x: body.minX, y: body.minY + radius))
+            p.addArc(center: CGPoint(x: body.minX + radius, y: body.minY + radius), radius: radius, startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false)
+            p.closeSubpath()
+            return p
+        }
         let body = CGRect(x: r.minX, y: r.minY, width: r.width, height: r.height - tailH)
         let radius = min(16, body.height / 2)
         let cx = r.midX
@@ -664,11 +688,13 @@ struct SoftwareUpdateView: View {
                         CompanionUpdateRows(setup: setup, runtime: rt)
                     } else {
                         VStack(spacing: 8) {
-                            BotFaceView(spec: AboutView.voryBot, size: 56, active: false)
+                            BotFaceView(spec: AboutView.voryBot, size: 56, active: setup.checkingCompanion, mood: BotFaceView.Mood(profile: "vory-update"))
                             Text("Vory Companion \(PushSetupModel.bundledPluginVersion)").font(.headline)
-                            Text("Your gateway is up to date.").font(.subheadline).foregroundStyle(.secondary)
+                            Text(setup.checkingCompanion ? "Checking for updates…" : "Your gateway is up to date.").font(.subheadline).foregroundStyle(.secondary)
+                                .contentTransition(.numericText())
                         }
                         .frame(maxWidth: .infinity).padding(.vertical, 10)
+                        .animation(.snappy, value: setup.checkingCompanion)
                     }
                 } header: { sectionHeader("Vory Companion") } footer: {
                     Text("A small plugin on your gateway. It sends replies as notifications, keeps the Live Activity up to date, and gets approval cards to your phone the moment a bot needs a yes. Installs in place; no restart unless it says so.")
@@ -690,6 +716,8 @@ struct SoftwareUpdateView: View {
         .animation(.smooth, value: setup.updateOutcome == nil)
         .task { if let rt = model.runtime { await setup.prepare(runtime: rt) } }
         .refreshable { if let rt = model.runtime { await setup.checkCompanion(runtime: rt) } }
+        // A check is the cloud's cue to turn.
+        .onChange(of: setup.checkingCompanion) { _, now in if now { BotAmbient.shared.turnFinished(profile: "vory-update") } }
         .onChange(of: setup.companionCheckedAt) { _, _ in
             model.companionUpdateAvailable = setup.updateAvailable
             model.companionInstalledVersion = setup.installedVersion

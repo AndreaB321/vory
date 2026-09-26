@@ -36,7 +36,19 @@ public struct UpdateCheck: Decodable, Sendable {
     public var message: String?
     public var commits: [UpdateCommit]?
 
-    public struct UpdateCommit: Codable, Sendable, Hashable { public var sha: String?; public var summary: String?; public var author: String?; public var at: String? }
+    public struct UpdateCommit: Codable, Sendable, Hashable {
+        public var sha: String?; public var summary: String?; public var author: String?; public var at: String?
+        enum CodingKeys: String, CodingKey { case sha, summary, author, at }
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            sha = try c.decodeIfPresent(String.self, forKey: .sha)
+            summary = try c.decodeIfPresent(String.self, forKey: .summary)
+            author = try c.decodeIfPresent(String.self, forKey: .author)
+            // Some gateways send the commit time as Unix seconds rather than a string.
+            if let s = try? c.decodeIfPresent(String.self, forKey: .at) { at = s }
+            else if let n = try? c.decodeIfPresent(Double.self, forKey: .at) { at = Date(timeIntervalSince1970: n).formatted(date: .abbreviated, time: .shortened) }
+        }
+    }
 
     public enum CodingKeys: String, CodingKey {
         case installMethod = "install_method", currentVersion = "current_version", behind

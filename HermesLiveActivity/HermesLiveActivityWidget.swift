@@ -166,15 +166,37 @@ struct ElapsedTimer: View {
     }
 }
 
+/// A small disc painted like the bot's glass: the tint with a lit top and a soft rim, the
+/// symbol in white on it. Widgets cannot run Liquid Glass, so this is the painted version the
+/// bot beside it uses too.
+struct GlassDisc: View {
+    var tint: Color
+    var size: CGFloat
+    var body: some View {
+        ZStack {
+            Circle().fill(LinearGradient(colors: [tint.opacity(0.95), tint.opacity(0.7)], startPoint: .top, endPoint: .bottom))
+            Circle().fill(LinearGradient(colors: [.white.opacity(0.45), .white.opacity(0.05), .clear], startPoint: .top, endPoint: .center))
+            Circle().strokeBorder(LinearGradient(colors: [.white.opacity(0.85), .white.opacity(0.1), .black.opacity(0.2)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: max(1, size * 0.06))
+        }
+        .frame(width: size, height: size)
+        .shadow(color: .black.opacity(0.25), radius: size * 0.06, y: size * 0.03)
+    }
+}
+
 /// Small glyph for the compact/minimal island.
 struct PhaseGlyph: View {
     var phase: String
     var attention: Bool
     var botHex: String = ""
     var body: some View {
-        Image(systemName: PhaseStyle.symbol(phase, attention: attention))
-            .foregroundStyle(attention ? .yellow : PhaseStyle.tint(phase, bot: botHex))
-            .symbolEffect(.pulse, isActive: attention || phase == "streaming" || phase == "tool" || phase == "thinking")
+        let tint = attention ? Color.yellow : PhaseStyle.tint(phase, bot: botHex)
+        ZStack {
+            GlassDisc(tint: tint, size: 20)
+            Image(systemName: PhaseStyle.symbol(phase, attention: attention))
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(attention ? .black.opacity(0.8) : .white)
+                .symbolEffect(.pulse, isActive: attention || phase == "streaming" || phase == "tool" || phase == "thinking")
+        }
     }
 }
 
@@ -216,10 +238,10 @@ struct PhaseBadge: View {
     var body: some View {
         let tint = attention ? Color.yellow : PhaseStyle.tint(phase, bot: botHex)
         ZStack {
-            Circle().fill(tint.gradient)
+            GlassDisc(tint: tint, size: size)
             Image(systemName: PhaseStyle.symbol(phase, attention: attention))
                 .font(.system(size: size * 0.45, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(attention ? .black.opacity(0.8) : .white)
                 .symbolEffect(.pulse, isActive: !attention && (phase == "streaming" || phase == "tool" || phase == "thinking"))
         }
         .frame(width: size, height: size)

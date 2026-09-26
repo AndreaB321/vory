@@ -55,6 +55,11 @@ struct BotsView: View {
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in BotAmbient.shared.scrolled(dy: new - old) }
             .navigationTitle("Bots")
             .tabRoot(.bots)
+            .overlay {
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-vory-shape-grid") { ShapeSeatGrid() }
+                #endif
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showNewBot = true } label: { Image(systemName: "plus") }.accessibilityLabel("New bot")
@@ -96,7 +101,7 @@ struct BotCard: View {
     /// bottom); the overlap is measured from the shape's real base so each bot sits the same.
     private var overlap: CGFloat {
         let shape = BotAvatarStore.choice(for: profile.name).spec(hex: "").shape
-        return 10 - 78 * (1 - BotFace.baseline(of: shape))
+        return 10 + 78 * BotFace.seatDrop(shape)
     }
 
     var body: some View {
@@ -123,6 +128,30 @@ struct BotCard: View {
         .accessibilityLabel("\(profile.label), \(profile.model ?? "no model")\(isActive ? ", active" : "")\(working ? ", working" : "")")
     }
 }
+
+#if DEBUG
+/// Every body shape on its pill, for checking that each one sits the same.
+private struct ShapeSeatGrid: View {
+    private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
+    var body: some View {
+        ScrollView {
+            LazyVGrid(columns: columns, spacing: 22) {
+                ForEach(BotLookSpec.shapes, id: \.self) { shape in
+                    VStack(spacing: -(10 + 78 * BotFace.seatDrop(shape))) {
+                        BotFaceView(spec: BotLookSpec(shape: shape, eyes: "classic", hex: "#0A84FF", finish: "glass"), size: 78, active: false, mood: BotFaceView.Mood(profile: "grid-\(shape)"))
+                            .zIndex(1)
+                        VStack(spacing: 2) { Text(shape).font(.subheadline.weight(.semibold)); Text("model").font(.caption2).foregroundStyle(.secondary) }
+                            .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 7).frame(maxWidth: .infinity)
+                            .glassEffect(.regular, in: .capsule)
+                    }
+                }
+            }
+            .padding(16)
+        }
+        .background(Color(.systemBackground))
+    }
+}
+#endif
 
 struct RoomCard: View {
     var room: Room
@@ -326,27 +355,49 @@ struct RoomView: View {
     @State private var text = ""
     @State private var error: String?
     @State private var cursor = 0
+    /// One thread per room composer; the gateway wants the same id on every message.
+    private let threadID = "main"
+
+    /// Which rows draw: the human's messages as blue bubbles, the bots' as grey ones with the
+    /// bot in front, room activity as a quiet line; everything else stays out of the way.
+    private var shown: [RoomEvent] { events.filter { ["message.user", "message.member", "room.activity"].contains($0.kind) } }
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(events) { ev in
-                        VStack(alignment: .leading, spacing: 2) {
+                    ForEach(shown) { ev in
+                        let body = ev.payload["text"]?.stringValue ?? ev.payload["content"]?.stringValue ?? ev.payload["status"]?.stringValue ?? ""
+                        switch ev.kind {
+                        case "message.user":
                             HStack {
-                                Text(ev.actor.id).font(.caption.weight(.semibold))
-                                Text(ev.kind).font(.caption2).foregroundStyle(.tertiary)
-                                Spacer()
-                                Text(Date(timeIntervalSince1970: ev.createdAt), style: .time).font(.caption2).foregroundStyle(.tertiary)
+                                Spacer(minLength: 56)
+                                Text(body).textSelection(.enabled)
+                                    .padding(.horizontal, 14).padding(.vertical, 9)
+                                    .foregroundStyle(.white)
+                                    .background(Color.accentColor, in: .rect(cornerRadius: 18))
                             }
-                            MarkdownView(text: ev.payload["text"]?.stringValue ?? ev.payload["content"]?.stringValue ?? ev.payload.displayText)
+                        case "message.member":
+                            let member = ev.payload["member_id"]?.stringValue ?? ev.actor.id
+                            let profile = room.members.first { $0.memberId == member || $0.handle == member }?.profile ?? member
+                            HStack(alignment: .bottom, spacing: 8) {
+                                BotAvatar(profile: profile, size: 28)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(room.members.first { $0.memberId == member || $0.handle == member }?.displayName ?? member).font(.caption2).foregroundStyle(.secondary)
+                                    MarkdownView(text: body)
+                                        .padding(.horizontal, 14).padding(.vertical, 9)
+                                        .background(Color(.systemGray5), in: .rect(cornerRadius: 18))
+                                }
+                                Spacer(minLength: 40)
+                            }
+                        default:
+                            Text(body.isEmpty ? ev.kind : body).font(.caption).foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity).padding(.vertical, 2)
                         }
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .glassEffect(.regular, in: .rect(cornerRadius: 12))
-                        .id(ev.id)
                     }
+                    .id("rows")
                     if let error { Text(error).foregroundStyle(.red).font(.footnote) }
+                    Color.clear.frame(height: 0).id("bottom")
                 }
                 .padding()
             }
@@ -359,7 +410,7 @@ struct RoomView: View {
                 .glassEffect(.regular, in: .rect(cornerRadius: 24))
                 .padding(12)
             }
-            .onChange(of: events.count) { _, _ in if let l = events.last { proxy.scrollTo(l.id, anchor: .bottom) } }
+            .onChange(of: events.count) { _, _ in withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo("bottom", anchor: .bottom) } }
         }
         .navigationTitle(room.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -388,8 +439,12 @@ struct RoomView: View {
     private func send() async {
         guard let rt = model.runtime else { return }
         let t = text; text = ""
+        // The gateway wants exactly {text, thread_id} in the payload and an identifier-shaped
+        // event_id per send (letters, digits, - . _ :); it hashes the id itself.
+        let eventID = "evt-" + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
         do {
-            _ = try await rt.rpc("groups.send", ["room_id": .string(room.roomId), "event_id": .string(UUID().uuidString), "payload": .object(["text": .string(t)])])
+            _ = try await rt.rpc("groups.send", ["room_id": .string(room.roomId), "event_id": .string(eventID),
+                                                 "payload": .object(["text": .string(t), "thread_id": .string(threadID)])])
             await load()
         } catch { self.error = error.localizedDescription }
     }

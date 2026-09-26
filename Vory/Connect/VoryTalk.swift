@@ -20,8 +20,8 @@ struct VoryTypedBubble: View {
         .foregroundStyle(tint)
         .multilineTextAlignment(.center)
         .padding(.horizontal, 14).padding(.vertical, 9)
-        .padding(.bottom, 8)
-        .background(fill, in: SpeechBubbleShape())
+        .padding(.top, 8)
+        .background(fill, in: SpeechBubbleShape(tailOnTop: true))
         .frame(maxWidth: 340)
         .task(id: key) {
             if reduceMotion { shown = text; return }
@@ -33,6 +33,11 @@ struct VoryTypedBubble: View {
             }
         }
     }
+}
+
+extension Color {
+    /// Green that reads on both backgrounds: the system green is too pale on white.
+    static let readableGreen = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? .systemGreen : UIColor(red: 0.10, green: 0.50, blue: 0.22, alpha: 1) })
 }
 
 /// Vory at the top of a guided screen: the glass cloud, a full turn whenever `turnKey` changes
@@ -51,7 +56,7 @@ struct VoryGuide: View {
             BotFaceView(spec: AboutView.voryBot, size: size, active: true, gaze: CGPoint(x: 0, y: 0.5),
                         mood: BotFaceView.Mood(thinking: thinking, profile: "vory-guide"))
             VoryTypedBubble(text: says, key: key, reduceMotion: reduceMotion,
-                            tint: done ? .green : .primary,
+                            tint: done ? Color.readableGreen : .primary,
                             fill: done ? Color.green.mix(with: Color(uiColor: .secondarySystemFill), by: 0.75) : Color(uiColor: .secondarySystemFill))
                 .padding(.horizontal, 24)
         }

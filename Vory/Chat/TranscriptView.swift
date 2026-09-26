@@ -46,7 +46,7 @@ struct TranscriptView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    if chat.items.isEmpty {
+                    if chat.items.isEmpty, chat.resumeError == nil {
                         VStack(spacing: 8) {
                             BotAvatar(profile: chat.profileName, size: 56)
                             Text("Say something to \(chat.profileName)").foregroundStyle(.secondary)

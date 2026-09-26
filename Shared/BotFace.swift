@@ -219,12 +219,21 @@ public enum BotFace {
         return m
     }
 
-    /// Where the shape's bottom edge is, as a fraction of the square (1 = the very bottom), so a
-    /// bot can sit on a surface by its actual base rather than its frame.
+    /// Where each shape's bottom edge sits, as a fraction of the square (the blob reaches
+    /// 0.985; the pill, cloud and triangle end well above that). Set by hand from the drawing.
     public static func baseline(of shape: String) -> CGFloat {
-        let box = CGRect(x: 0, y: 0, width: 100, height: 100)
-        return bodyPath(shape, in: box, time: 0, active: false).boundingRect.maxY / 100
+        switch shape {
+        case "blob": return 0.985
+        case "pill": return 0.795
+        case "cloud": return 0.825
+        case "triangle": return 0.815
+        default: return 0.96   // circle, square, hexagon, drop
+        }
     }
+
+    /// How far down (fraction of the size) to move a bot so its base lands where the blob's does,
+    /// so every shape sits on a pill the same way.
+    public static func seatDrop(_ shape: String) -> CGFloat { 0.985 - baseline(of: shape) }
 
     /// Whether the eyes have something to do around `t` (a blink or a glance): idle bots only
     /// redraw during these moments.
@@ -255,7 +264,7 @@ public enum BotFace {
     }
 
     /// Draws body and eyes into `size` (square). `active` animates; otherwise `time` should be 0.
-    public static func draw(_ spec: BotLookSpec, in ctx: inout GraphicsContext, size: CGSize, time t: Double, active: Bool, gaze: CGPoint = .zero, part: Part = .all, breathe: Bool = true, idleEyes: Bool = false, move: Bool = true, strain: Bool = false, glanceFree: Bool = true, finishedAt: Double? = nil) {
+    public static func draw(_ spec: BotLookSpec, in ctx: inout GraphicsContext, size: CGSize, time t: Double, active: Bool, gaze: CGPoint = .zero, part: Part = .all, breathe: Bool = true, idleEyes: Bool = false, move: Bool = true, strain: Bool = false, glanceFree: Bool = true, finishedAt: Double? = nil, light: Bool = false) {
         let box = CGRect(origin: .zero, size: size)
         let s = min(size.width, size.height)
         let seed = spec.shape.utf8.reduce(0) { $0 + Int($1) } + spec.eyes.utf8.reduce(0) { $0 + Int($1) }
@@ -275,7 +284,7 @@ public enum BotFace {
         let body = bodyPath(spec.shape, in: box, time: t, active: active)
         if part != .eyes {
             if spec.isGlass {
-                drawGlassBody(body, tint: tint, in: &ctx, box: box, s: s)
+                drawGlassBody(body, tint: tint, in: &ctx, box: box, s: s, light: light)
             } else {
                 ctx.fill(body, with: .linearGradient(Gradient(colors: [tint.opacity(1), tint.opacity(0.84)]), startPoint: CGPoint(x: 0, y: 0), endPoint: CGPoint(x: 0, y: size.height)))
                 // A soft light across the top, clipped to the body so shapes made of several pieces (the
@@ -308,22 +317,28 @@ public enum BotFace {
     /// The painted stand-in for Liquid Glass, for where real glass cannot render (widgets,
     /// notification images, menu icons): a translucent tinted body with a lit rim, a darker
     /// lower edge and a soft highlight across the top, like the app icon.
-    static func drawGlassBody(_ body: Path, tint: Color, in ctx: inout GraphicsContext, box: CGRect, s: CGFloat) {
+    /// `light`: match the live glass on a light background — the live version lays the colour
+    /// down at 62 % plus a light glass tint, so the painted one stays airy: no dark rim, a
+    /// lighter shadow, the colour itself a touch lifted. Dark mode keeps the deeper version.
+    static func drawGlassBody(_ body: Path, tint: Color, in ctx: inout GraphicsContext, box: CGRect, s: CGFloat, light: Bool = false) {
         ctx.drawLayer { layer in
-            layer.addFilter(.shadow(color: .black.opacity(0.28), radius: s * 0.05, y: s * 0.03))
-            layer.fill(body, with: .linearGradient(Gradient(colors: [tint.opacity(0.92), tint.opacity(0.62)]), startPoint: CGPoint(x: 0, y: box.minY), endPoint: CGPoint(x: 0, y: box.maxY)))
+            layer.addFilter(.shadow(color: .black.opacity(light ? 0.12 : 0.28), radius: s * 0.05, y: s * 0.03))
+            let top = light ? tint.opacity(0.82) : tint.opacity(0.92)
+            let bottom = light ? tint.opacity(0.68) : tint.opacity(0.62)
+            layer.fill(body, with: .linearGradient(Gradient(colors: [top, bottom]), startPoint: CGPoint(x: 0, y: box.minY), endPoint: CGPoint(x: 0, y: box.maxY)))
         }
         ctx.drawLayer { layer in
             layer.clip(to: body)
             // Specular: light pooling along the top, fading out a third of the way down.
-            layer.fill(Path(box), with: .linearGradient(Gradient(colors: [.white.opacity(0.42), .white.opacity(0.05), .white.opacity(0)]), startPoint: CGPoint(x: 0, y: box.minY), endPoint: CGPoint(x: 0, y: box.maxY * 0.5)))
+            layer.fill(Path(box), with: .linearGradient(Gradient(colors: [.white.opacity(light ? 0.5 : 0.42), .white.opacity(0.05), .white.opacity(0)]), startPoint: CGPoint(x: 0, y: box.minY), endPoint: CGPoint(x: 0, y: box.maxY * 0.5)))
         }
+        let rimDark: Color = light ? .black.opacity(0.10) : .black.opacity(0.28)
         // Rim: bright where the light hits (top-left), dark on the underside. Not a stroke: the
         // cloud is several overlapping pieces and a stroke draws every inner edge (the doubled
         // cloud seen in the profile menu). Fill the body, then punch out the body shrunk a little
         // about its centre, which leaves only the outline.
         ctx.drawLayer { layer in
-            layer.fill(body, with: .linearGradient(Gradient(colors: [.white.opacity(0.9), .white.opacity(0.15), .black.opacity(0.28)]), startPoint: CGPoint(x: box.minX, y: box.minY), endPoint: CGPoint(x: box.maxX, y: box.maxY)))
+            layer.fill(body, with: .linearGradient(Gradient(colors: [.white.opacity(0.9), .white.opacity(0.15), rimDark]), startPoint: CGPoint(x: box.minX, y: box.minY), endPoint: CGPoint(x: box.maxX, y: box.maxY)))
             layer.blendMode = .destinationOut
             let b = body.boundingRect
             let k = max(0, 1 - (s * 0.045) / max(b.width, 1))
@@ -550,7 +565,7 @@ public struct BotFaceView: View {
                     liveGlass(time: t, gaze: g, glanceFree: !held)
                 } else {
                     Canvas(opaque: false, rendersAsynchronously: false) { ctx, sz in
-                        BotFace.draw(spec, in: &ctx, size: sz, time: t, active: active, gaze: g, breathe: false, idleEyes: !drawn, move: false, strain: mood.thinking, glanceFree: !held)
+                        BotFace.draw(spec, in: &ctx, size: sz, time: t, active: active, gaze: g, breathe: false, idleEyes: !drawn, move: false, strain: mood.thinking, glanceFree: !held, light: colorScheme == .light)
                     }
                 }
             }

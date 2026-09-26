@@ -33,12 +33,18 @@ struct ChatListView: View {
     @AppStorage("chats.filter.live") private var liveOnly = false
     @AppStorage("chats.filter.archived") private var showArchived = true
     @AppStorage("chats.sort") private var sortKey = "recent"
-    private var filtering: Bool { pinnedOnly || needsYouOnly || liveOnly || !showArchived || sortKey != "recent" }
+    @AppStorage("chats.filter.groups") private var groupsOnly = false
+    /// Rooms have no archive on the gateway; archived ones are remembered here.
+    @AppStorage("chats.archivedRooms") private var archivedRoomsRaw = ""
+    @State private var pendingRoomDelete: Room?
+    private var archivedRooms: Set<String> { Set(archivedRoomsRaw.split(separator: ",").map(String.init)) }
+    private var filtering: Bool { pinnedOnly || needsYouOnly || liveOnly || groupsOnly || !showArchived || sortKey != "recent" }
     /// The profile menu's icons are rendered images; UIKit keeps the built menu, so it is given a
     /// new identity whenever a bot's colour or look changes.
     @AppStorage(BotColors.storageKey) private var botColorsRaw = ""
     @AppStorage(BotAvatarStore.storageKey) private var botAvatarsRaw = ""
     @AppStorage(BotAvatarStore.glassAllKey) private var glassAll = false
+    @Environment(\.colorScheme) private var colorScheme
     /// Mirrors the tab bar's minimize-on-scroll so the compose circle drops beside the collapsed bar.
 
     private var runtime: GatewayRuntime? { model.runtime }
@@ -98,6 +104,10 @@ struct ChatListView: View {
                 lastRouted = r
                 path.append(ChatRoute(storedID: r.storedSessionID, title: nil))
             }
+            .alert("Delete group chat?", isPresented: Binding(get: { pendingRoomDelete != nil }, set: { if !$0 { pendingRoomDelete = nil } })) {
+                Button("Delete", role: .destructive) { if let r = pendingRoomDelete { Task { await deleteRoom(r) } } }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("This disbands the group on the gateway. Its messages stay in the gateway's log.") }
             .alert("Delete chat?", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })) {
                 Button("Delete", role: .destructive) { if let s = pendingDelete { Task { await delete(s) } } }
                 Button("Cancel", role: .cancel) {}
@@ -110,7 +120,7 @@ struct ChatListView: View {
             if let runtime {
                 Picker("Profile", selection: Binding(get: { runtime.selectedProfile ?? "" }, set: { runtime.selectedProfile = $0 })) {
                     ForEach(runtime.profiles) { p in
-                        Label { Text(p.label) } icon: { Image(uiImage: BotAvatarImage.make(profile: p.name)) }.tag(p.name)
+                        Label { Text(p.label) } icon: { Image(uiImage: BotAvatarImage.make(profile: p.name, scheme: colorScheme)).renderingMode(.original) }.tag(p.name)
                     }
                 }
                 Toggle(isOn: $allBots) { Label("All bots", systemImage: "person.2") }
@@ -125,11 +135,12 @@ struct ChatListView: View {
         } label: {
             // A fixed-size avatar: a text label changed width with each profile name and the bar
             // visibly jumped as it re-laid out.
-            // Painted, not glass: this sits on the toolbar's own glass button.
-            BotAvatar(profile: runtime?.selectedProfile ?? "?", size: 26, drawn: true)
+            // A rendered, untinted image: live glass went murky on the toolbar's glass and a
+            // painted view picked up the toolbar's tint in light mode.
+            Image(uiImage: BotAvatarImage.make(profile: runtime?.selectedProfile ?? "?", size: 26, scheme: colorScheme)).renderingMode(.original)
                 .accessibilityLabel("Profile: \(runtime?.selectedProfile ?? "none")")
         }
-        .id("\(botColorsRaw)|\(botAvatarsRaw)|\(glassAll)")
+        .id("\(botColorsRaw)|\(botAvatarsRaw)|\(glassAll)|\(colorScheme == .light)")
     }
 
     private var filterMenu: some View {
@@ -139,6 +150,7 @@ struct ChatListView: View {
                 Toggle(isOn: $needsYouOnly) { Label("Needs you", systemImage: "exclamationmark.bubble") }
                 Toggle(isOn: $liveOnly) { Label("Working now", systemImage: "bolt") }
                 Toggle(isOn: $showArchived) { Label("Archived", systemImage: "archivebox") }
+                Toggle(isOn: $groupsOnly) { Label("Group chats", systemImage: "person.3") }
             }
             Picker("Sort by", selection: $sortKey) {
                 Label("Recent", systemImage: "clock").tag("recent")
@@ -147,7 +159,7 @@ struct ChatListView: View {
                 Label("Model", systemImage: "cpu").tag("model")
             }
             if filtering {
-                Button { pinnedOnly = false; needsYouOnly = false; liveOnly = false; showArchived = true; sortKey = "recent" } label: { Label("Clear filters", systemImage: "xmark.circle") }
+                Button { pinnedOnly = false; needsYouOnly = false; liveOnly = false; groupsOnly = false; showArchived = true; sortKey = "recent" } label: { Label("Clear filters", systemImage: "xmark.circle") }
             }
         } label: {
             Image(systemName: filtering ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
@@ -158,6 +170,7 @@ struct ChatListView: View {
 
     /// The filters and the sort applied to the loaded (or searched) sessions.
     private func filtered(_ list: [StoredSession], runtime: GatewayRuntime) -> [StoredSession] {
+        if groupsOnly { return [] }
         var out = list
         if pinnedOnly { out = out.filter { $0.pinned == true } }
         if needsYouOnly { out = out.filter { runtime.needsAttention.contains($0.id) } }
@@ -185,9 +198,11 @@ struct ChatListView: View {
         let rows = filtered(searchText.isEmpty ? sessions : searchResults, runtime: runtime)
         List {
             if let errorText { Text(errorText).foregroundStyle(.red).font(.footnote) }
-            if searchText.isEmpty, !rooms.isEmpty, !pinnedOnly, !needsYouOnly, !liveOnly {
+            let visibleRooms = rooms.filter { showArchived || !archivedRooms.contains($0.roomId) }
+            if searchText.isEmpty, !visibleRooms.isEmpty, !pinnedOnly, !needsYouOnly, !liveOnly {
                 Section("Group chats") {
-                    ForEach(rooms) { room in
+                    ForEach(visibleRooms) { room in
+                        let archived = archivedRooms.contains(room.roomId)
                         NavigationLink(value: RoomRoute(room: room, initialText: nil)) {
                             HStack(spacing: 12) {
                                 HStack(spacing: -12) {
@@ -196,10 +211,27 @@ struct ChatListView: View {
                                     }
                                 }
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(room.name).font(.body.weight(.medium)).lineLimit(1)
+                                    HStack(spacing: 6) {
+                                        if archived { Image(systemName: "archivebox").font(.caption2).foregroundStyle(.secondary) }
+                                        Text(room.name).font(.body.weight(.medium)).lineLimit(1)
+                                    }
                                     Text(room.members.compactMap { $0.displayName ?? $0.handle ?? $0.profile }.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                 }
                             }
+                        }
+                        .contextMenu {
+                            Button { path.append(RoomRoute(room: room, initialText: nil)) } label: { Label("Open", systemImage: "bubble.left") }
+                            Button { setArchived(room, !archived) } label: { Label(archived ? "Unarchive" : "Archive", systemImage: "archivebox") }
+                            Divider()
+                            Button(role: .destructive) { pendingRoomDelete = room } label: { Label("Delete", systemImage: "trash") }
+                        } preview: {
+                            RoomPreview(room: room, runtime: runtime)
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) { pendingRoomDelete = room } label: { Label("Delete", systemImage: "trash") }
+                        }
+                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                            Button { setArchived(room, !archived) } label: { Label(archived ? "Unarchive" : "Archive", systemImage: "archivebox") }.tint(.orange)
                         }
                     }
                 }
@@ -216,6 +248,7 @@ struct ChatListView: View {
                                summary: summarizer.summary(for: s))
                         .task(id: "\(s.id)-\(s.lastActive ?? 0)-\(aiSummaries)") { if aiSummaries { summarizer.refresh(s, runtime: runtime, profile: allBots ? s.profile : nil) } }
                 }
+                .listRowInsets(EdgeInsets(top: 10, leading: ChatRowStyle.rowInset, bottom: 10, trailing: 8))
                 .contextMenu {
                     Button { path.append(ChatRoute(storedID: s.id, title: s.displayTitle, profile: allBots ? s.profile : nil)) } label: { Label("Open", systemImage: "bubble.left") }
                     Button { Task { await patch(s, ["pinned": .bool(!(s.pinned ?? false))]) } } label: { Label(s.pinned == true ? "Unpin" : "Pin", systemImage: s.pinned == true ? "pin.slash" : "pin") }
@@ -239,6 +272,8 @@ struct ChatListView: View {
         .listStyle(.insetGrouped)
         // The grouped list otherwise leaves a section's worth of empty space under the search bar.
         .contentMargins(.top, 0, for: .scrollContent)
+        // Wider rows: the card hugs the screen edges and the rows their card.
+        .contentMargins(.horizontal, ChatRowStyle.cardInset, for: .scrollContent)
         // The bots in the rows look where the list is going.
         .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in BotAmbient.shared.scrolled(dy: new - old) }
         .overlay { if loading && sessions.isEmpty { ProgressView() } }
@@ -295,6 +330,27 @@ struct ChatListView: View {
         } catch { errorText = error.localizedDescription }
     }
 
+    private func setArchived(_ room: Room, _ on: Bool) {
+        var set = archivedRooms
+        if on { set.insert(room.roomId) } else { set.remove(room.roomId) }
+        archivedRoomsRaw = set.sorted().joined(separator: ",")
+    }
+
+    private func deleteRoom(_ room: Room) async {
+        guard let runtime else { return }
+        do {
+            // Gateways name it differently; try the common ones before giving up.
+            var lastError: Error?
+            for method in ["groups.disband", "groups.delete", "groups.close"] {
+                do { _ = try await runtime.rpc(method, ["room_id": .string(room.roomId)]); lastError = nil; break }
+                catch { lastError = error }
+            }
+            if let lastError { throw lastError }
+            rooms.removeAll { $0.roomId == room.roomId }
+            setArchived(room, false)
+        } catch { errorText = "Could not delete the group chat: \(error.localizedDescription)" }
+    }
+
     private func delete(_ s: StoredSession) async {
         guard let runtime else { return }
         if let chat = runtime.chatForStored(s.id) { runtime.closeChat(chat) }
@@ -329,7 +385,7 @@ struct SessionRow: View {
                     Text(summary?.title ?? session.displayTitle).font(.body.weight(.medium)).lineLimit(1)
                     if summary != nil { Image(systemName: "sparkles").font(.caption2).foregroundStyle(.secondary).accessibilityLabel("Summarized on device") }
                 }
-                Text(summary?.summary ?? session.preview ?? "").font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                Text(summary?.summary ?? session.preview ?? "").font(.subheadline).foregroundStyle(.secondary).lineLimit(ChatRowStyle.previewLines)
                 HStack(spacing: 8) {
                     if let m = session.model, !m.isEmpty { Text(m).font(.caption2).foregroundStyle(.tertiary).lineLimit(1) }
                     if let d = session.lastDate { Text(d, format: .relative(presentation: .named)).font(.caption2).foregroundStyle(.tertiary) }
@@ -404,6 +460,62 @@ struct SessionPreview: View {
             messages = Array(all.filter { ($0.role == "user" || $0.role == "assistant") && !($0.text ?? "").isEmpty }.suffix(6))
         }
     }
+}
+
+/// The long-press peek for a group chat: the bots in it and the last few messages.
+struct RoomPreview: View {
+    var room: Room
+    var runtime: GatewayRuntime
+    @State private var events: [RoomEvent] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                HStack(spacing: -10) {
+                    ForEach(Array(room.members.prefix(4).enumerated()), id: \.offset) { _, m in BotAvatar(profile: m.profile ?? m.handle ?? "?", size: 26) }
+                }
+                Text(room.name).font(.headline).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            Text(room.members.compactMap { $0.displayName ?? $0.handle ?? $0.profile }.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
+            VStack(spacing: 6) {
+                ForEach(events.suffix(5)) { ev in
+                    let user = ev.kind == "message.user"
+                    HStack {
+                        if user { Spacer(minLength: 40) }
+                        Text(ev.payload["text"]?.stringValue ?? "").font(.footnote).lineLimit(3)
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .foregroundStyle(user ? .white : .primary)
+                            .background(user ? Color.accentColor : Color(.systemGray5), in: .rect(cornerRadius: 12))
+                        if !user { Spacer(minLength: 40) }
+                    }
+                }
+            }
+            Label("Group chat", systemImage: "person.3").font(.caption).foregroundStyle(.tertiary)
+        }
+        .padding(16)
+        .frame(width: 340, alignment: .leading)
+        .task {
+            if let r: GroupsLogResult = try? await runtime.rpc("groups.log", ["room_id": .string(room.roomId), "since_seq": 0, "limit": 60], timeout: 10).decode() {
+                events = r.events.filter { $0.kind == "message.user" || $0.kind == "message.member" }
+            }
+        }
+    }
+}
+
+/// How much room the chat rows get. DEBUG: `-vory-row-style a|b|c` tries the variants
+/// (a = the old spacing, b = tighter, c = tighter with a three-line preview).
+enum ChatRowStyle {
+    static let variant: String = {
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "-vory-row-style"), i + 1 < args.count { return args[i + 1] }
+        #endif
+        return "b"
+    }()
+    static var cardInset: CGFloat { variant == "a" ? 16 : 8 }
+    static var rowInset: CGFloat { variant == "a" ? 16 : 12 }
+    static var previewLines: Int { variant == "c" ? 3 : 2 }
 }
 
 /// A group chat as a navigation value, with the first message when it was just started.

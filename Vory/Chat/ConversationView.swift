@@ -28,11 +28,14 @@ struct ConversationView: View {
                     .overlay {
                         if let e = chat.resumeError, chat.items.isEmpty {
                             ContentUnavailableView("Could not open chat", systemImage: "exclamationmark.triangle", description: Text(e))
+                                // Centred in what is left above the composer and the keyboard.
+                                .padding(.bottom, dockHeight + keyboardInset)
                         }
                     }
                     // Like Messages: header and dock float over the thread and the text scrolls under their glass.
                     .overlay(alignment: .bottom) {
                         BottomDock(chat: chat, text: $composerText, namespace: glassNamespace)
+                            .disabled(chat.resumeError != nil && chat.items.isEmpty)
                             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { if $0 < 400 { dockHeight = $0 } }
                             .padding(.bottom, keyboardInset)
                     }
@@ -202,7 +205,7 @@ struct ChatHeader: View {
             .buttonStyle(.plain).accessibilityLabel("Back").accessibilityIdentifier("chat.back")
             Spacer(minLength: 0)
             Button(action: onProfile) {
-                VStack(spacing: -(9 - 52 * (1 - BotFace.baseline(of: BotAvatarStore.choice(for: chat.profileName).spec(hex: "").shape)))) {
+                VStack(spacing: -(9 + 52 * BotFace.seatDrop(BotAvatarStore.choice(for: chat.profileName).spec(hex: "").shape))) {
                     // The bot sits on the pill, its base a few points over the top edge (measured from
                     // the shape, not the frame), like a contact photo in Messages; it springs in from
                     // small on the first appearance.
