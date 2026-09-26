@@ -250,7 +250,7 @@ struct TranscriptRow: View {
             HStack(alignment: .bottom, spacing: 8) {
                 if let profile {
                     if botShown {
-                        BotAvatar(profile: profile, size: 28, active: streaming, mood: BotFaceView.Mood(thinking: streaming && text.isEmpty, profile: profile))
+                        BotAvatar(profile: profile, size: 28, active: streaming, mood: BotFaceView.Mood(profile: profile, state: streaming ? (text.isEmpty ? .thinking : .streaming) : .idle))
                     } else {
                         Color.clear.frame(width: 28, height: 1)
                     }

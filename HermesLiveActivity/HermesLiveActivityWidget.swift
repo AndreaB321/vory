@@ -215,7 +215,8 @@ struct BotMark: View {
             // Drawn straight into a Canvas: a TimelineView in a widget blanked the bot for a
             // frame on every state change.
             Canvas(opaque: false, rendersAsynchronously: false) { ctx, sz in
-                BotFace.draw(spec, in: &ctx, size: sz, time: 0, active: false, breathe: false, idleEyes: false, move: false)
+                // One held pose per phase: the squint, the asking lean, the lowered eyes.
+                BotFace.draw(spec, in: &ctx, size: sz, time: 0, active: false, breathe: false, idleEyes: false, move: false, motion: BotFace.widgetPose(phase: state.phase, attention: state.needsAttention))
             }
             .frame(width: size, height: size)
             if size >= 28 {

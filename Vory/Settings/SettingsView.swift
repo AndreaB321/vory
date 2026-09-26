@@ -690,7 +690,7 @@ struct SoftwareUpdateView: View {
                         CompanionUpdateRows(setup: setup, runtime: rt)
                     } else {
                         VStack(spacing: 8) {
-                            BotFaceView(spec: AboutView.voryBot, size: 56, active: setup.checkingCompanion, mood: BotFaceView.Mood(profile: "vory-update"))
+                            BotFaceView(spec: AboutView.voryBot, size: 56, mood: BotFaceView.Mood(profile: "vory-update", state: setup.checkingCompanion ? .thinking : .guide))
                             Text("Vory Companion \(PushSetupModel.bundledPluginVersion)").font(.headline)
                             Text(setup.checkingCompanion ? "Checking for updates…" : "Your gateway is up to date.").font(.subheadline).foregroundStyle(.secondary)
                                 .contentTransition(.numericText())
@@ -718,8 +718,8 @@ struct SoftwareUpdateView: View {
         .animation(.smooth, value: setup.updateOutcome == nil)
         .task { if let rt = model.runtime { await setup.prepare(runtime: rt) } }
         .refreshable { if let rt = model.runtime { await setup.checkCompanion(runtime: rt) } }
-        // A check is the cloud's cue to turn.
-        .onChange(of: setup.checkingCompanion) { _, now in if now { BotAmbient.shared.turnFinished(profile: "vory-update") } }
+        // The cloud squints while it checks and turns once the answer is in.
+        .onChange(of: setup.checkingCompanion) { was, now in if was, !now { BotAmbient.shared.turnFinished(profile: "vory-update") } }
         .onChange(of: setup.companionCheckedAt) { _, _ in
             model.companionUpdateAvailable = setup.updateAvailable
             model.companionInstalledVersion = setup.installedVersion

@@ -18,10 +18,11 @@ struct BotsView: View {
             ScrollView {
                 if let rt = model.runtime {
                     LazyVGrid(columns: columns, spacing: 22) {
-                        ForEach(rt.profiles) { p in
+                        ForEach(Array(rt.profiles.enumerated()), id: \.element.id) { i, p in
                             NavigationLink(value: p) {
                                 BotCard(profile: p, isActive: rt.selectedProfile == p.name,
-                                        working: rt.chats.contains { $0.profileName == p.name && $0.isRunning })
+                                        working: rt.chats.contains { $0.profileName == p.name && $0.isRunning },
+                                        slot: i, slots: rt.profiles.count)
                             }
                             .buttonStyle(.plain)
                         }
@@ -58,6 +59,7 @@ struct BotsView: View {
             .overlay {
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("-vory-shape-grid") { ShapeSeatGrid() }
+                if ProcessInfo.processInfo.arguments.contains("-vory-motion-demo") { MotionDemoGrid() }
                 #endif
             }
             .toolbar {
@@ -93,6 +95,9 @@ struct BotCard: View {
     var profile: ProfileInfo
     var isActive: Bool
     var working: Bool
+    /// This card's turn in the grid: only one bot moves its body per five-second block.
+    var slot = 0
+    var slots = 1
 
     private var ambient: BotAmbient { BotAmbient.shared }
     @AppStorage(BotAvatarStore.storageKey) private var avatarsRaw = ""
@@ -109,7 +114,7 @@ struct BotCard: View {
             // The bot sits on the pill, its base a few points over the top edge.
             // Plays while the page scrolls (random per bot), settles when it stops.
             BotAvatar(profile: profile.name, size: 78, active: working || (ambient.scrolling && ambient.enabled),
-                      mood: BotFaceView.Mood(profile: profile.name, followsTilt: true))
+                      mood: BotFaceView.Mood(profile: profile.name, followsTilt: true, groupIndex: slot, groupCount: slots))
                 .zIndex(1)
             VStack(spacing: 2) {
                 HStack(spacing: 5) {
@@ -147,6 +152,50 @@ private struct ShapeSeatGrid: View {
                 }
             }
             .padding(16)
+        }
+        .background(Color(.systemBackground))
+    }
+}
+#endif
+
+#if DEBUG
+/// Every pose the bots know, side by side: the working routines on a few shapes and finishes,
+/// then each state held. Tap a bot for the tap turn. `-vory-motion-demo`.
+private struct MotionDemoGrid: View {
+    private struct Cell: Identifiable { let id: String; let spec: BotLookSpec; let state: BotFace.State; let active: Bool }
+    private let cells: [Cell] = [
+        Cell(id: "working · blob", spec: BotLookSpec(shape: "blob", eyes: "curious", hex: "#E07A5F"), state: .working, active: true),
+        Cell(id: "working · triangle", spec: BotLookSpec(shape: "triangle", eyes: "bold", hex: "#F5A524"), state: .working, active: true),
+        Cell(id: "working · pill", spec: BotLookSpec(shape: "pill", eyes: "wide", hex: "#F4F4F5", finish: "glass"), state: .working, active: true),
+        Cell(id: "working · cloud", spec: BotLookSpec(shape: "cloud", eyes: "classic", hex: "#4C8DFF", finish: "glass"), state: .working, active: true),
+        Cell(id: "working · circle", spec: BotLookSpec(shape: "circle", eyes: "classic", hex: "#111111", finish: "glass"), state: .working, active: true),
+        Cell(id: "working · drop", spec: BotLookSpec(shape: "drop", eyes: "tiny", hex: "#2BB5A0"), state: .working, active: true),
+        Cell(id: "thinking", spec: BotLookSpec(shape: "circle", eyes: "classic", hex: "#111111", finish: "glass"), state: .thinking, active: true),
+        Cell(id: "using tool", spec: BotLookSpec(shape: "square", eyes: "classic", hex: "#4C8DFF", finish: "glass"), state: .usingTool, active: true),
+        Cell(id: "approval", spec: BotLookSpec(shape: "triangle", eyes: "bold", hex: "#F5A524"), state: .awaitingApproval, active: true),
+        Cell(id: "error", spec: BotLookSpec(shape: "hexagon", eyes: "round", hex: "#FF453A", finish: "glass"), state: .error, active: true),
+        Cell(id: "reconnecting", spec: BotLookSpec(shape: "drop", eyes: "tiny", hex: "#2BB5A0"), state: .reconnecting, active: true),
+        Cell(id: "streaming", spec: BotLookSpec(shape: "blob", eyes: "classic", hex: "#BF5AF2"), state: .streaming, active: true),
+        Cell(id: "guide (Vory)", spec: AboutView.voryBot, state: .guide, active: false),
+        Cell(id: "idle", spec: BotLookSpec(shape: "cloud", eyes: "sleepy", hex: "#F4F4F5"), state: .idle, active: false),
+        Cell(id: "idle · curious", spec: BotLookSpec(shape: "square", eyes: "curious", hex: "#30D158"), state: .idle, active: false),
+    ]
+    private let columns = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 8) {
+                LazyVGrid(columns: columns, spacing: 18) {
+                    ForEach(cells) { c in
+                        VStack(spacing: 6) {
+                            BotFaceView(spec: c.spec, size: 72, active: c.active, mood: BotFaceView.Mood(profile: "demo-\(c.id)", state: c.state))
+                            Text(c.id).font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .padding(16)
+                Button("Finish spin (all)") { for c in cells { BotAmbient.shared.turnFinished(profile: "demo-\(c.id)") } }
+                    .buttonStyle(.glass).padding(.bottom, 120)
+            }
         }
         .background(Color(.systemBackground))
     }
@@ -408,7 +457,8 @@ struct RoomView: View {
                     VStack(spacing: 12) {
                         HStack(spacing: -14) {
                             ForEach(Array(room.members.enumerated()), id: \.offset) { i, m in
-                                BotAvatar(profile: m.profile ?? m.handle ?? "?", size: 56, mood: BotFaceView.Mood(profile: "room-\(room.roomId)-\(i)"))
+                                // The front bot has its eyes; the ones behind it stay still.
+                                BotAvatar(profile: m.profile ?? m.handle ?? "?", size: 56, mood: BotFaceView.Mood(profile: "room-\(room.roomId)-\(i)", still: i != 0))
                                     .zIndex(Double(room.members.count - i))
                             }
                         }

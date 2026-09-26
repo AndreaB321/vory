@@ -54,7 +54,7 @@ struct VoryGuide: View {
     var body: some View {
         VStack(spacing: 6) {
             BotFaceView(spec: AboutView.voryBot, size: size, active: true, gaze: CGPoint(x: 0, y: 0.5),
-                        mood: BotFaceView.Mood(thinking: thinking, profile: "vory-guide"))
+                        mood: BotFaceView.Mood(profile: "vory-guide", state: thinking ? .thinking : .guide))
             VoryTypedBubble(text: says, key: key, reduceMotion: reduceMotion,
                             tint: done ? Color.readableGreen : .primary,
                             fill: done ? Color.green.mix(with: Color(uiColor: .secondarySystemFill), by: 0.75) : Color(uiColor: .secondarySystemFill))

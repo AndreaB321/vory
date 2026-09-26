@@ -378,7 +378,8 @@ struct SessionRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            if showBot { BotAvatar(profile: session.profile ?? "?", size: 34, active: live, mood: BotFaceView.Mood(thinking: thinking)) }
+            // Eyes only in the list: a squint while it writes, no body routines at this size.
+            if showBot { BotAvatar(profile: session.profile ?? "?", size: 34, active: live, mood: BotFaceView.Mood(state: live ? (thinking ? .thinking : .streaming) : .idle)) }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     if session.pinned == true { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary) }

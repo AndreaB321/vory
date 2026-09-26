@@ -228,9 +228,43 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
   text." Keep / Attach as file. Attach writes the text to `<first line>.txt`, stages it as
   `.file` (uploads via `file.attach` as text/plain) and clears the field. Keep holds until the
   text shrinks under the limit again.
-- **HOLD**: the user wants the bot animations reworked before build 44 ships — they are
-  collecting ideas from another model using `scratchpad/vory-bots-brief.md` (a copy is in
-  `docs/bots-brief.md`). Do not upload until they say "ship it".
+- **Motion system v2** (from the user's `FABLE_VORY_BOT_MOTION_BRIEF.md`, saved as
+  `docs/bot-motion-brief.md`), all in `Shared/BotFace.swift`:
+  - `BotFace.State` — idle, working, thinking, usingTool, streaming, awaitingApproval, error,
+    reconnecting, guide. `BotFaceView.Mood(state:groupIndex:groupCount:still:)`; `.idle` +
+    `active` still means `.working` (old callers unchanged). `ChatSession.botState`
+    (`Vory/Chat/ChatSession+BotState.swift`) maps cards → approval, resume error → error,
+    "Reconnected…" banner → reconnecting, status line Thinking/Sending/Queued → thinking,
+    Running/Preparing → usingTool, else working.
+  - `BotFace.Motion` grew `eyeOpen` (cap), `eyeX/eyeY` (extra glance), `freezeGlance`,
+    `blinkPeriod`, `sheen` + `sheenAngle` (rim light, degrees clockwise from the right, −130 =
+    lit top-left); `bodyStill` for Reduce Motion / painted renders.
+  - `BotFace.motion(time:seed:spec:state:since:finishedAt:tappedAt:group:)`: finish spin (turn +
+    blink edge-on + glance down after), tap (18° and back, blink, sheen tick), then per state.
+    Working = 5 s blocks, kind `(((index + seed) % 10) + 10) % 10`: 0 full turn (sheen rides), 1
+    glance turn (eyes lead 60 ms), 2 head tilt, 3 nod (drop 1.5 %), 4 lean, 5 rest, 6 squint &
+    settle, 7 scan, 8 rim sheen, 9 half-turn (round, blink, round again). Cloud roll ×0.75, pill
+    roll ≤3°, triangle nod→lean. Groups (`group`) share the clock and take turns, one body per
+    block. `widgetPose(phase:attention:)` for the Live Activity Canvas (squint / rolled ask /
+    lowered eyes; `draw(motion:)` paints roll + sheen).
+  - Eyes: `liveliness(blinkPeriod:blinkLength:doubleBlinks:glancePeriod:rare:)` — rare slow blink
+    / micro-squint every ~25 s; tiny eyes blink 90 ms and skip the double blink under 32 pt;
+    curious's tall eye glances 60 ms late; sleepy lids weigh instead of squashing.
+  - Sheen: painted via `drawSheen` (conic arc, body minus shrunk body); live glass via an
+    AngularGradient-filled body masked to a ring.
+  - `BotAmbient.tap(profile:)` + `tapped` (BotFaceView adds a simultaneous TapGesture).
+  - **Bug found on the way**: `BotFaceView.seed` folded the profile name with `&*`, which wraps
+    negative, and Swift's `%` keeps the sign, so bots with longer names picked one routine
+    forever (before this build: never moved). Seed is now `UInt(bitPattern:) % 1_000_003`.
+  - DEBUG `-vory-motion-demo`: a grid on the Bots tab of every state on six hero looks plus a
+    "Finish spin (all)" button; `Tools`: `ffmpeg … fps=10,tile=` strips from
+    `simctl io recordVideo` are how the motion was checked.
+  - Callers: header `Mood(state: chat.botState)`; chat list rows `.streaming`/`.thinking` while
+    live (eyes only, no body routines at 34 pt); bubble bot `.thinking` until text, then
+    `.streaming`; Bots grid cards `groupIndex/groupCount`; room empty-state stack `still` for the
+    back bots; `VoryGuide` `.guide` (sheen every 8 s) / `.thinking`; Software Update `.thinking`
+    while checking, turn on the falling edge.
+- **HOLD**: do not upload until the user reviews the motion and says "ship it".
 
 ### 2026-09-26 (build 43, from the build-42 review)
 - **Tilt** is its own switch (Settings › Bots › "Tilt with the phone", BETA, `bots.tilt`, off by

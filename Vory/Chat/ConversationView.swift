@@ -210,7 +210,7 @@ struct ChatHeader: View {
                     // the shape, not the frame), like a contact photo in Messages; it springs in from
                     // small on the first appearance.
                     BotAvatar(profile: chat.profileName, size: 52, active: chat.isRunning,
-                              mood: BotFaceView.Mood(thinking: chat.isRunning && (chat.statusLine ?? "Thinking…") == "Thinking…"))
+                              mood: BotFaceView.Mood(state: chat.botState))
                         .opacity(popped ? 1 : 0)
                         .zIndex(1)
                     VStack(spacing: 1) {
