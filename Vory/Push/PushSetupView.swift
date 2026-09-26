@@ -100,6 +100,18 @@ struct PushSetupView: View {
                                     removal: .move(edge: forward ? .leading : .trailing).combined(with: .opacity)))
         }
         .overlay(alignment: .bottom) { bottomBar }
+        .overlay(alignment: .topLeading) {
+            if let p = step.previous {
+                Button { go(to: p) } label: {
+                    Image(systemName: "chevron.left").font(.body.weight(.semibold)).frame(width: 40, height: 40)
+                }
+                .buttonStyle(.glass).buttonBorderShape(.circle)
+                .disabled(locked)
+                .padding(.leading, 16).padding(.top, 10)
+                .accessibilityLabel("Back")
+                .transition(.opacity)
+            }
+        }
         .background(Color(.systemGroupedBackground))
         .toolbar(.hidden, for: .navigationBar)
         .hidesTabBar()
@@ -126,7 +138,7 @@ struct PushSetupView: View {
             if setup.teamID.isEmpty { setup.teamID = ProvisioningProfile.teamID ?? "" }
             guard let rt else { return }
             await setup.prepare(runtime: rt)
-            withAnimation(.snappy) { step = SetupStep.allCases.first { !isDone($0) } ?? .overview }
+            // Always from the first step: done steps show their green state and Continue moves on.
         }
         .onChange(of: isDone(.overview)) { _, now in
             doneSettled = false

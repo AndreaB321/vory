@@ -510,6 +510,7 @@ struct CronView: View {
                 }
             }
         }
+        .contentMargins(.top, 14, for: .scrollContent)
         .refreshable { await load() }
         .task { await load() }
     }
@@ -524,8 +525,11 @@ struct CronView: View {
             for j in arr {
                 let c: CronJob
                 if let d = try? j.decode(CronJob.self), d.id != nil || d.jobId != nil || d.name != nil { c = d }
-                else { c = CronJob(id: j["id"]?.stringValue ?? j["job_id"]?.stringValue, name: j["name"]?.stringValue, schedule: j["schedule"]?.stringValue ?? j["schedule"]?.displayText, prompt: j["prompt"]?.stringValue, enabled: j["enabled"]?.boolValue, state: j["state"]?.stringValue) }
-                out.append(c); rawMap[c.identity] = j
+                else { c = CronJob(id: j["id"]?.stringValue ?? j["job_id"]?.stringValue, name: j["name"]?.stringValue, schedule: CronSchedule.expression(of: j["schedule"]), prompt: j["prompt"]?.stringValue, enabled: j["enabled"]?.boolValue, state: j["state"]?.stringValue) }
+                var c2 = c
+                // Some gateways send the schedule as an object ({kind, expr, …}); keep the expression.
+                if let e = CronSchedule.expression(of: j["schedule"]), c2.schedule?.hasPrefix("{") ?? true { c2.schedule = e }
+                out.append(c2); rawMap[c2.identity] = j
             }
             jobs = out; raw = rawMap; error = nil
         } catch { self.error = error.localizedDescription }
@@ -534,6 +538,20 @@ struct CronView: View {
 
 /// Human wording for the common cron shapes; anything else is shown verbatim.
 enum CronSchedule {
+    /// The cron expression out of whatever the gateway sent: a string, or an object with the
+    /// expression under one of the usual keys, or an interval.
+    static func expression(of v: JSONValue?) -> String? {
+        guard let v else { return nil }
+        if let s = v.stringValue { return s }
+        for k in ["cron", "expr", "expression", "spec", "value"] { if let s = v[k]?.stringValue, !s.isEmpty { return s } }
+        if let every = v["every"]?.stringValue ?? v["interval"]?.stringValue { return "every \(every)" }
+        if let secs = v["every_seconds"]?.doubleValue ?? v["interval_seconds"]?.doubleValue {
+            return secs >= 3600 ? "every \(Int(secs / 3600)) h" : "every \(Int(secs / 60)) min"
+        }
+        if let at = v["at"]?.stringValue { return "at \(at)" }
+        return v.displayText
+    }
+
     static func describe(_ s: String?) -> String {
         guard let s, !s.isEmpty else { return "no schedule" }
         let p = s.split(separator: " ").map(String.init)

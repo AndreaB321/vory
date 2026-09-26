@@ -27,7 +27,7 @@ struct NewChatSheet: View {
             (q.isEmpty || p.label.lowercased().contains(q) || p.name.lowercased().contains(q))
         }
     }
-    private var canSend: Bool { !chosen.isEmpty && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !busy }
+    private var canSend: Bool { !chosen.isEmpty && chosen.count <= 6 && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !busy }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -139,6 +139,7 @@ struct NewChatSheet: View {
     }
 
     private func add(_ p: ProfileInfo) {
+        guard chosen.count < 6 else { error = "A group chat can have up to six bots."; return }
         withAnimation(.snappy) { chosen.append(p) }
         query = ""
         focus = .message

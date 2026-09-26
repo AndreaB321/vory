@@ -68,7 +68,7 @@ public enum BotFace {
             // the base reaches near the bottom and the eyes have a face to sit in.
             let d = r.width * 1.16
             let box2 = CGRect(x: c.x - d / 2, y: r.minY + r.height * 0.56 - d / 2, width: d, height: d)
-            return roundedPolygon(sides: 3, in: box2, rotation: -.pi / 2, corner: r.width * 0.13)
+            return roundedPolygon(sides: 3, in: box2, rotation: -.pi / 2, corner: r.width * 0.24)
         case "hexagon":
             return roundedPolygon(sides: 6, in: r, rotation: -.pi / 2, corner: r.width * 0.10)
         case "cloud":

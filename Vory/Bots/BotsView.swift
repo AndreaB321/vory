@@ -150,11 +150,13 @@ struct RoomCard: View {
 /// Creates a hosted group chat on the gateway for these bots; the name is what the room is called.
 enum GroupChats {
     static func create(runtime: GatewayRuntime, name: String, profiles: [ProfileInfo]) async throws -> Room {
-        let list: [JSONValue] = profiles.map { .object(["member_id": .string($0.name), "handle": .string($0.name), "profile": .string($0.name), "display_name": .string($0.label)]) }
-        let r = try await runtime.rpc("groups.create", ["name": .string(name), "members": .array(list)])
+        // The gateway does not mint room ids: the client sends one (a string, letters/digits/-._:).
+        let roomID = "room-" + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(10)).lowercased()
+        let list: [JSONValue] = profiles.prefix(6).map { .object(["member_id": .string($0.name), "handle": .string($0.name), "profile": .string($0.name), "display_name": .string($0.label)]) }
+        let r = try await runtime.rpc("groups.create", ["room_id": .string(roomID), "name": .string(String(name.prefix(200))), "members": .array(list)])
         // Gateways answer in different shapes (the room, {room}, or an id only); the room list is
         // the one source that always has the full record, so the new room is taken from there.
-        let createdID = r["room_id"]?.stringValue ?? r["room"]?["room_id"]?.stringValue ?? r["id"]?.stringValue
+        let createdID = r["room_id"]?.stringValue ?? r["room"]?["room_id"]?.stringValue ?? r["id"]?.stringValue ?? roomID
         let all: GroupsListResult = try await runtime.rpc("groups.list", ["limit": 100]).decode()
         let room = all.rooms.first { $0.roomId == createdID && !$0.roomId.isEmpty }
             ?? all.rooms.filter { $0.name == name && $0.disbandedAt == nil }.max { $0.updatedAt < $1.updatedAt }

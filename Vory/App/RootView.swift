@@ -119,8 +119,6 @@ struct MainTabView: View {
             // selected one is visible and touchable, which is what the system TabView does too.
             ForEach(tabs, id: \.self) { tab in
                 content(for: tab)
-                    // A new identity re-creates the tab at its root page (Chats pops its own path).
-                    .id(tab == .chats ? 0 : model.popToRoot[tab, default: 0])
                     .opacity(model.selectedTab == tab ? 1 : 0)
                     .allowsHitTesting(model.selectedTab == tab)
                     .accessibilityHidden(model.selectedTab != tab)

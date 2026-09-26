@@ -5,27 +5,41 @@ import SwiftUI
 struct FlowLayout: Layout {
     var spacing: CGFloat = 6
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? .infinity
-        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0, maxX: CGFloat = 0
-        for v in subviews {
-            let s = v.sizeThatFits(.unspecified)
-            if x > 0, x + s.width > width { x = 0; y += rowHeight + spacing; rowHeight = 0 }
-            x += s.width + spacing
-            rowHeight = max(rowHeight, s.height)
-            maxX = max(maxX, x - spacing)
+    /// Each child is measured against the room left on its row: a text field takes what is
+    /// left rather than its (large) ideal width, so it only wraps when its minimum will not fit.
+    private func rows(width: CGFloat, subviews: Subviews) -> [[(index: Int, size: CGSize)]] {
+        var rows: [[(Int, CGSize)]] = [[]]
+        var x: CGFloat = 0
+        for (i, v) in subviews.enumerated() {
+            let remaining = max(0, width - x)
+            let minW = v.sizeThatFits(ProposedViewSize(width: 0, height: nil)).width
+            if x > 0, minW > remaining { rows.append([]); x = 0 }
+            let s = v.sizeThatFits(ProposedViewSize(width: max(0, width - x), height: nil))
+            let w = min(s.width, max(0, width - x))
+            rows[rows.count - 1].append((i, CGSize(width: w, height: s.height)))
+            x += w + spacing
         }
-        return CGSize(width: width == .infinity ? maxX : width, height: y + rowHeight)
+        return rows
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 320
+        let h = rows(width: width, subviews: subviews).reduce(CGFloat(0)) { $0 + ($1.map(\.size.height).max() ?? 0) }
+        let n = rows(width: width, subviews: subviews).count
+        return CGSize(width: width, height: h + CGFloat(max(0, n - 1)) * spacing)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0
-        for v in subviews {
-            let s = v.sizeThatFits(.unspecified)
-            if x > 0, x + s.width > bounds.width { x = 0; y += rowHeight + spacing; rowHeight = 0 }
-            v.place(at: CGPoint(x: bounds.minX + x, y: bounds.minY + y + (rowHeight > 0 ? (rowHeight - s.height) / 2 : 0)), proposal: .unspecified)
-            x += s.width + spacing
-            rowHeight = max(rowHeight, s.height)
+        var y: CGFloat = 0
+        for row in rows(width: bounds.width, subviews: subviews) {
+            let rowHeight = row.map(\.size.height).max() ?? 0
+            var x: CGFloat = 0
+            for item in row {
+                subviews[item.index].place(at: CGPoint(x: bounds.minX + x, y: bounds.minY + y + (rowHeight - item.size.height) / 2),
+                                           proposal: ProposedViewSize(width: item.size.width, height: item.size.height))
+                x += item.size.width + spacing
+            }
+            y += rowHeight + spacing
         }
     }
 }

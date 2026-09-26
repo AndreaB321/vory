@@ -248,7 +248,8 @@ struct HidesTabBar: ViewModifier {
 }
 
 /// Marks a tab's root page: on screen means the tab is at its root. Chats reports through its
-/// navigation path instead (a pushed chat keeps the list alive underneath).
+/// navigation path instead (a pushed chat keeps the list alive underneath). A tap on the tab
+/// while deeper pops the stack the way a swipe back would, animated.
 struct TabRoot: ViewModifier {
     @Environment(AppModel.self) private var model
     var tab: AppModel.AppTab
@@ -256,6 +257,38 @@ struct TabRoot: ViewModifier {
         content
             .onAppear { model.tabAtRoot[tab] = true }
             .onDisappear { model.tabAtRoot[tab] = false }
+            .background(PopToRootProbe(tab: tab))
+    }
+}
+
+/// A zero-size view under a tab's root page that finds the UIKit navigation controller behind
+/// the NavigationStack and pops it to the root, animated, whenever `popToRoot` bumps.
+private struct PopToRootProbe: UIViewRepresentable {
+    @Environment(AppModel.self) private var model
+    var tab: AppModel.AppTab
+
+    func makeUIView(context: Context) -> UIView { let v = UIView(); v.isUserInteractionEnabled = false; return v }
+    func updateUIView(_ v: UIView, context: Context) {
+        let bump = model.popToRoot[tab, default: 0]
+        guard bump != context.coordinator.seen else { return }
+        context.coordinator.seen = bump
+        guard bump > 0 else { return }
+        DispatchQueue.main.async {
+            var r: UIResponder? = v
+            while let n = r { if let nav = n as? UINavigationController { nav.popToRootViewController(animated: true); return }; r = n.next }
+            // The probe sits in the root page, which is inside the stack's hosting controller.
+            if let nav = v.parentViewController?.navigationController { nav.popToRootViewController(animated: true) }
+        }
+    }
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    final class Coordinator { var seen = 0 }
+}
+
+private extension UIView {
+    var parentViewController: UIViewController? {
+        var r: UIResponder? = self
+        while let n = r { if let vc = n as? UIViewController { return vc }; r = n.next }
+        return nil
     }
 }
 

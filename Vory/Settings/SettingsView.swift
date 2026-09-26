@@ -303,14 +303,24 @@ struct BotsSettingsView: View {
     @Environment(AppModel.self) private var model
     @AppStorage(BotAvatarStore.glassAllKey) private var glassAll = false
     @AppStorage(BotMotionSource.enabledKey) private var motion = true
+    @AppStorage(BotMotionSource.tiltKey) private var tilt = false
 
     var body: some View {
         List {
             Section {
                 Toggle("Motion effects", isOn: $motion)
                     .onChange(of: motion) { _, _ in BotMotionSource.shared.apply() }
+                Toggle(isOn: $tilt) {
+                    HStack(spacing: 6) {
+                        Text("Tilt with the phone")
+                        Text("BETA").font(.caption2.weight(.bold)).padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Capsule().fill(Color.accentColor.opacity(0.15))).foregroundStyle(Color.accentColor)
+                    }
+                }
+                .disabled(!motion)
+                .onChange(of: tilt) { _, _ in BotMotionSource.shared.apply() }
             } footer: {
-                Text("Bots look where you scroll and lean with the phone. Off, they only blink and glance.")
+                Text("Bots look where you scroll. With tilt on, they also lean with the phone and, on the Bots page, follow its angle with their eyes.")
             }
             Section {
                 Toggle(isOn: $glassAll) {

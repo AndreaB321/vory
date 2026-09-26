@@ -139,16 +139,16 @@ struct TranscriptView: View {
             .defaultScrollAnchor(.bottom)
             // Whole item, not just `.kind`: the tokens/sec footer lands after the text does and
             // must pull the bottom back into view too.
-            // No animation while following: tokens arrive faster than an animated scroll settles,
-            // and an unfinished animation left the thread lagging the bottom.
+            // Streaming text follows unanimated (tokens arrive faster than an animated scroll
+            // settles); a new message glides: the bubble slides in and the thread eases up with it.
             .onChange(of: chat.items.last) { _, _ in
                 if stickToBottom, !userScrolling { proxy.scrollTo("bottom", anchor: .bottom) }
             }
             .onChange(of: chat.items.count) { _, _ in
-                if stickToBottom, !userScrolling { proxy.scrollTo("bottom", anchor: .bottom) }
+                if stickToBottom, !userScrolling { withAnimation(.easeOut(duration: 0.28)) { proxy.scrollTo("bottom", anchor: .bottom) } }
             }
             .onChange(of: chat.statusLine) { _, _ in
-                if stickToBottom, !userScrolling { proxy.scrollTo("bottom", anchor: .bottom) }
+                if stickToBottom, !userScrolling { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) } }
             }
         }
     }
