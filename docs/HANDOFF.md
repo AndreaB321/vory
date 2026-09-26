@@ -8,8 +8,8 @@ at a time, ship a TestFlight build, wait for their verdict.
 ## Where things stand
 
 - **Latest TestFlight build: 1.0.1 (42)**, uploaded 2026-09-26 ~15:05 (31–41 earlier that day),
-  companion 1.0.26 unchanged. Build 42 = the build-41 review list plus the animated tour, the
-  restyled Companion setup, one-piece bubble tails and the no-bloom bots. Awaiting the user's verdict.
+  companion 1.0.26. User verdict on 42: everything fine apart from the build-43 list. **Build 43 is
+  built and committed, awaiting the user's "ship it"** — see its entry.
 - **Public beta rule (user, 2026-09-26):** nothing user-specific in notes, setup copy, sample data
   or docs — no bot names, gateway names or hostnames. Write for strangers.
   Build 39 (shipped on the user's "ship it"): dark-mode icon blue lighter
@@ -159,6 +159,45 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
   `hermes.text` (≤1200) and `hermes.title`; payload trimmed under Apple's 4 KB.
 
 ## Change log
+
+### 2026-09-26 (build 43, from the build-42 review)
+- **Tilt** is its own switch (Settings › Bots › "Tilt with the phone", BETA, `bots.tilt`, off by
+  default; needs Motion effects on). Curve: 5° dead zone, full at ~40°, smoothing 0.12.
+- Triangle corner radius 0.24 (glass rim smudged at the sharp vertices).
+- **Re-tap a tab → animated pop**: `PopToRootProbe` (UIViewRepresentable under each root page)
+  finds the UINavigationController and `popToRootViewController(animated:)`; no more `.id` re-create.
+- **Setup wizard**: opens on step 1 always; glass back button top-left (`step.previous`).
+- **FlowLayout** measures each child against the remaining width (a TextField's ideal width is
+  huge) so the To: row only wraps when a chip will not fit.
+- New messages glide (`withAnimation(.easeOut(0.28))` on the count-driven follow scroll).
+- **groups.create** sends a client `room_id` ("room-" + 10 hex), `handle` per member, ≤ 6 members
+  (compose sheet caps at 6); the created room is read back from `groups.list`.
+- **Scheduled Tasks**: list has top margin and a readable schedule (`CronSchedule.expression(of:)`
+  unwraps object schedules); `CronJobDetailView` is a form — name, Enabled (pause/resume),
+  Repeats picker + weekday/day-of-month + time DatePicker building the cron line, prompt editor
+  (falls back to prompt_preview), Delivers-to picker, details — plus a "Raw JSON" DisclosureGroup
+  with a TextEditor; save = raw diff + form fields via PUT updates.
+- **Companion page** (`CompanionView`, was BackgroundNotificationsView): status → Configure →
+  Software Update (badge) → Uninstall → diagnostics. Settings row "Companion" replaces Software
+  Update; Notifications page links to it; first-run card leads to it.
+- **Uninstall**: `install.sh --uninstall` (stops systemd/launchd, deletes plugins/vory-push and the
+  push dir); the app disables the plugin, withdraws the device file, asks Hermes to run the
+  uninstall (approval card in a new chat, like the install), then `startOver`.
+- **Live Activity**: `BotMark` draws with a Canvas (a TimelineView blanked the bot per update);
+  expanded layout restored (timer `.frame(width: 52)`, no fixedSize); approval state = "Needs
+  Approval" + detail in the bottom region and `ApprovalButtons` (Approve / Deny `Link`s to
+  `vory://approval?session=…&choice=once|deny`) in the trailing region and on the Lock Screen.
+  `AppModel.open(_:)` routes that to a `PendingRoute` with the notification action, which opens
+  the chat and applies the choice.
+- **Chat menus on the phone** (unreproducible on the sim): composer capsule is `.regular` glass,
+  not `.interactive()` (interactive glass answers touches itself); noted in the composer.
+- **Vory Summaries** (`Vory/Chat/ChatSummaries.swift`, FoundationModels): `ChatSummarizer.shared`,
+  `@Generable Draft {title, summary}`, `LanguageModelSession.respond(to:generating:)`; cache
+  `chats.aiSummaries.cache` keyed by session id with the `lastActive` stamp (≤ 300); switch
+  `chats.aiSummaries` in Appearance (disabled with the reason when the model is unavailable);
+  `SessionRow(summary:)` shows title + summary with a sparkle; a tour page (inserted before
+  Connect) with the switch, only when the model is available. The simulator has no model.
+- Settings tiles: one symbol size (15 pt medium) centred in 28 pt.
 
 ### 2026-09-26 (build 42, from the build-41 review)
 - **Motion, gentle**: `BotFace.Motion` is now {yaw, roll, dx, dy} — no scale anywhere (breathing
