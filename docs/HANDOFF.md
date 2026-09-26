@@ -7,9 +7,11 @@ at a time, ship a TestFlight build, wait for their verdict.
 
 ## Where things stand
 
-- **Latest TestFlight build: 1.0.1 (42)**, uploaded 2026-09-26 ~15:05 (31–41 earlier that day),
-  companion 1.0.26. User verdict on 42: everything fine apart from the build-43 list. **Build 43 is
-  built and committed, awaiting the user's "ship it"** — see its entry.
+- **Latest TestFlight build: 1.0.1 (43)** (42 before it), uploaded 2026-09-26 ~15:05 (31–41 earlier that day),
+  companion 1.0.26.
+- **Build 43 uploaded 2026-09-26 ~15:50** — the build-42 review list (see its entry). Awaiting the
+  user's verdict; phone-only checks: chat menus with the keyboard up, LA Approve/Deny, tilt
+  switch, Vory Summaries (needs Apple Intelligence).
 - **Public beta rule (user, 2026-09-26):** nothing user-specific in notes, setup copy, sample data
   or docs — no bot names, gateway names or hostnames. Write for strangers.
   Build 39 (shipped on the user's "ship it"): dark-mode icon blue lighter
