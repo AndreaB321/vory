@@ -17,6 +17,7 @@ struct ConversationView: View {
     /// the dock (the command list) instead of lifting the dock, which left the composer under
     /// the keyboard.
     @State private var keyboardInset: CGFloat = 0
+    @State private var sentInitial = false
     @Namespace private var glassNamespace
     @Environment(\.dismiss) private var dismiss
 
@@ -79,6 +80,12 @@ struct ConversationView: View {
             if let sid = route.storedID { chat = try await runtime.openChat(storedID: sid, title: route.title) }
             else { chat = try await runtime.newChat() }
             if let chat, composerText.isEmpty, let draft = ComposerDrafts.load(for: chat) { composerText = draft }
+            // The first message from the compose sheet goes out as soon as the chat exists.
+            if let chat, let t = route.initialText, !t.isEmpty, !sentInitial {
+                sentInitial = true
+                _ = await chat.send(t)
+                NotificationCenter.default.post(name: .hermesSessionsChanged, object: nil)
+            }
         } catch {
             loadError = error.localizedDescription
         }

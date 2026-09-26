@@ -301,9 +301,16 @@ struct SecurityView: View {
 struct BotsSettingsView: View {
     @Environment(AppModel.self) private var model
     @AppStorage(BotAvatarStore.glassAllKey) private var glassAll = false
+    @AppStorage(BotMotionSource.enabledKey) private var motion = true
 
     var body: some View {
         List {
+            Section {
+                Toggle("Motion effects", isOn: $motion)
+                    .onChange(of: motion) { _, _ in BotMotionSource.shared.apply() }
+            } footer: {
+                Text("Bots look where you scroll and lean with the phone. Off, they only blink and glance.")
+            }
             Section {
                 Toggle(isOn: $glassAll) {
                     HStack(spacing: 6) {

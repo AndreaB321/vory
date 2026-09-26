@@ -101,6 +101,9 @@ struct TranscriptView: View {
                     if stickToBottom { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
             }
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in
+                if userScrolling { BotAmbient.shared.scrolled(dy: new - old) }
+            }
             .onScrollGeometryChange(for: CGFloat.self) { g in
                 g.contentSize.height - (g.contentOffset.y + g.containerSize.height)
             } action: { _, distance in

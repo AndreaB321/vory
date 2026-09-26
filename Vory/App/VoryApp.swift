@@ -31,6 +31,7 @@ struct VoryApp: App {
                     switch phase {
                     case .active:
                         LocalNotifier.isForeground = true
+                        BotMotionSource.shared.apply(active: true)
                         model.lock.willEnterForeground()
                         Task { await model.push.refreshAuthorization() }
                         Task { await model.refreshCompanionUpdateFlag() }
@@ -38,6 +39,7 @@ struct VoryApp: App {
                         let chats = model.runtime?.chats ?? []
                         LiveActivityController.endOrphans(runningStoredIDs: Set(chats.filter(\.isRunning).map(\.storedID)), knownStoredIDs: Set(chats.map(\.storedID)))
                     case .background:
+                        BotMotionSource.shared.apply(active: false)
                         LocalNotifier.isForeground = false
                         model.lock.didEnterBackground()
                     case .inactive:

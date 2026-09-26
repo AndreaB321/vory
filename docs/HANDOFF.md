@@ -8,6 +8,8 @@ at a time, ship a TestFlight build, wait for their verdict.
 ## Where things stand
 
 - **Latest TestFlight build: 1.0.1 (39)**, uploaded 2026-09-26 ~12:20 (31–38 earlier that day).
+  **Build 40 is built and committed, awaiting the user's "ship it"** — see the 2026-09-26 (build 40)
+  entry: 15 items from the user's build-39 review.
   Build 39 (shipped on the user's "ship it"): dark-mode icon blue lighter
   (layer `fill-specializations` for dark, light unchanged), cloud 1.21× and up 20 pt, slash-command
   list in the composer, bottom lock in the transcript, glass bots redraw on change, darker glass
@@ -155,6 +157,45 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
   `hermes.text` (≤1200) and `hermes.title`; payload trimmed under Apple's 4 KB.
 
 ## Change log
+
+### 2026-09-26 (build 40, from the build-39 review)
+- **Painted glass cloud**: rim = body filled minus body shrunk (destinationOut), not a stroke
+  (`BotFace.drawGlassBody`) — a stroke drew every inner edge of the multi-piece cloud.
+- **Slash list**: any ScrollView inside the dock swallows SwiftUI keyboard avoidance → the dock is
+  lifted by hand (`ConversationView.keyboardInset` from `keyboardWillChangeFrame`, whole view
+  `.ignoresSafeArea(.keyboard)`); names arriving with "/" are shown with one; rows fixed 38 pt.
+- **Tab bar hiding per tab** (`AppModel.tabBarHiders: [AppTab: Int]`, `chatsPathOpen` only counts on
+  Chats, bar `.allowsHitTesting(!hidden)`): a tap on the bar while it slid away switched tabs under
+  an open chat and hid the bar everywhere (reproduced with automation; log via NSLog on the flags).
+- **Re-tap tab → root**: `tabAtRoot[tab]` reported by `.tabRoot(tab)` on each root page (Chats via
+  its path); `popToRoot[tab]` bumps an `.id` on the tab's content (re-creates at root; Chats resets
+  its path instead).
+- **Approvals**: routing by runtime OR stored id, unknown sessions are opened (`openChat`) and then
+  answered; `advertiseCapabilities()` logs the result and retries once if "approval" is missing;
+  `ChatSession.pollPendingApprovals()` after every resume. The handshake itself already existed —
+  if cards still fail on the real gateway, check the os_log line `client.capabilities → …`.
+- **Notification bot lookup**: `BotLooks.key(profile:label:)` (name → label → case-insensitive);
+  the mirror writes each look under name AND label and fills default colours; the NSE breadcrumb
+  (Background Notifications page) now says which key it found. Reply window text scrolls.
+- **Motion system** (`Shared/BotFace.swift`): `BotFace.motion(time:seed:active:)` — 5 s blocks,
+  routines hop / spin / wiggle / pulse / rest, only while `active`; idle bots blink+glance
+  (`idleEyes`), with the TimelineView paused except during `eyesBusy` windows (¼ s poll).
+  `BotAmbient.shared` (Observable): `gaze` from scrolls (transcript, chat list, Bots page →
+  `scrolled(dy:)`, decays after 450 ms) and `tilt` from CoreMotion (`Vory/App/BotMotionSource.swift`,
+  attitude relative to a drifting rest hold, 30 Hz, started/stopped with the scene phase).
+  Settings › Bots "Motion effects" (`bots.motion`). Reduce Motion disables body motion and tilt.
+- **Bots page**: 2-column `BotCard`s (bot floating over a glass name/model pill), `RoomCard`s for
+  group chats; room creation removed from here ("Group rooms" → "Group chats").
+- **Compose** (`Vory/Chat/NewChatSheet.swift`): Messages-style — To: chips + search, matching bots
+  as rows, first message at the bottom. One bot → `ChatRoute(profile:initialText:)` (ConversationView
+  sends it once the chat exists, `sentInitial`); several → `GroupChats.create` (groups.create) →
+  `RoomRoute(room:initialText:)` → `RoomView(initialText:)` sends it. The Chats list shows a
+  "Group chats" section (groups.list in `load()`); the mock gateway lacks `groups.send`.
+- **Chats filters** (funnel, top right): pinned / needs you / working now / archived, sort recent /
+  title / bot / model; `@AppStorage("chats.filter.*", "chats.sort")`, applied in `filtered(_:runtime:)`.
+- Cron Jobs → Scheduled Tasks (tab "Tasks", symbol calendar.badge.clock); Settings › Profile picker
+  shows the bots' pictures (`.id` on the look raws to redraw); chat profile page has the four
+  display toggles; Gateways row text on one line; gateway icon = Vory cloud tile (`GatewayTile`).
 
 ### 2026-09-26 (builds 31–39)
 - 39: icon: the Cloud layer has a `fill-specializations` entry for `dark` (2-stop lighter

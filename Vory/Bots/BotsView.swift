@@ -9,44 +9,49 @@ struct BotsView: View {
     @State private var capabilities: GroupsCapabilities?
     @State private var rooms: [Room] = []
     @State private var error: String?
-    @State private var showCreate = false
+
+    private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
 
     var body: some View {
         NavigationStack {
-            List {
+            ScrollView {
                 if let rt = model.runtime {
-                    Section {
+                    LazyVGrid(columns: columns, spacing: 22) {
                         ForEach(rt.profiles) { p in
-                            NavigationLink(value: p) { BotRow(profile: p, isActive: rt.selectedProfile == p.name) }
+                            NavigationLink(value: p) {
+                                BotCard(profile: p, isActive: rt.selectedProfile == p.name,
+                                        working: rt.chats.contains { $0.profileName == p.name && $0.isRunning })
+                            }
+                            .buttonStyle(.plain)
                         }
-                        if rt.profiles.isEmpty { Text("No profiles reported by this gateway.").foregroundStyle(.secondary).font(.footnote) }
-                    } header: { Text("Bots") } footer: {
-                        Text("Each bot is a Hermes profile: its own SOUL.md, model and sessions. Tap one for its chats.")
                     }
-                    if capabilities != nil {
-                        Section {
+                    .padding(.horizontal, 16).padding(.top, 18)
+                    if rt.profiles.isEmpty {
+                        Text("No profiles reported by this gateway.").foregroundStyle(.secondary).font(.footnote).padding()
+                    }
+                    Text("Each bot is a Hermes profile: its own SOUL.md, model and sessions. Tap one for its chats.")
+                        .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        .padding(.horizontal, 28).padding(.top, 14)
+                    if capabilities != nil, !rooms.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Group chats").font(.title3.weight(.semibold)).padding(.horizontal, 20).padding(.top, 26)
                             if capabilities?.driver == false {
-                                Label("The room driver is not running on the gateway; rooms are listed but the agent will not answer in them.", systemImage: "exclamationmark.triangle")
-                                    .font(.footnote).foregroundStyle(.secondary)
+                                Label("The room driver is not running on the gateway; group chats are listed but the bots will not answer in them.", systemImage: "exclamationmark.triangle")
+                                    .font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 20)
                             }
                             ForEach(rooms) { room in
-                                NavigationLink(value: room) {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(room.name).font(.body.weight(.medium))
-                                        Text(room.members.compactMap { $0.displayName ?? $0.handle ?? $0.profile }.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                    }
-                                }
+                                NavigationLink(value: room) { RoomCard(room: room) }.buttonStyle(.plain)
                             }
-                            Button { showCreate = true } label: { Label("New Room", systemImage: "plus") }
-                        } header: { Text("Group rooms") } footer: {
-                            Text("Hosted group chats where several bots and people talk in one thread.")
+                            Text("Start one from the compose button on Chats by adding more than one bot.")
+                                .font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 20)
                         }
                     }
-                    if let error { Text(error).foregroundStyle(.red).font(.footnote) }
+                    if let error { Text(error).foregroundStyle(.red).font(.footnote).padding() }
                 } else {
                     ContentUnavailableView("No gateway selected", systemImage: "antenna.radiowaves.left.and.right.slash")
                 }
             }
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in BotAmbient.shared.scrolled(dy: new - old) }
             .navigationTitle("Bots")
             .tabRoot(.bots)
             .navigationDestination(for: ProfileInfo.self) { BotDetailView(profile: $0) }
@@ -54,9 +59,6 @@ struct BotsView: View {
             .navigationDestination(for: ChatRoute.self) { ConversationView(route: $0) }
             .refreshable { await load() }
             .task(id: model.runtime?.connection.id) { await load() }
-            .sheet(isPresented: $showCreate) {
-                if let rt = model.runtime { NewRoomSheet(runtime: rt) { await load() } }
-            }
         }
     }
 
@@ -71,7 +73,72 @@ struct BotsView: View {
             error = nil
         } catch { self.error = error.localizedDescription }
     }
+}
 
+/// A bot on the Bots page: the bot floating above a glass pill with its name and model, like the
+/// header of its chat. It blinks and glances on its own; while it works it moves.
+struct BotCard: View {
+    var profile: ProfileInfo
+    var isActive: Bool
+    var working: Bool
+
+    var body: some View {
+        VStack(spacing: -16) {
+            BotAvatar(profile: profile.name, size: 78, active: working)
+                .zIndex(1)
+            VStack(spacing: 2) {
+                HStack(spacing: 5) {
+                    Text(profile.label).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    if isActive { Circle().fill(Color.accentColor).frame(width: 6, height: 6).accessibilityLabel("active") }
+                }
+                Text(profile.model.map { $0.split(separator: "/").last.map(String.init) ?? $0 } ?? "no model")
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .padding(.horizontal, 14).padding(.top, 22).padding(.bottom, 10)
+            .frame(maxWidth: .infinity)
+            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 22))
+        }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(profile.label), \(profile.model ?? "no model")\(isActive ? ", active" : "")\(working ? ", working" : "")")
+    }
+}
+
+struct RoomCard: View {
+    var room: Room
+    var body: some View {
+        HStack(spacing: 12) {
+            // The members' bots, overlapping like a group in Messages.
+            HStack(spacing: -12) {
+                ForEach(Array(room.members.prefix(3).enumerated()), id: \.offset) { _, m in
+                    BotAvatar(profile: m.profile ?? m.handle ?? "?", size: 32)
+                }
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(room.name).font(.body.weight(.medium)).lineLimit(1)
+                Text(room.members.compactMap { $0.displayName ?? $0.handle ?? $0.profile }.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer()
+            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+        }
+        .padding(14)
+        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 18))
+        .padding(.horizontal, 16)
+    }
+}
+
+/// Creates a hosted group chat on the gateway for these bots; the name is what the room is called.
+enum GroupChats {
+    static func create(runtime: GatewayRuntime, name: String, profiles: [ProfileInfo]) async throws -> Room {
+        let list: [JSONValue] = profiles.map { .object(["member_id": .string($0.name), "profile": .string($0.name), "display_name": .string($0.label)]) }
+        let r = try await runtime.rpc("groups.create", ["name": .string(name), "members": .array(list)])
+        if let room: Room = try? r.decode() { return room }
+        if let room: Room = try? (r["room"] ?? .null).decode() { return room }
+        // The gateway answered with less than a room; list and find it by name.
+        let all: GroupsListResult = try await runtime.rpc("groups.list", ["limit": 50]).decode()
+        guard let room = all.rooms.filter({ $0.name == name }).max(by: { $0.updatedAt < $1.updatedAt }) else { throw HermesAPIError.transport("The group chat was not created.") }
+        return room
+    }
 }
 
 /// "New group" the way Messages does it: a name, then tick the bots (profiles) that take part.
@@ -229,6 +296,8 @@ struct BotDetailView: View {
 struct RoomView: View {
     @Environment(AppModel.self) private var model
     var room: Room
+    /// The first message, when the chat was started from the compose sheet.
+    var initialText: String? = nil
     @State private var events: [RoomEvent] = []
     @State private var text = ""
     @State private var error: String?
@@ -259,7 +328,7 @@ struct RoomView: View {
             }
             .safeAreaInset(edge: .bottom) {
                 HStack {
-                    TextField("Message the room", text: $text, axis: .vertical).lineLimit(1...4).padding(.vertical, 6)
+                    TextField("Message the group", text: $text, axis: .vertical).lineLimit(1...4).padding(.vertical, 6)
                     Button { Task { await send() } } label: { Image(systemName: "arrow.up").font(.body.weight(.bold)) }.buttonStyle(.glassProminent).disabled(text.isEmpty)
                 }
                 .padding(.horizontal, 12).padding(.vertical, 6)
@@ -270,7 +339,10 @@ struct RoomView: View {
         }
         .navigationTitle(room.name)
         .navigationBarTitleDisplayMode(.inline)
-        .task { await load(); await poll() }
+        .task {
+            if let t = initialText, !t.isEmpty, events.isEmpty { text = t; await send() }
+            await load(); await poll()
+        }
     }
 
     private func load() async {
