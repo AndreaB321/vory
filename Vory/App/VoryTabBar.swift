@@ -34,10 +34,10 @@ struct VoryTabBar: View {
             HStack(spacing: circleGap) {
                 capsule
                 Button(action: compose) {
-                    // The glyph's ink sits about a point up and right of its layout box (measured
-                    // from its alpha bounds), so centre the ink rather than the box.
+                    // Centred on the square, not the glyph: the pencil hangs off its top-right
+                    // corner. Measured from a simulator screenshot (the square sat 2.5 pt low).
                     Image(systemName: "square.and.pencil").font(.system(size: 24, weight: .medium))
-                        .offset(x: -1, y: 1)
+                        .offset(x: 0, y: -2.5)
                         .frame(width: barHeight, height: barHeight)
                         .glassEffect(.regular.interactive(), in: .circle)
                 }
