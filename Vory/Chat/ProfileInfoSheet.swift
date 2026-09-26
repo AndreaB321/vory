@@ -53,6 +53,10 @@ struct ProfileCardView: View {
     @State private var options: ModelOptionsResult?
     @State private var status: String?
     @State private var loaded = false
+    @AppStorage(ChatStyle.showToolCalls) private var showToolCalls = true
+    @AppStorage(ChatStyle.showReasoning) private var showReasoning = true
+    @AppStorage(ChatStyle.showTurnStats) private var showTurnStats = true
+    @AppStorage(ChatStyle.showSystemNotes) private var showSystemNotes = true
 
     private var rt: GatewayRuntime? { model.runtime }
     private var profile: ProfileInfo? { rt?.profiles.first { $0.name == profileName } }
@@ -105,6 +109,12 @@ struct ProfileCardView: View {
                         LabeledContent("Context", value: "\(pct)% of \((u.contextMax ?? 0).formatted())")
                     }
                 } header: { Text("This chat") }
+                Section {
+                    Toggle("Show tool calls", isOn: $showToolCalls)
+                    Toggle("Show reasoning", isOn: $showReasoning)
+                    Toggle("Show tokens per second", isOn: $showTurnStats)
+                    Toggle("Show system notes", isOn: $showSystemNotes)
+                } header: { Text("Show in chats") } footer: { Text("Also under Settings › Appearance.") }
             }
             Section {
                 NavigationLink { SoulEditorView(profileName: profileName) } label: {

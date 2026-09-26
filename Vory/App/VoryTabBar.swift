@@ -167,7 +167,13 @@ struct VoryTabBar: View {
         return tabs.indices.contains(i) ? tabs[i] : (x < inset ? tabs.first : tabs.last)
     }
 
+    /// A tap on the selected tab while it is deeper than its root page goes back to that page,
+    /// like the system bar.
     private func select(_ tab: AppModel.AppTab) {
+        if tab == model.selectedTab {
+            if model.tabAtRoot[tab] == false { model.popToRoot[tab, default: 0] += 1 }
+            return
+        }
         withAnimation(.snappy(duration: 0.28)) { model.selectedTab = tab }
     }
 
@@ -241,6 +247,19 @@ struct HidesTabBar: ViewModifier {
     }
 }
 
+/// Marks a tab's root page: on screen means the tab is at its root. Chats reports through its
+/// navigation path instead (a pushed chat keeps the list alive underneath).
+struct TabRoot: ViewModifier {
+    @Environment(AppModel.self) private var model
+    var tab: AppModel.AppTab
+    func body(content: Content) -> some View {
+        content
+            .onAppear { model.tabAtRoot[tab] = true }
+            .onDisappear { model.tabAtRoot[tab] = false }
+    }
+}
+
 extension View {
     func hidesTabBar() -> some View { modifier(HidesTabBar()) }
+    func tabRoot(_ tab: AppModel.AppTab) -> some View { modifier(TabRoot(tab: tab)) }
 }

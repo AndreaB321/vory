@@ -595,7 +595,7 @@ struct CronJobDetailView: View {
             }
             if let status { Section { Text(status).font(.footnote).foregroundStyle(status.hasPrefix("Saved") || status.hasPrefix("Done") ? Color.secondary : Color.red) } }
         }
-        .navigationTitle(job.name?.isEmpty == false ? job.name! : "Cron job")
+        .navigationTitle(job.name?.isEmpty == false ? job.name! : "Scheduled task")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save() } }.disabled(!dirty) } }
         .task {

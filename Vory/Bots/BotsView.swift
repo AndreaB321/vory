@@ -48,6 +48,7 @@ struct BotsView: View {
                 }
             }
             .navigationTitle("Bots")
+            .tabRoot(.bots)
             .navigationDestination(for: ProfileInfo.self) { BotDetailView(profile: $0) }
             .navigationDestination(for: Room.self) { RoomView(room: $0) }
             .navigationDestination(for: ChatRoute.self) { ConversationView(route: $0) }

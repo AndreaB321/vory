@@ -50,6 +50,8 @@ struct MainTabView: View {
             // selected one is visible and touchable, which is what the system TabView does too.
             ForEach(tabs, id: \.self) { tab in
                 content(for: tab)
+                    // A new identity re-creates the tab at its root page (Chats pops its own path).
+                    .id(tab == .chats ? 0 : model.popToRoot[tab, default: 0])
                     .opacity(model.selectedTab == tab ? 1 : 0)
                     .allowsHitTesting(model.selectedTab == tab)
                     .accessibilityHidden(model.selectedTab != tab)
@@ -88,10 +90,10 @@ struct MainTabView: View {
         case .bots: BotsView()
         case .files: FilesView()
         case .settings: SettingsView()
-        case .sessions: NavigationStack { SessionsView().navigationTitle("Sessions") }
-        case .cron: NavigationStack { CronView().navigationTitle("Cron Jobs") }
-        case .approvals: NavigationStack { ApprovalsView().navigationTitle("Approvals") }
-        case .system: NavigationStack { SystemView().navigationTitle("System") }
+        case .sessions: NavigationStack { SessionsView().navigationTitle("Sessions").tabRoot(.sessions) }
+        case .cron: NavigationStack { CronView().navigationTitle("Scheduled Tasks").tabRoot(.cron) }
+        case .approvals: NavigationStack { ApprovalsView().navigationTitle("Approvals").tabRoot(.approvals) }
+        case .system: NavigationStack { SystemView().navigationTitle("System").tabRoot(.system) }
         }
     }
 }

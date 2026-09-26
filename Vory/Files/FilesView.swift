@@ -47,6 +47,7 @@ struct FilesView: View {
             }
             .overlay { if loading && listing == nil { ProgressView() } }
             .navigationTitle("Files")
+            .tabRoot(.files)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button { path = nil } label: { Label("Home", systemImage: "house") } }
                 ToolbarItem(placement: .primaryAction) { Button { showImporter = true } label: { Label("Upload", systemImage: "square.and.arrow.up") } }

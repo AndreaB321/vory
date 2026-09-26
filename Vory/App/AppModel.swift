@@ -55,7 +55,7 @@ final class AppModel {
             case .bots: return "Bots"
             case .files: return "Files"
             case .sessions: return "Sessions"
-            case .cron: return "Cron"
+            case .cron: return "Tasks"
             case .approvals: return "Approvals"
             case .system: return "System"
             case .settings: return "Settings"
@@ -68,7 +68,7 @@ final class AppModel {
             case .bots: return "person.2.wave.2"
             case .files: return "folder"
             case .sessions: return "list.bullet.rectangle"
-            case .cron: return "clock"
+            case .cron: return "calendar.badge.clock"
             case .approvals: return "checkmark.shield"
             case .system: return "server.rack"
             case .settings: return "gear"
@@ -87,6 +87,10 @@ final class AppModel {
     /// tap on the bar as it slides away switches tabs, and the new tab must show it again while
     /// the old one keeps its chat open.
     var tabBarHiders: [AppTab: Int] = [:]
+    /// Whether each tab shows its root page (reported by the root views). Tapping the selected
+    /// tab while deeper in it bumps `popToRoot`, which re-creates that tab at its root.
+    var tabAtRoot: [AppTab: Bool] = [:]
+    var popToRoot: [AppTab: Int] = [:]
     var tabBarHidden: Bool { (selectedTab == .chats && chatsPathOpen) || (tabBarHiders[selectedTab] ?? 0) > 0 }
 
     init() {

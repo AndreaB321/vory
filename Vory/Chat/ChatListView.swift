@@ -42,7 +42,8 @@ struct ChatListView: View {
             .navigationBarTitleDisplayMode(.inline)
             // Driven by the stack's own path rather than by the pushed screen: the bar starts
             // coming back the instant a pop begins instead of after the transition settles.
-            .onChange(of: path.isEmpty, initial: true) { _, empty in model.chatsPathOpen = !empty }
+            .onChange(of: path.isEmpty, initial: true) { _, empty in model.chatsPathOpen = !empty; model.tabAtRoot[.chats] = empty }
+            .onChange(of: model.popToRoot[.chats]) { _, _ in path = NavigationPath() }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { profileMenu }
             }

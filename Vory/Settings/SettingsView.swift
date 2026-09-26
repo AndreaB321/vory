@@ -19,7 +19,7 @@ struct SettingsView: View {
             Row(id: "skills", title: "Skills", symbol: "sparkles", color: .purple, destination: AnyView(SkillsView())),
             Row(id: "mcp", title: "MCP Servers", symbol: "point.3.connected.trianglepath.dotted", color: .mint, destination: AnyView(MCPView())),
             Row(id: "approvals", title: "Approvals", symbol: "checkmark.shield", color: .green, destination: AnyView(ApprovalsView())),
-            Row(id: "cron", title: "Cron Jobs", symbol: "clock", color: .pink, destination: AnyView(CronView())),
+            Row(id: "cron", title: "Scheduled Tasks", symbol: "calendar.badge.clock", color: .pink, destination: AnyView(CronView())),
             Row(id: "sessions", title: "Sessions", symbol: "list.bullet.rectangle", color: .cyan, destination: AnyView(SessionsView())),
             Row(id: "channels", title: "Channels", symbol: "antenna.radiowaves.left.and.right", color: .brown, destination: AnyView(ChannelsView())),
             Row(id: "system", title: "System", symbol: "server.rack", color: .secondary, destination: AnyView(SystemView())),
@@ -37,6 +37,9 @@ struct SettingsView: View {
     }
 
     private func filtered(_ rows: [Row]) -> [Row] { search.isEmpty ? rows : rows.filter { $0.title.localizedCaseInsensitiveContains(search) } }
+    @AppStorage(BotColors.storageKey) private var botColorsRaw = ""
+    @AppStorage(BotAvatarStore.storageKey) private var botAvatarsRaw = ""
+    @AppStorage(BotAvatarStore.glassAllKey) private var glassAll = false
 
     var body: some View {
         NavigationStack {
@@ -78,8 +81,12 @@ struct SettingsView: View {
                         }
                         if let rt = model.runtime, !rt.profiles.isEmpty {
                             Picker("Profile", selection: Binding(get: { rt.selectedProfile ?? "" }, set: { rt.selectedProfile = $0 })) {
-                                ForEach(rt.profiles) { Text($0.label).tag($0.name) }
+                                ForEach(rt.profiles) { p in
+                                    Label { Text(p.label) } icon: { Image(uiImage: BotAvatarImage.make(profile: p.name, size: 24)) }.tag(p.name)
+                                }
                             }
+                            // The menu's icons are rendered images; a new identity redraws them when a look changes.
+                            .id("profile-picker|\(botColorsRaw)|\(botAvatarsRaw)|\(glassAll)")
                         }
                     } header: { Text("Gateway") }
                 }
@@ -102,6 +109,7 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .tabRoot(.settings)
             .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search settings")
         }
     }
