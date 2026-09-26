@@ -7,7 +7,10 @@ at a time, ship a TestFlight build, wait for their verdict.
 
 ## Where things stand
 
-- **Latest TestFlight build: 1.0.1 (38)**, uploaded 2026-09-26 ~12:00 (31–37 earlier that day). Companion plugin **1.0.25**.
+- **Latest TestFlight build: 1.0.1 (38)**, uploaded 2026-09-26 ~12:00 (31–37 earlier that day).
+  **Build 39 is built and committed, awaiting the user's "ship it":** dark-mode icon blue lighter
+  (layer `fill-specializations` for dark, light unchanged), cloud 1.21× and up 20 pt, slash-command
+  list in the composer. Companion plugin **1.0.25**.
   Builds 20 and 22 were superseded cuts and are expired. Build 38 = 37 + the icon's cloud 10 % larger (layer `position.scale` 1.1). Build 37 = 36 + Settings › Bots with "Liquid Glass for all bots" (greys out the per-bot
   switch with a note). Build 36 = 35 + Liquid Glass bots (beta toggle in the Creator Studio), bots in the profile
   switcher, bigger Bots tab icon, more room above the bar. Build 35 = 34 + the new app icon
@@ -151,7 +154,15 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
 
 ## Change log
 
-### 2026-09-26 (builds 31–37)
+### 2026-09-26 (builds 31–39)
+- 39: icon: the Cloud layer has a `fill-specializations` entry for `dark` (2-stop lighter
+  gradient; validated by ictool AND the Xcode build); layers at `scale 1.21`, `translation-in-points
+  [0, -20]`. Composer: placeholder "Type / for commands"; a bare "/" lists EVERY command from
+  `commands.catalog` (sorted) in a ScrollView capped at 30 % of the screen height (max 280 pt) so
+  it never reaches the header; typing narrows it; tapping inserts "/name ". Dispatch was already
+  there (`ChatSession.dispatchSlash`). Sim note: the composer sits ~13 pt under the keyboard's
+  predictive bar on the simulator — pre-existing, not seen on the phone.
+- 38: icon cloud 10 % larger.
 - 37: **Settings › Bots** (`BotsSettingsView`, App section): "Liquid Glass for all bots" (BETA),
   `bots.glassAll` in UserDefaults (`BotAvatarStore.glassAllKey`). `BotAvatarStore.effective(raw)`
   applies it to any studio choice; `BotAvatar`, `BotAvatarStore.choice(for:)` and the keychain mirror

@@ -21,26 +21,45 @@ struct ComposerView: View {
     @State private var fieldID = UUID()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// Every command the gateway lists, narrowed by what follows the "/" (a bare "/" shows all).
     private var slashSuggestions: [(name: String, description: String)] {
         guard text.hasPrefix("/"), !text.contains(" "), let catalog else { return [] }
         let q = text.dropFirst().lowercased()
-        return catalog.allPairs.filter { q.isEmpty || $0.name.lowercased().hasPrefix(q) }.prefix(6).map { $0 }
+        return catalog.allPairs
+            .filter { q.isEmpty || $0.name.lowercased().hasPrefix(q) }
+            .sorted { $0.name.lowercased() < $1.name.lowercased() }
     }
+
+    /// The command list scrolls inside a cap: about 30 % of the screen, so with the keyboard up
+    /// it stops well short of the bot header at the top.
+    private var commandListCap: CGFloat { max(120, min(280, UIScreen.main.bounds.height * 0.30)) }
 
     var body: some View {
         VStack(spacing: 8) {
             if !slashSuggestions.isEmpty {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(slashSuggestions, id: \.name) { s in
-                        Button { text = "/" + s.name + " " } label: {
-                            HStack { Text("/" + s.name).font(.subheadline.monospaced()); Text(s.description).font(.caption).foregroundStyle(.secondary).lineLimit(1); Spacer() }
-                                .padding(.vertical, 6)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(slashSuggestions, id: \.name) { s in
+                            Button { text = "/" + s.name + " " } label: {
+                                HStack(spacing: 10) {
+                                    Text("/" + s.name).font(.subheadline.monospaced().weight(.medium))
+                                    Text(s.description).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.vertical, 8)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("composer.command.\(s.name)")
+                            if s.name != slashSuggestions.last?.name { Divider() }
                         }
-                        .buttonStyle(.plain)
                     }
+                    .padding(.horizontal, 14).padding(.vertical, 4)
                 }
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .glassEffect(.regular, in: .rect(cornerRadius: 14))
+                .scrollIndicators(.visible)
+                .frame(maxHeight: min(commandListCap, CGFloat(slashSuggestions.count) * 38 + 8))
+                .glassEffect(.regular, in: .rect(cornerRadius: 16))
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             if !chat.staged.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -62,7 +81,7 @@ struct ComposerView: View {
             HStack(alignment: .bottom, spacing: 8) {
                 attachMenu
                 HStack(alignment: .bottom, spacing: 6) {
-                    TextField("Message", text: $text, axis: .vertical)
+                    TextField("Type / for commands", text: $text, axis: .vertical)
                         .id(fieldID)
                         .lineLimit(1...6)
                         .focused($focused)
@@ -88,6 +107,7 @@ struct ComposerView: View {
                 .padding(.horizontal, 8)
             }
         }
+        .animation(.snappy(duration: 0.25), value: slashSuggestions.map(\.name))
         .photosPicker(isPresented: $showPhotos, selection: $photoItems, maxSelectionCount: 6, matching: .any(of: [.images, .videos]))
         .onChange(of: photoItems) { _, items in Task { await importPhotos(items) } }
         .fullScreenCover(isPresented: $showCamera) { CameraPicker { data, name in chat.stageAttachment(data: data, name: name, kind: .image) }.ignoresSafeArea() }
