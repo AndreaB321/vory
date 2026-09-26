@@ -190,8 +190,10 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
   settled/idle/done activity clears it); typing activities are not drawn as lines; polling
   runs at 1.2 s while someone is typing or within 30 s of a send, else 4 s. Mock: `groups.send`
   now answers 4 s later (`call_later`) with a `settled` activity after.
-- **Chats list**: group chats show only with the "Group chats" filter on (their own list; the
-  sessions' "No chats yet" is suppressed there). Group rows fetch `groups.log` (last 40) into
+- **Chats list**: group chats show only with the "Group chats" filter on — and then **in the
+  main list**, merged with chats by recency (`ListEntry` session/room, `merge`: pinned first,
+  then `lastActive`/`updatedAt`), each with a `person.2.fill` mark; rows are `sessionRow` /
+  `roomRow` builder funcs. Group rows fetch `groups.log` (last 40) into
   `roomLogs` for a "You: …"/"Hermes: …" preview (markdown marks stripped) and feed
   `ChatSummarizer.refreshRoom` — summaries keyed `room:<id>`, stamped with the last seq —
   showing the sparkle title + summary like session rows.

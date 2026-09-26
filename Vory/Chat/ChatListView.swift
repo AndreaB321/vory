@@ -172,7 +172,6 @@ struct ChatListView: View {
 
     /// The filters and the sort applied to the loaded (or searched) sessions.
     private func filtered(_ list: [StoredSession], runtime: GatewayRuntime) -> [StoredSession] {
-        if groupsOnly { return [] }
         var out = list
         if pinnedOnly { out = out.filter { $0.pinned == true } }
         if needsYouOnly { out = out.filter { runtime.needsAttention.contains($0.id) } }
@@ -200,90 +199,20 @@ struct ChatListView: View {
         let rows = filtered(searchText.isEmpty ? sessions : searchResults, runtime: runtime)
         List {
             if let errorText { Text(errorText).foregroundStyle(.red).font(.footnote) }
-            let visibleRooms = rooms.filter { showArchived || !archivedRooms.contains($0.roomId) }
-            // Group chats show only with their filter on, as their own list.
-            if groupsOnly, searchText.isEmpty {
-                if visibleRooms.isEmpty {
-                    Section { Text("No group chats yet. Start one from the compose button by adding more than one bot.").font(.footnote).foregroundStyle(.secondary) }
-                }
-                Section("Group chats") {
-                    ForEach(visibleRooms) { room in
-                        let archived = archivedRooms.contains(room.roomId)
-                        let log = roomLogs[room.roomId] ?? []
-                        let summary = summarizer.summary(forRoom: room, events: log)
-                        NavigationLink(value: RoomRoute(room: room, initialText: nil)) {
-                            HStack(spacing: 12) {
-                                HStack(spacing: -12) {
-                                    ForEach(Array(room.members.prefix(3).enumerated()), id: \.offset) { _, m in
-                                        BotAvatar(profile: m.profile ?? m.handle ?? "?", size: 30)
-                                    }
-                                }
-                                VStack(alignment: .leading, spacing: 3) {
-                                    HStack(spacing: 6) {
-                                        if archived { Image(systemName: "archivebox").font(.caption2).foregroundStyle(.secondary) }
-                                        Text(summary?.title ?? room.name).font(.body.weight(.medium)).lineLimit(1)
-                                        if summary != nil { Image(systemName: "sparkles").font(.caption2).foregroundStyle(.secondary) }
-                                    }
-                                    // The summary, else the last thing said, else who is in it.
-                                    Text(summary?.summary ?? Self.lastLine(room, log) ?? room.members.compactMap { $0.displayName ?? $0.handle ?? $0.profile }.joined(separator: ", "))
-                                        .font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                                }
-                            }
-                        }
-                        .task(id: "\(room.roomId)-\(room.latestSeq ?? 0)-\(aiSummaries)") {
-                            if roomLogs[room.roomId] == nil || (room.latestSeq ?? 0) > (roomLogs[room.roomId]?.last?.seq ?? 0),
-                               let r: GroupsLogResult = try? await runtime.rpc("groups.log", ["room_id": .string(room.roomId), "since_seq": 0, "limit": 40], timeout: 10).decode() {
-                                roomLogs[room.roomId] = r.events
-                            }
-                            if aiSummaries, let events = roomLogs[room.roomId] { summarizer.refreshRoom(room, events: events) }
-                        }
-                        .contextMenu {
-                            Button { path.append(RoomRoute(room: room, initialText: nil)) } label: { Label("Open", systemImage: "bubble.left") }
-                            Button { setArchived(room, !archived) } label: { Label(archived ? "Unarchive" : "Archive", systemImage: "archivebox") }
-                            Divider()
-                            Button(role: .destructive) { pendingRoomDelete = room } label: { Label("Delete", systemImage: "trash") }
-                        } preview: {
-                            RoomPreview(room: room, runtime: runtime)
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) { pendingRoomDelete = room } label: { Label("Delete", systemImage: "trash") }
-                        }
-                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                            Button { setArchived(room, !archived) } label: { Label(archived ? "Unarchive" : "Archive", systemImage: "archivebox") }.tint(.orange)
-                        }
-                    }
-                }
-            }
-            if rows.isEmpty && !loading && !groupsOnly {
+            // With the "Group chats" filter on, rooms sit among the chats by recency, as chats.
+            let visibleRooms = groupsOnly
+                ? rooms.filter { (showArchived || !archivedRooms.contains($0.roomId)) && (searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(searchText)) }
+                : []
+            let entries = Self.merge(rows, visibleRooms)
+            if entries.isEmpty && !loading {
                 ContentUnavailableView(searchText.isEmpty ? "No chats yet" : "No results", systemImage: "bubble.left.and.bubble.right",
                                        description: Text(searchText.isEmpty ? "Start a new chat with the compose button." : "Try another search."))
                     .listRowSeparator(.hidden)
             }
-            ForEach(rows) { s in
-                NavigationLink(value: ChatRoute(storedID: s.id, title: s.displayTitle, profile: allBots ? s.profile : nil)) {
-                    SessionRow(session: s, needsYou: runtime.needsAttention.contains(s.id), live: runtime.chatForStored(s.id)?.isRunning ?? false, showBot: allBots,
-                               thinking: runtime.chatForStored(s.id).map { $0.isRunning && ($0.statusLine ?? "Thinking…") == "Thinking…" } ?? false,
-                               summary: summarizer.summary(for: s))
-                        .task(id: "\(s.id)-\(s.lastActive ?? 0)-\(aiSummaries)") { if aiSummaries { summarizer.refresh(s, runtime: runtime, profile: allBots ? s.profile : nil) } }
-                }
-                .listRowInsets(EdgeInsets(top: 10, leading: ChatRowStyle.rowInset, bottom: 10, trailing: 8))
-                .contextMenu {
-                    Button { path.append(ChatRoute(storedID: s.id, title: s.displayTitle, profile: allBots ? s.profile : nil)) } label: { Label("Open", systemImage: "bubble.left") }
-                    Button { Task { await patch(s, ["pinned": .bool(!(s.pinned ?? false))]) } } label: { Label(s.pinned == true ? "Unpin" : "Pin", systemImage: s.pinned == true ? "pin.slash" : "pin") }
-                    Button { Task { await patch(s, ["archived": .bool(!(s.archived ?? false))]) } } label: { Label(s.archived == true ? "Unarchive" : "Archive", systemImage: "archivebox") }
-                    Divider()
-                    Button(role: .destructive) { pendingDelete = s } label: { Label("Delete", systemImage: "trash") }
-                } preview: {
-                    SessionPreview(session: s, runtime: runtime, profile: allBots ? s.profile : nil)
-                }
-                // Delete alone on the trailing edge; Archive lives with Pin on the leading edge so
-                // the two are never a thumb-width apart.
-                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    Button(role: .destructive) { pendingDelete = s } label: { Label("Delete", systemImage: "trash") }
-                }
-                .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                    Button { Task { await patch(s, ["pinned": .bool(!(s.pinned ?? false))]) } } label: { Label(s.pinned == true ? "Unpin" : "Pin", systemImage: s.pinned == true ? "pin.slash" : "pin") }.tint(.yellow)
-                    Button { Task { await patch(s, ["archived": .bool(!(s.archived ?? false))]) } } label: { Label(s.archived == true ? "Unarchive" : "Archive", systemImage: "archivebox") }.tint(.orange)
+            ForEach(entries) { entry in
+                switch entry {
+                case .session(let s): sessionRow(s, runtime: runtime)
+                case .room(let room): roomRow(room, runtime: runtime)
                 }
             }
         }
@@ -346,6 +275,96 @@ struct ChatListView: View {
             let arr = r["sessions"]?.arrayValue ?? r["results"]?.arrayValue ?? r.arrayValue ?? []
             searchResults = arr.compactMap { try? $0.decode(StoredSession.self) }
         } catch { errorText = error.localizedDescription }
+    }
+
+    /// A row of the list: a chat, or a group chat when the filter lets them in.
+    enum ListEntry: Identifiable {
+        case session(StoredSession), room(Room)
+        var id: String { switch self { case .session(let s): return s.id; case .room(let r): return "room:" + r.roomId } }
+        var pinned: Bool { if case .session(let s) = self { return s.pinned ?? false }; return false }
+        var date: Double { switch self { case .session(let s): return s.lastActive ?? 0; case .room(let r): return r.updatedAt } }
+    }
+
+    /// Pinned chats first, then everything by when it last moved.
+    private static func merge(_ sessions: [StoredSession], _ rooms: [Room]) -> [ListEntry] {
+        (sessions.map(ListEntry.session) + rooms.map(ListEntry.room))
+            .sorted { ($0.pinned ? 1 : 0, $0.date) > ($1.pinned ? 1 : 0, $1.date) }
+    }
+
+    @ViewBuilder private func sessionRow(_ s: StoredSession, runtime: GatewayRuntime) -> some View {
+                NavigationLink(value: ChatRoute(storedID: s.id, title: s.displayTitle, profile: allBots ? s.profile : nil)) {
+                    SessionRow(session: s, needsYou: runtime.needsAttention.contains(s.id), live: runtime.chatForStored(s.id)?.isRunning ?? false, showBot: allBots,
+                               thinking: runtime.chatForStored(s.id).map { $0.isRunning && ($0.statusLine ?? "Thinking…") == "Thinking…" } ?? false,
+                               summary: summarizer.summary(for: s))
+                        .task(id: "\(s.id)-\(s.lastActive ?? 0)-\(aiSummaries)") { if aiSummaries { summarizer.refresh(s, runtime: runtime, profile: allBots ? s.profile : nil) } }
+                }
+                .listRowInsets(EdgeInsets(top: 10, leading: ChatRowStyle.rowInset, bottom: 10, trailing: 8))
+                .contextMenu {
+                    Button { path.append(ChatRoute(storedID: s.id, title: s.displayTitle, profile: allBots ? s.profile : nil)) } label: { Label("Open", systemImage: "bubble.left") }
+                    Button { Task { await patch(s, ["pinned": .bool(!(s.pinned ?? false))]) } } label: { Label(s.pinned == true ? "Unpin" : "Pin", systemImage: s.pinned == true ? "pin.slash" : "pin") }
+                    Button { Task { await patch(s, ["archived": .bool(!(s.archived ?? false))]) } } label: { Label(s.archived == true ? "Unarchive" : "Archive", systemImage: "archivebox") }
+                    Divider()
+                    Button(role: .destructive) { pendingDelete = s } label: { Label("Delete", systemImage: "trash") }
+                } preview: {
+                    SessionPreview(session: s, runtime: runtime, profile: allBots ? s.profile : nil)
+                }
+                // Delete alone on the trailing edge; Archive lives with Pin on the leading edge so
+                // the two are never a thumb-width apart.
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) { pendingDelete = s } label: { Label("Delete", systemImage: "trash") }
+                }
+                .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                    Button { Task { await patch(s, ["pinned": .bool(!(s.pinned ?? false))]) } } label: { Label(s.pinned == true ? "Unpin" : "Pin", systemImage: s.pinned == true ? "pin.slash" : "pin") }.tint(.yellow)
+                    Button { Task { await patch(s, ["archived": .bool(!(s.archived ?? false))]) } } label: { Label(s.archived == true ? "Unarchive" : "Archive", systemImage: "archivebox") }.tint(.orange)
+                }
+    }
+
+    @ViewBuilder private func roomRow(_ room: Room, runtime: GatewayRuntime) -> some View {
+        let archived = archivedRooms.contains(room.roomId)
+        let log = roomLogs[room.roomId] ?? []
+        let summary = summarizer.summary(forRoom: room, events: log)
+                NavigationLink(value: RoomRoute(room: room, initialText: nil)) {
+                    HStack(spacing: 12) {
+                        HStack(spacing: -12) {
+                            ForEach(Array(room.members.prefix(3).enumerated()), id: \.offset) { _, m in
+                                BotAvatar(profile: m.profile ?? m.handle ?? "?", size: 30)
+                            }
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 6) {
+                                if archived { Image(systemName: "archivebox").font(.caption2).foregroundStyle(.secondary) }
+                                Image(systemName: "person.2.fill").font(.caption2).foregroundStyle(.secondary)
+                                Text(summary?.title ?? room.name).font(.body.weight(.medium)).lineLimit(1)
+                                if summary != nil { Image(systemName: "sparkles").font(.caption2).foregroundStyle(.secondary) }
+                            }
+                            // The summary, else the last thing said, else who is in it.
+                            Text(summary?.summary ?? Self.lastLine(room, log) ?? room.members.compactMap { $0.displayName ?? $0.handle ?? $0.profile }.joined(separator: ", "))
+                                .font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                        }
+                    }
+                }
+                .listRowInsets(EdgeInsets(top: 10, leading: ChatRowStyle.rowInset, bottom: 10, trailing: 8))
+                .task(id: "\(room.roomId)-\(room.latestSeq ?? 0)-\(aiSummaries)") {
+                    if roomLogs[room.roomId] == nil || (room.latestSeq ?? 0) > (roomLogs[room.roomId]?.last?.seq ?? 0),
+                       let r: GroupsLogResult = try? await runtime.rpc("groups.log", ["room_id": .string(room.roomId), "since_seq": 0, "limit": 40], timeout: 10).decode() {
+                        roomLogs[room.roomId] = r.events
+                    }
+                    if aiSummaries, let events = roomLogs[room.roomId] { summarizer.refreshRoom(room, events: events) }
+                }
+                .contextMenu {
+                    Button { path.append(RoomRoute(room: room, initialText: nil)) } label: { Label("Open", systemImage: "bubble.left") }
+                    Button { setArchived(room, !archived) } label: { Label(archived ? "Unarchive" : "Archive", systemImage: "archivebox") }
+                    Divider()
+                    Button(role: .destructive) { pendingRoomDelete = room } label: { Label("Delete", systemImage: "trash") }
+                } preview: {
+                    RoomPreview(room: room, runtime: runtime)
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) { pendingRoomDelete = room } label: { Label("Delete", systemImage: "trash") }
+                }
+                .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                    Button { setArchived(room, !archived) } label: { Label(archived ? "Unarchive" : "Archive", systemImage: "archivebox") }.tint(.orange)
+                }
     }
 
     /// "You: …" or "Hermes: …" from the last message in a room's log.
