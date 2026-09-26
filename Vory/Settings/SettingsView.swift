@@ -29,6 +29,7 @@ struct SettingsView: View {
         [
             Row(id: "notifications", title: "Notifications", symbol: "bell.badge", color: .red, destination: AnyView(NotificationsView())),
             Row(id: "security", title: "Security", symbol: "faceid", color: .green, destination: AnyView(SecurityView())),
+            Row(id: "bots", title: "Bots", symbol: "cloud.fill", color: .indigo, destination: AnyView(BotsSettingsView())),
             Row(id: "appearance", title: "Appearance", symbol: "circle.lefthalf.filled", color: .black, destination: AnyView(AppearanceView())),
             Row(id: "update", title: "Software Update", symbol: "arrow.down.circle", color: .gray, destination: AnyView(SoftwareUpdateView())),
             Row(id: "about", title: "About", symbol: "info.circle", color: .blue, destination: AnyView(AboutView())),
@@ -274,6 +275,43 @@ struct SecurityView: View {
                 Toggle("Require \(model.lock.biometryName)", isOn: Binding(get: { model.lock.isEnabled }, set: { model.lock.isEnabled = $0 }))
             } footer: { Text("Locks the app after it has been in the background. Gateway credentials are stored in the iOS Keychain (device-only).") }
         }
+    }
+}
+
+/// Settings › Bots: what applies to every bot at once. Each bot's own look lives in its Creator
+/// Studio (Bots tab › bot › Profile).
+struct BotsSettingsView: View {
+    @Environment(AppModel.self) private var model
+    @AppStorage(BotAvatarStore.glassAllKey) private var glassAll = false
+
+    var body: some View {
+        List {
+            Section {
+                Toggle(isOn: $glassAll) {
+                    HStack(spacing: 6) {
+                        Text("Liquid Glass for all bots")
+                        Text("BETA").font(.caption2.weight(.bold)).padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Capsule().fill(Color.accentColor.opacity(0.15))).foregroundStyle(Color.accentColor)
+                    }
+                }
+                .accessibilityIdentifier("settings.bots.glassAll")
+            } footer: {
+                Text("Every bot becomes a piece of glass, like the app icon — in chats, the Island, notifications and the reply window. Off, each bot keeps the finish chosen in its Creator Studio.")
+            }
+            if let profiles = model.runtime?.profiles, !profiles.isEmpty {
+                Section("Your bots") {
+                    ForEach(profiles) { p in
+                        HStack(spacing: 12) {
+                            BotAvatar(profile: p.name, size: 34)
+                            Text(p.label)
+                            Spacer()
+                            if glassAll || BotAvatarStore.choice(for: p.name).isGlass { Image(systemName: "sparkles").foregroundStyle(.secondary).accessibilityLabel("Glass") }
+                        }
+                    }
+                }
+            }
+        }
+        .onChange(of: glassAll) { _, _ in BotLooksMirror.mirror() }
     }
 }
 

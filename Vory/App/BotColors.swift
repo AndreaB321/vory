@@ -16,7 +16,7 @@ enum BotColors {
         return map
     }
 
-    static func save(_ map: [String: String]) {
+    @MainActor static func save(_ map: [String: String]) {
         if let data = try? JSONEncoder().encode(map), let s = String(data: data, encoding: .utf8) {
             UserDefaults.standard.set(s, forKey: storageKey)
         }
@@ -39,7 +39,7 @@ enum BotColors {
         Color(hex: hex(for: profile, overrides: overrides)) ?? .accentColor
     }
 
-    static func set(_ color: Color, for profile: String) {
+    @MainActor static func set(_ color: Color, for profile: String) {
         var map = stored()
         map[profile] = color.hexString
         save(map)
@@ -72,6 +72,7 @@ struct BotAvatar: View {
     var override: BotAvatarChoice? = nil
     @AppStorage(BotColors.storageKey) private var raw = ""
     @AppStorage(BotAvatarStore.storageKey) private var avatarsRaw = ""
+    @AppStorage(BotAvatarStore.glassAllKey) private var glassAll = false
 
     private var overrides: [String: String] {
         guard let d = raw.data(using: .utf8), let m = try? JSONDecoder().decode([String: String].self, from: d) else { return [:] }
@@ -79,8 +80,10 @@ struct BotAvatar: View {
     }
     private var choice: BotAvatarChoice {
         if let override { return override }
-        guard let d = avatarsRaw.data(using: .utf8), let m = try? JSONDecoder().decode([String: String].self, from: d) else { return .default }
-        return BotAvatarChoice(raw: m[profile] ?? "")
+        guard let d = avatarsRaw.data(using: .utf8), let m = try? JSONDecoder().decode([String: String].self, from: d) else {
+            return BotAvatarChoice(raw: BotAvatarStore.effective("", glassAll: glassAll))
+        }
+        return BotAvatarChoice(raw: BotAvatarStore.effective(m[profile] ?? "", glassAll: glassAll))
     }
 
     var body: some View {
@@ -99,9 +102,14 @@ struct BotAvatar: View {
 
 /// Copies the bot colours, avatar choices and photo thumbnails into the shared keychain
 /// (`BotLooks`) for the notification extensions.
+@MainActor
 enum BotLooksMirror {
     static func mirror() {
-        let avatars = BotAvatarStore.stored()
+        // The all-bots glass setting is baked in here, for every profile the gateway knows, so
+        // the extensions (which only read this mirror) draw the same bot as the app.
+        var avatars = BotAvatarStore.stored()
+        let known = Set(avatars.keys).union(AppModel.shared.runtime?.profiles.map(\.name) ?? [])
+        for profile in known { avatars[profile] = BotAvatarStore.effective(avatars[profile] ?? "") }
         var photos: [String: Data] = [:]
         for (profile, choice) in avatars where choice == "photo" {
             if let image = BotAvatarStore.photo(for: profile), let data = thumbnail(image) { photos[profile] = data }

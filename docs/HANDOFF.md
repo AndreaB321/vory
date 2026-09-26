@@ -7,8 +7,9 @@ at a time, ship a TestFlight build, wait for their verdict.
 
 ## Where things stand
 
-- **Latest TestFlight build: 1.0.1 (36)**, uploaded 2026-09-26 ~11:40 (31–35 earlier that morning). Companion plugin **1.0.25**.
-  Builds 20 and 22 were superseded cuts and are expired. Build 36 = 35 + Liquid Glass bots (beta toggle in the Creator Studio), bots in the profile
+- **Latest TestFlight build: 1.0.1 (37)**, uploaded 2026-09-26 ~11:50 (31–36 earlier that morning). Companion plugin **1.0.25**.
+  Builds 20 and 22 were superseded cuts and are expired. Build 37 = 36 + Settings › Bots with "Liquid Glass for all bots" (greys out the per-bot
+  switch with a note). Build 36 = 35 + Liquid Glass bots (beta toggle in the Creator Studio), bots in the profile
   switcher, bigger Bots tab icon, more room above the bar. Build 35 = 34 + the new app icon
   (user approved 34 and 35). Build 34 = 33 + capsule 56 pt (user: 62 felt tall; bottom edge kept) and the lens refracting the
   icons while dragged. Compose glyph centred on its square (user approved the zoom). Verdict on 31: not
@@ -146,7 +147,14 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
 
 ## Change log
 
-### 2026-09-26 (builds 31–36)
+### 2026-09-26 (builds 31–37)
+- 37: **Settings › Bots** (`BotsSettingsView`, App section): "Liquid Glass for all bots" (BETA),
+  `bots.glassAll` in UserDefaults (`BotAvatarStore.glassAllKey`). `BotAvatarStore.effective(raw)`
+  applies it to any studio choice; `BotAvatar`, `BotAvatarStore.choice(for:)` and the keychain mirror
+  (`BotLooksMirror`, now @MainActor; bakes the setting in for every gateway profile so the
+  extensions match) all go through it. The studio's own switch stays per bot; with the global on
+  it shows on, disabled, captioned "On for every bot in Settings › Bots." The page also lists the
+  bots with a sparkle on the glass ones.
 - 36: **Liquid Glass bots (beta)**: `BotLookSpec.finish` ("flat"|"glass"), stored as a fourth part
   of the choice string (`studio:<shape>:<eyes>:glass`); `BotAvatarChoice.studio(shape:eyes:glass:)`;
   a Toggle at the bottom of the Creator Studio. In the app (`BotFace.liveGlass = true`, set in

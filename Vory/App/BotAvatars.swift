@@ -48,7 +48,7 @@ enum BotAvatarStore {
         return map
     }
 
-    static func save(_ map: [String: String]) {
+    @MainActor static func save(_ map: [String: String]) {
         if let data = try? JSONEncoder().encode(map), let s = String(data: data, encoding: .utf8) {
             UserDefaults.standard.set(s, forKey: storageKey)
         }
@@ -56,10 +56,23 @@ enum BotAvatarStore {
     }
 
     static func choice(for profile: String, overrides: [String: String]? = nil) -> BotAvatarChoice {
-        BotAvatarChoice(raw: (overrides ?? stored())[profile] ?? "")
+        BotAvatarChoice(raw: effective((overrides ?? stored())[profile] ?? ""))
     }
 
-    static func set(_ choice: BotAvatarChoice, for profile: String) {
+    /// Settings › Bots › "Liquid Glass for all bots": every studio bot draws as glass, whatever
+    /// its own switch says.
+    static let glassAllKey = "bots.glassAll"
+    static var glassAll: Bool { UserDefaults.standard.bool(forKey: glassAllKey) }
+
+    /// The raw choice with the all-bots glass setting applied.
+    static func effective(_ raw: String, glassAll: Bool = glassAll) -> String {
+        guard glassAll else { return raw }
+        let c = BotAvatarChoice(raw: raw)
+        if case .studio(let shape, let eyes, _) = c { return BotAvatarChoice.studio(shape: shape, eyes: eyes, glass: true).raw }
+        return raw
+    }
+
+    @MainActor static func set(_ choice: BotAvatarChoice, for profile: String) {
         var map = stored()
         map[profile] = choice.raw
         save(map)
@@ -111,6 +124,7 @@ struct CreatorStudio: View {
     @State private var photoError: String?
     @State private var photoVersion = 0
     @State private var tab: StudioTab = .body
+    @AppStorage(BotAvatarStore.glassAllKey) private var glassAll = false
 
     enum StudioTab: String, CaseIterable { case body, eyes, colour }
 
@@ -205,7 +219,7 @@ struct CreatorStudio: View {
     /// Beta: the bot as Liquid Glass, like the app icon. Real glass in the app; the Island and
     /// notifications get a painted version of it.
     private var glassRow: some View {
-        Toggle(isOn: Binding(get: { glass }, set: { choice = .studio(shape: shape, eyes: eyes, glass: $0) })) {
+        Toggle(isOn: Binding(get: { glass || glassAll }, set: { choice = .studio(shape: shape, eyes: eyes, glass: $0) })) {
             HStack(spacing: 10) {
                 BotFaceView(spec: BotLookSpec(shape: shape, eyes: eyes, hex: hex, finish: "glass"), size: 30, active: false)
                 VStack(alignment: .leading, spacing: 1) {
@@ -214,11 +228,11 @@ struct CreatorStudio: View {
                         Text("BETA").font(.caption2.weight(.bold)).padding(.horizontal, 5).padding(.vertical, 1)
                             .background(Capsule().fill(Color.accentColor.opacity(0.15))).foregroundStyle(Color.accentColor)
                     }
-                    Text("The bot as a piece of glass, like the app icon.").font(.caption).foregroundStyle(.secondary)
+                    Text(glassAll ? "On for every bot in Settings › Bots." : "The bot as a piece of glass, like the app icon.").font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
-        .disabled(choice == .photo)
+        .disabled(choice == .photo || glassAll)
         .accessibilityIdentifier("studio.glass")
     }
 
