@@ -190,6 +190,8 @@ enum LocalNotifier {
 
     @MainActor
     static func cardArrived(_ card: PendingCard, chat: ChatSession) {
+        // In front of the user the card is on screen: a buzz, nothing more.
+        if isForeground { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
         guard !isForeground, !companionDelivers else { return }
         let bot = botName(chat)
         let content = UNMutableNotificationContent()

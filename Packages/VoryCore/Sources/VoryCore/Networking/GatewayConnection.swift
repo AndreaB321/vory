@@ -49,8 +49,11 @@ public struct GatewayConnection: Codable, Identifiable, Hashable, Sendable {
     public var lastProfile: String?
     public var hasAccessHeaders: Bool = false
     public var lastVersion: String?
+    /// How the phone reaches the gateway ("local", "tailscale", "cloudflare", "other"); only
+    /// for the form's help and the list's label, the URL and headers do the work.
+    public var connectionKind: String?
 
-    public init(id: UUID = UUID(), name: String, gateway: GatewayURL, authMode: AuthMode, authProvider: String? = nil, createdAt: Date = Date(), lastProfile: String? = nil, hasAccessHeaders: Bool = false, lastVersion: String? = nil) {
+    public init(id: UUID = UUID(), name: String, gateway: GatewayURL, authMode: AuthMode, authProvider: String? = nil, createdAt: Date = Date(), lastProfile: String? = nil, hasAccessHeaders: Bool = false, lastVersion: String? = nil, connectionKind: String? = nil) {
         self.id = id
         self.name = name
         self.gateway = gateway
@@ -60,6 +63,7 @@ public struct GatewayConnection: Codable, Identifiable, Hashable, Sendable {
         self.lastProfile = lastProfile
         self.hasAccessHeaders = hasAccessHeaders
         self.lastVersion = lastVersion
+        self.connectionKind = connectionKind
     }
 }
 

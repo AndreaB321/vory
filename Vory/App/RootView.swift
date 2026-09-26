@@ -3,10 +3,23 @@ import VoryCore
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    /// DEBUG: `-vory-show-tour` shows the first-run tour over a configured app.
+    static let forceTour: Bool = {
+        #if DEBUG
+        return ProcessInfo.processInfo.arguments.contains("-vory-show-tour")
+        #else
+        return false
+        #endif
+    }()
+    /// Shown once, right after the first gateway is saved: install the Companion now or later.
+    @AppStorage("companionPromptShown") private var companionPromptShown = false
+    @AppStorage("notificationsSetupCardDone") private var setupCardDone = false
+    @State private var showCompanionPrompt = false
+    @State private var showInstaller = false
 
     var body: some View {
         ZStack {
-            if !model.hasConnections {
+            if !model.hasConnections || Self.forceTour {
                 OnboardingView()
             } else {
                 MainTabView()
@@ -17,6 +30,61 @@ struct RootView: View {
             }
         }
         .animation(.default, value: model.lock.isLocked)
+        .onAppear {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-vory-show-companion-prompt") { showCompanionPrompt = true }
+            #endif
+        }
+        .onChange(of: model.hasConnections) { had, has in
+            if !had, has, !companionPromptShown {
+                companionPromptShown = true
+                Task { try? await Task.sleep(for: .milliseconds(700)); showCompanionPrompt = true }
+            }
+        }
+        .sheet(isPresented: $showCompanionPrompt) {
+            CompanionPromptSheet(install: {
+                // Installed from here: the Settings suggestion never needs to show.
+                setupCardDone = true
+                showCompanionPrompt = false
+                showInstaller = true
+            }, later: {
+                setupCardDone = false
+                showCompanionPrompt = false
+            })
+        }
+        .sheet(isPresented: $showInstaller) {
+            NavigationStack {
+                SetupWizardHost()
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showInstaller = false } } }
+            }
+        }
+    }
+}
+
+/// "You're connected — install the Companion now, or later?": Vory asks, once.
+struct CompanionPromptSheet: View {
+    var install: () -> Void
+    var later: () -> Void
+    var body: some View {
+        VStack(spacing: 18) {
+            BotFaceView(spec: AboutView.voryBot, size: 96, active: true)
+                .padding(.top, 26)
+            Text("Unlock Vory's full potential").font(.title2.weight(.bold)).multilineTextAlignment(.center)
+            Text("The Companion is a small plugin on your gateway. With it, replies arrive as notifications, a Live Activity follows every turn, and approval cards reach your phone the moment a bot needs a yes.")
+                .font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(spacing: 10) {
+                Button(action: install) { Text("Install now").font(.headline).frame(maxWidth: .infinity).padding(.vertical, 6) }
+                    .buttonStyle(.glassProminent)
+                Button(action: later) { Text("Later").font(.subheadline) }
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 6)
+            Text("Later is fine — Settings will remind you.").font(.caption).foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 28).padding(.bottom, 20)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 }
 

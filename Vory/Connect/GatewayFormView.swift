@@ -9,6 +9,45 @@ struct GatewayFormView: View {
     var existing: GatewayConnection?
     var onSaved: ((GatewayConnection) -> Void)?
 
+    /// How the phone reaches the gateway. Only changes the help and the fields shown; the URL,
+    /// the auth method and the optional Access headers are what actually connect.
+    enum ConnectionKind: String, CaseIterable, Identifiable {
+        case local, tailscale, cloudflare, other
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .local: return "Local network"
+            case .tailscale: return "Tailscale"
+            case .cloudflare: return "Cloudflare Access"
+            case .other: return "Other"
+            }
+        }
+        var symbol: String {
+            switch self {
+            case .local: return "wifi"
+            case .tailscale: return "point.3.connected.trianglepath.dotted"
+            case .cloudflare: return "cloud"
+            case .other: return "globe"
+            }
+        }
+        var placeholder: String {
+            switch self {
+            case .local: return "http://192.168.1.20:9119"
+            case .tailscale: return "http://my-mac.tail1234.ts.net:9119"
+            case .cloudflare: return "https://hermes.example.com"
+            case .other: return "https://hermes.example.com"
+            }
+        }
+        var help: String {
+            switch self {
+            case .local: return "Same Wi‑Fi as the gateway machine. Use its LAN address and the port hermes serve prints (9119 by default). Plain http is fine here; it only works at home."
+            case .tailscale: return "Reach the gateway from anywhere over your tailnet. Install Tailscale on this iPhone and the gateway machine, then use the machine's MagicDNS name or its 100.x address. No port forwarding, no public exposure; plain http is safe inside the tailnet."
+            case .cloudflare: return "A public hostname behind Cloudflare Access (a Cloudflare Tunnel on the gateway machine). Enter the service token below — the app cannot use a browser login for Access. Always https."
+            case .other: return "Any https address that reaches the dashboard: a reverse proxy, a VPS, your own VPN. Add Access headers only if Cloudflare sits in front."
+            }
+        }
+    }
+    @State private var kind: ConnectionKind = .local
     @State private var name = ""
     @State private var urlText = ""
     @State private var pathPrefix = ""
@@ -39,9 +78,17 @@ struct GatewayFormView: View {
     var body: some View {
         Form {
             Section {
+                Picker("Connection", selection: $kind) {
+                    ForEach(ConnectionKind.allCases) { Label($0.title, systemImage: $0.symbol).tag($0) }
+                }
+                .pickerStyle(.menu)
+            } footer: {
+                Text(kind.help)
+            }
+            Section {
                 TextField("Name", text: $name, prompt: Text("Home"))
                     .accessibilityIdentifier("gateway.name")
-                TextField("Gateway URL", text: $urlText, prompt: Text("https://hermes.example.com"))
+                TextField("Gateway URL", text: $urlText, prompt: Text(kind.placeholder))
                     .keyboardType(.URL).textContentType(.URL).autocorrectionDisabled().textInputAutocapitalization(.never)
                     .accessibilityIdentifier("gateway.url")
                 TextField("Path prefix (optional)", text: $pathPrefix, prompt: Text("/hermes"))
@@ -54,7 +101,11 @@ struct GatewayFormView: View {
                     if let urlError { Text(urlError).foregroundStyle(.red) }
                     else if let u = normalizedURL {
                         Text("Will connect to \(u.description)").foregroundStyle(.secondary)
-                        if !u.isTLS && !u.isPrivateHost { Text("This is plain HTTP to a public host; credentials will travel unencrypted.").foregroundStyle(.orange) }
+                        if !u.isTLS && !u.isPrivateHost && !u.isTailscaleHost { Text("This is plain HTTP to a public host; credentials will travel unencrypted.").foregroundStyle(.orange) }
+                        if kind == .tailscale && !u.isTailscaleHost { Text("This does not look like a Tailscale address (a *.ts.net name or 100.x.x.x).").foregroundStyle(.orange) }
+                        if kind == .local && !u.isPrivateHost && !u.isTailscaleHost { Text("This is not a local address; pick another connection type if the gateway is elsewhere.").foregroundStyle(.orange) }
+                        if kind == .cloudflare && !u.isTLS { Text("Cloudflare Access needs https.").foregroundStyle(.orange) }
+                        if u.isTailscaleHost { Text("Tailscale must be connected on this iPhone for the test to pass.").foregroundStyle(.secondary) }
                     }
                 }
             }
@@ -91,15 +142,19 @@ struct GatewayFormView: View {
                 }
             }
 
-            Section {
-                TextField("CF-Access-Client-Id", text: $cfClientId).autocorrectionDisabled().textInputAutocapitalization(.never)
-                SecureField("CF-Access-Client-Secret", text: $cfClientSecret)
-            } header: {
-                Text("Cloudflare Access (Advanced, optional)")
-            } footer: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Leave blank if there is no Cloudflare Access in front of your gateway. When both are set they are sent on every request and on the WebSocket handshake. Safari cookies do not carry over to the app.")
-                    if access.isPartiallyConfigured { Text("Enter both the Client ID and the Client Secret, or leave both blank.").foregroundStyle(.red) }
+            if kind == .cloudflare || kind == .other || access.isPartiallyConfigured || !cfClientId.isEmpty {
+                Section {
+                    TextField("CF-Access-Client-Id", text: $cfClientId).autocorrectionDisabled().textInputAutocapitalization(.never)
+                    SecureField("CF-Access-Client-Secret", text: $cfClientSecret)
+                } header: {
+                    Text(kind == .cloudflare ? "Cloudflare Access service token" : "Cloudflare Access (optional)")
+                } footer: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(kind == .cloudflare
+                             ? "From Zero Trust › Access › Service Auth: create a service token and allow it in the application's policy. Both values are sent on every request and on the WebSocket handshake."
+                             : "Leave blank unless Cloudflare Access is in front of your gateway. Safari cookies do not carry over to the app.")
+                        if access.isPartiallyConfigured { Text("Enter both the Client ID and the Client Secret, or leave both blank.").foregroundStyle(.red) }
+                    }
                 }
             }
 
@@ -141,6 +196,7 @@ struct GatewayFormView: View {
             ToolbarItem(placement: .confirmationAction) { Button("Save") { save() }.disabled(!testPassed || name.trimmingCharacters(in: .whitespaces).isEmpty).accessibilityIdentifier("gateway.save") }
         }
         .onChange(of: urlText) { _, _ in invalidate() }
+        .onChange(of: kind) { _, _ in invalidate() }
         .onChange(of: pathPrefix) { _, _ in invalidate() }
         .onChange(of: authMode) { _, _ in invalidate(); Task { await loadProviders() } }
         .onChange(of: sessionToken) { _, _ in invalidate() }
@@ -188,6 +244,7 @@ struct GatewayFormView: View {
         guard let c = existing else { return }
         name = c.name
         urlText = c.gateway.description
+        kind = ConnectionKind(rawValue: c.connectionKind ?? "") ?? (c.hasAccessHeaders ? .cloudflare : c.gateway.isTailscaleHost ? .tailscale : c.gateway.isPrivateHost ? .local : .other)
         authMode = c.authMode
         providerName = c.authProvider ?? ""
         let s = model.store.secrets(for: c.id)
@@ -266,6 +323,7 @@ struct GatewayFormView: View {
                 conn.authMode = authMode
                 conn.authProvider = providerName.isEmpty ? nil : providerName
                 conn.lastVersion = testedVersion
+                conn.connectionKind = kind.rawValue
                 try model.store.upsert(conn, secrets: secrets)
                 if model.runtime?.connection.id == conn.id { await model.deactivate() }
                 onSaved?(conn)

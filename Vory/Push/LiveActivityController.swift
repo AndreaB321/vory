@@ -159,7 +159,7 @@ final class LiveActivityController: TurnActivityReporting {
         if attention, !alertedAttention, UIApplication.shared.applicationState != .active {
             alertedAttention = true
             let botName = handle.activity.attributes.botName ?? chat.profileName
-            handle.alert(state, title: botName, body: "Approval needed — tap to answer")
+            handle.alert(state, title: botName, body: "Approval needed — tap to answer. It waits for you.")
             Self.note("approval alert from the app (background)")
             return
         }

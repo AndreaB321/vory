@@ -29,7 +29,7 @@ struct HermesTurnLiveActivity: Widget {
                     HStack(spacing: 8) {
                         BotMark(attributes: context.attributes, state: context.state, size: 34)
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(context.attributes.displayBotName).font(.headline).lineLimit(1)
+                            Text(context.attributes.displayBotName).font(.headline).lineLimit(1).minimumScaleFactor(0.6).layoutPriority(1)
                             Text(PhaseText.headline(for: context.state)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
@@ -38,7 +38,8 @@ struct HermesTurnLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.trailing) {
                     ElapsedTimer(state: context.state)
                         .font(.headline.monospacedDigit())
-                        .multilineTextAlignment(.trailing).frame(width: 52)
+                        .multilineTextAlignment(.trailing).frame(minWidth: 44)
+                        .fixedSize()
                         .padding(.trailing, 4)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
@@ -58,7 +59,7 @@ struct HermesTurnLiveActivity: Widget {
                 }
             } compactTrailing: {
                 if context.state.needsAttention {
-                    Text("Reply").font(.caption2.weight(.semibold)).foregroundStyle(.orange)
+                    Text("Approve").font(.caption2.weight(.semibold)).foregroundStyle(.yellow)
                 } else {
                     // Ticks while the turn runs; once it ends this is the total time it took.
                     ElapsedTimer(state: context.state).font(.caption2.monospacedDigit())
@@ -67,7 +68,7 @@ struct HermesTurnLiveActivity: Widget {
             } minimal: {
                 PhaseGlyph(phase: context.state.phase, attention: context.state.needsAttention, botHex: context.attributes.tintHex)
             }
-            .keylineTint(context.state.needsAttention ? .orange : PhaseStyle.tint(context.state.phase, bot: context.attributes.tintHex))
+            .keylineTint(context.state.needsAttention ? .yellow : PhaseStyle.tint(context.state.phase, bot: context.attributes.tintHex))
         }
     }
 }
@@ -91,13 +92,13 @@ enum PhaseStyle {
         case "thinking": return .indigo
         case "done": return .green
         case "error": return .red
-        case "waiting": return .orange
+        case "waiting": return .yellow
         default: return .purple
         }
     }
 
     static func symbol(_ phase: String, attention: Bool) -> String {
-        if attention { return "exclamationmark.bubble.fill" }
+        if attention { return "exclamationmark.triangle.fill" }
         switch phase {
         case "tool": return "wrench.and.screwdriver.fill"
         case "thinking": return "brain.fill"
@@ -118,7 +119,7 @@ extension Color {
 
 enum PhaseText {
     static func headline(for s: HermesTurnAttributes.ContentState) -> String {
-        if s.needsAttention { return "Waiting for you" }
+        if s.needsAttention { return "Approval needed" }
         switch s.phase {
         case "tool": return "Running a tool"
         case "thinking": return "Thinking"
@@ -159,8 +160,8 @@ struct PhaseGlyph: View {
     var botHex: String = ""
     var body: some View {
         Image(systemName: PhaseStyle.symbol(phase, attention: attention))
-            .foregroundStyle(attention ? .orange : PhaseStyle.tint(phase, bot: botHex))
-            .symbolEffect(.pulse, isActive: !attention && (phase == "streaming" || phase == "tool" || phase == "thinking"))
+            .foregroundStyle(attention ? .yellow : PhaseStyle.tint(phase, bot: botHex))
+            .symbolEffect(.pulse, isActive: attention || phase == "streaming" || phase == "tool" || phase == "thinking")
     }
 }
 
@@ -195,7 +196,7 @@ struct PhaseBadge: View {
     var size: CGFloat
     var botHex: String = ""
     var body: some View {
-        let tint = attention ? Color.orange : PhaseStyle.tint(phase, bot: botHex)
+        let tint = attention ? Color.yellow : PhaseStyle.tint(phase, bot: botHex)
         ZStack {
             Circle().fill(tint.gradient)
             Image(systemName: PhaseStyle.symbol(phase, attention: attention))
@@ -261,7 +262,7 @@ struct LockScreenTurnView: View {
             HStack(alignment: .center, spacing: 12) {
                 BotMark(attributes: attributes, state: state, size: 44)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(attributes.displayBotName).font(.headline).lineLimit(1)
+                    Text(attributes.displayBotName).font(.headline).lineLimit(1).minimumScaleFactor(0.6).layoutPriority(1)
                     Text(attributes.sessionTitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     Text(state.detail).font(.subheadline).lineLimit(2)
                 }

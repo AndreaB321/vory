@@ -7,9 +7,11 @@ at a time, ship a TestFlight build, wait for their verdict.
 
 ## Where things stand
 
-- **Latest TestFlight build: 1.0.1 (41)**, uploaded 2026-09-26 ~14:05 (31–40 earlier that day). It
-  carries companion **1.0.26** (the approval-cards fix), which the user installs from Settings ›
-  Software Update after the build. Awaiting the user's verdict.
+- **Latest TestFlight build: 1.0.1 (41)**, uploaded 2026-09-26 ~14:05 (31–40 earlier that day),
+  with companion 1.0.26. User verdict on 41: approval cards work; everything else approved apart
+  from the build-42 list below. **Build 42 is built and committed, awaiting the user's "ship it".**
+- **Public beta rule (user, 2026-09-26):** nothing user-specific in notes, setup copy, sample data
+  or docs — no bot names, gateway names or hostnames. Write for strangers.
   Build 39 (shipped on the user's "ship it"): dark-mode icon blue lighter
   (layer `fill-specializations` for dark, light unchanged), cloud 1.21× and up 20 pt, slash-command
   list in the composer, bottom lock in the transcript, glass bots redraw on change, darker glass
@@ -157,6 +159,43 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
   `hermes.text` (≤1200) and `hermes.title`; payload trimmed under Apple's 4 KB.
 
 ## Change log
+
+### 2026-09-26 (build 42, from the build-41 review)
+- **Motion, gentle**: `BotFace.Motion` is now {yaw, roll, dx, dy} — no scale anywhere (breathing
+  removed too). Routines per 5 s block: full 360° turn about the vertical axis (`rotation3DEffect`,
+  eased by `stroke()` = slow–fast–slow), a partial yaw glance, a ±4° head tilt, a 2 % nod, a small
+  lean; the rest of the block is still. Applied as view modifiers in `BotFaceView` (both painted
+  and glass); `draw()` no longer transforms. The finish spin is the same turn. Seed now includes
+  `mood.profile` and offsets the block clock (`seed % 47 * 0.31 s`) so bots never move in unison.
+- Pills: the overlap is measured from the shape's base (`BotFace.baseline(of:)` = bodyPath
+  boundingRect.maxY) so every shape sits the same (Bots page 10 pt, header 9 pt onto the pill).
+- Header status line is `.secondary` (was the bot colour, unreadable).
+- **LA approval state**: yellow keyline/tint, `exclamationmark.triangle.fill` pulsing, compact
+  trailing "Approve", headline "Approval needed"; bot name `.minimumScaleFactor(0.6)` +
+  `.layoutPriority(1)` and the timer column no longer fixed-width (it truncated "defen…"). In-app
+  haptic (`.warning`) when a card arrives in the foreground. The LA already stays while waiting
+  (no message.complete until the card is answered).
+- **Companion copy** (generic): Software Update card/footer and the update rows say
+  notifications + Live Activities + approval cards; Software Update shows an "Install the Vory
+  Companion" link (→ `SetupWizardHost`) when nothing is installed; the Settings first-run card is
+  "Unlock Vory's full potential" and leads to Software Update.
+- **Post-connect prompt** (`RootView` → `CompanionPromptSheet`): once, when `hasConnections`
+  flips false→true (`companionPromptShown`); "Install now" opens the wizard in a sheet and sets
+  `notificationsSetupCardDone = true` (the Settings card never shows); "Later" leaves the card on.
+  DEBUG launch args: `-vory-show-tour`, `-vory-show-companion-prompt`.
+- **Connection types** (`GatewayFormView.ConnectionKind` local/tailscale/cloudflare/other, saved as
+  `GatewayConnection.connectionKind`): a menu picker with a short footer per type, per-type URL
+  placeholder, warnings (Tailscale address check via `GatewayURL.isTailscaleHost` = *.ts.net or
+  100.64/10; local vs public; Cloudflare needs https), the Access section only for Cloudflare/Other.
+  Nothing in the transport changed — Cloudflare Access headers and local http work as before.
+- **Tour** (`Vory/Connect/OnboardingView.swift`): Vory at the top, a typed speech bubble
+  (`TypedBubble`), a 360° on every page (`BotAmbient.turnFinished("vory-tour")`), a squint on the
+  approvals page; per-page demos: `BotsDemo`, `ChatDemo` (typing reply + tool card),
+  `ApprovalDemo` (card slides in, "Once" picked), `IslandDemo` (island + notification),
+  `StudioDemo` (cycling looks), `ConnectDemo` (the four connection types). All copy generic; the
+  sample bot is "Ada".
+- Compose chips wrap (`FlowLayout`); `GroupChats.create` takes the room from `groups.list` (by the
+  returned id, else newest by name) — the real gateway's create response is not the room.
 
 ### 2026-09-26 (build 41, from the build-40 review)
 - **Approval cards — the real cause.** The app's `client.capabilities {server_requests: true}` was

@@ -167,48 +167,63 @@ public enum BotFace {
 
     /// What the body does while the bot works: one routine at a time, each a short burst inside
     /// a five-second block, so a working bot is lively but not frantic. Idle bots keep still.
+    /// What the body does while the bot works: small, in place, never scaled. One routine per
+    /// five-second block, most of the block at rest, so a working bot is lively but calm.
     public struct Motion: Equatable, Sendable {
-        public var rotation: Double = 0   // radians, about the centre
+        public var yaw: Double = 0        // radians about the vertical axis (a 3D turn, like a coin)
+        public var roll: Double = 0       // radians about the centre, in the plane
         public var dx: CGFloat = 0        // horizontal offset as a fraction of the size
         public var dy: CGFloat = 0        // vertical offset as a fraction of the size (negative = up)
-        public var sx: CGFloat = 1
-        public var sy: CGFloat = 1
         public static let still = Motion()
     }
 
     static func smooth(_ x: Double) -> Double { let u = min(1, max(0, x)); return u * u * (3 - 2 * u) }
+    /// Slow start, quick middle, slow stop — a whole turn in one stroke.
+    static func stroke(_ x: Double) -> Double { let u = min(1, max(0, x)); return u * u * u * (u * (u * 6 - 15) + 10) }
 
-    /// A full turn, easing in and out, over 1.1 s from `u` = 0.
-    static func spin(_ u: Double) -> Motion { var m = Motion(); m.rotation = smooth(u / 1.1) * 2 * .pi; return m }
+    /// One 360° turn about the vertical axis over `dur` seconds from `u` = 0.
+    static func turn(_ u: Double, dur: Double = 1.15) -> Motion { var m = Motion(); m.yaw = stroke(u / dur) * 2 * .pi; return m }
 
-    /// `finishedAt`: the turn just ended — one 360° spin, whatever else is going on.
+    /// Bots share the clock but not the phase: `seed` (shape, eyes and profile) offsets each
+    /// one's blocks, so a page of bots never moves in unison.
+    /// `finishedAt`: the turn just ended — one full turn, whatever else is going on.
     public static func motion(time t: Double, seed: Int, active: Bool, finishedAt: Double? = nil) -> Motion {
-        if let f = finishedAt, t - f >= 0, t - f < 1.1 { return spin(t - f) }
+        if let f = finishedAt, t - f >= 0, t - f < 1.15 { return turn(t - f) }
         guard active, t > 0 else { return .still }
         let block = 5.0
-        let tt = t + Double(seed % 11) * 0.7
+        let tt = t + Double(seed % 47) * 0.31
         let index = Int(tt / block)
         let u = tt.truncatingRemainder(dividingBy: block)   // 0…5 within the block
         var m = Motion()
-        switch (index + seed) % 5 {
-        case 1: // a nod: two small dips
-            guard u < 0.9 else { break }
-            m.dy = 0.035 * CGFloat(abs(sin(u / 0.9 * 2 * .pi))) * CGFloat(1 - smooth((u - 0.6) / 0.3))
-        case 2: // one full spin
+        switch (index &+ seed) % 6 {
+        case 1: // a full turn on the spot
+            guard u < 1.15 else { break }
+            m = turn(u)
+        case 2: // a glance to one side and back: a partial turn
+            guard u < 1.0 else { break }
+            m.yaw = 0.45 * sin(u / 1.0 * .pi) * (seed % 2 == 0 ? 1 : -1)
+        case 3: // a small tilt of the head, once each way
             guard u < 1.1 else { break }
-            m = spin(u)
-        case 3: // a wiggle: a few small tilts, fading out
-            guard u < 1.2 else { break }
-            m.rotation = 0.11 * sin(u * 2 * .pi * 2.2) * (1 - smooth((u - 0.5) / 0.7))
-        case 4: // a lean to one side and back
+            m.roll = 0.07 * sin(u / 1.1 * 2 * .pi) * (1 - smooth((u - 0.7) / 0.4))
+        case 4: // a nod: two tiny dips
             guard u < 0.8 else { break }
-            let e = sin(u / 0.8 * .pi)
-            m.rotation = 0.09 * e * (seed % 2 == 0 ? 1 : -1)
-            m.dx = 0.02 * CGFloat(e) * (seed % 2 == 0 ? 1 : -1)
-        default: // a rest block: breathing only
+            m.dy = 0.02 * CGFloat(abs(sin(u / 0.8 * 2 * .pi)))
+        case 5: // a lean: a few degrees and a point sideways, then back
+            guard u < 0.9 else { break }
+            let e = sin(u / 0.9 * .pi)
+            m.roll = 0.06 * e * (seed % 2 == 0 ? 1 : -1)
+            m.dx = 0.012 * CGFloat(e) * (seed % 2 == 0 ? 1 : -1)
+        default: // rest
             break
         }
         return m
+    }
+
+    /// Where the shape's bottom edge is, as a fraction of the square (1 = the very bottom), so a
+    /// bot can sit on a surface by its actual base rather than its frame.
+    public static func baseline(of shape: String) -> CGFloat {
+        let box = CGRect(x: 0, y: 0, width: 100, height: 100)
+        return bodyPath(shape, in: box, time: 0, active: false).boundingRect.maxY / 100
     }
 
     /// Whether the eyes have something to do around `t` (a blink or a glance): idle bots only
@@ -248,13 +263,7 @@ public enum BotFace {
         let live = liveliness(time: (active || idleEyes) ? t : 0, seed: seed)
         let tint = Color(botHex: spec.hex) ?? Color(red: 0.49, green: 0.36, blue: 1)
 
-        let m = move ? motion(time: t, seed: seed, active: active, finishedAt: finishedAt) : .still
-        if m != .still {
-            ctx.translateBy(x: size.width / 2 + m.dx * s, y: size.height / 2 + m.dy * s)
-            ctx.rotate(by: .radians(m.rotation))
-            ctx.scaleBy(x: m.sx, y: m.sy)
-            ctx.translateBy(x: -size.width / 2, y: -size.height / 2)
-        }
+        _ = move; _ = finishedAt   // body motion is applied by BotFaceView (a 3D turn needs a view)
         // Breathing: a whisper of squash and stretch about the bottom while working.
         if active && breathe {
             let sy = 1 + 0.025 * (live.breath - 0.5)
@@ -449,7 +458,10 @@ public struct BotFaceView: View {
     @State private var spinTick = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var ambient: BotAmbient { BotAmbient.shared }
-    private var seed: Int { spec.shape.utf8.reduce(0) { $0 + Int($1) } + spec.eyes.utf8.reduce(0) { $0 + Int($1) } }
+    private var seed: Int {
+        spec.shape.utf8.reduce(0) { $0 + Int($1) } + spec.eyes.utf8.reduce(0) { $0 + Int($1) }
+            + (mood.profile ?? "").utf8.reduce(0) { $0 &* 31 &+ Int($1) }
+    }
 
     /// Paint the glass finish even in the app (for offscreen renders such as menu icons).
     public var drawn: Bool
@@ -489,10 +501,8 @@ public struct BotFaceView: View {
     /// The glass bot as the icon is built: the body a tinted piece of glass, the eyes a darker
     /// piece in front, each in its own container (in one container they would merge into a
     /// single shape). Sleepy lids are strokes, so they stay painted.
-    @ViewBuilder private func liveGlass(time t: Double, gaze g: CGPoint, glanceFree: Bool, finishedAt: Double?) -> some View {
+    @ViewBuilder private func liveGlass(time t: Double, gaze g: CGPoint, glanceFree: Bool) -> some View {
         let tint = Color(botHex: spec.hex) ?? Color(red: 0.49, green: 0.36, blue: 1)
-        let sy = BotFace.breathScale(time: t, active: active, spec: spec)
-        let m = reduceMotion ? BotFace.Motion.still : BotFace.motion(time: t, seed: seed, active: active, finishedAt: finishedAt)
         ZStack {
             // The colour itself under the glass: tinted glass alone reads dark on a light
             // background (a sky-blue bot came out navy), so the hue is laid down first and the
@@ -514,10 +524,6 @@ public struct BotFaceView: View {
                 }
             }
         }
-        .scaleEffect(x: 1 / sy, y: sy, anchor: UnitPoint(x: 0.5, y: 0.96))
-        .scaleEffect(x: m.sx, y: m.sy)
-        .rotationEffect(.radians(m.rotation))
-        .offset(x: m.dx * size, y: m.dy * size)
     }
 
     public var body: some View {
@@ -535,13 +541,21 @@ public struct BotFaceView: View {
             let ease = u * u * (3 - 2 * u)
             let g0 = CGPoint(x: gazeFrom.x + (gaze.x - gazeFrom.x) * ease, y: gazeFrom.y + (gaze.y - gazeFrom.y) * ease)
             let g = CGPoint(x: max(-1, min(1, g0.x + ambientGaze.x)), y: max(-1, min(1, g0.y + ambientGaze.y)))
-            if spec.isGlass && BotFace.liveGlass && !drawn && scenePhase == .active {
-                liveGlass(time: t, gaze: g, glanceFree: !held, finishedAt: finished)
-            } else {
-                Canvas(opaque: false, rendersAsynchronously: false) { ctx, sz in
-                    BotFace.draw(spec, in: &ctx, size: sz, time: t, active: active, gaze: g, idleEyes: !drawn, move: !reduceMotion, strain: mood.thinking, glanceFree: !held, finishedAt: reduceMotion ? nil : finished)
+            let m = (reduceMotion || drawn) ? BotFace.Motion.still : BotFace.motion(time: t, seed: seed, active: active, finishedAt: finished)
+            Group {
+                if spec.isGlass && BotFace.liveGlass && !drawn && scenePhase == .active {
+                    liveGlass(time: t, gaze: g, glanceFree: !held)
+                } else {
+                    Canvas(opaque: false, rendersAsynchronously: false) { ctx, sz in
+                        BotFace.draw(spec, in: &ctx, size: sz, time: t, active: active, gaze: g, breathe: false, idleEyes: !drawn, move: false, strain: mood.thinking, glanceFree: !held)
+                    }
                 }
             }
+            // The routines: a turn about the vertical axis (3D, on the spot), a small tilt, a
+            // tiny nod or lean. Nothing scales and nothing leaves the bot's footprint.
+            .rotation3DEffect(.radians(m.yaw), axis: (x: 0, y: 1, z: 0), perspective: 0.6)
+            .rotationEffect(.radians(m.roll))
+            .offset(x: m.dx * size, y: m.dy * size)
         }
         .animation(.interactiveSpring(response: 0.3), value: ambientGaze)
         // The bot leans with the phone: a few degrees, about the centre.

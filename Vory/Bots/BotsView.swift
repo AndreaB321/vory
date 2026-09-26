@@ -90,10 +90,18 @@ struct BotCard: View {
     var working: Bool
 
     private var ambient: BotAmbient { BotAmbient.shared }
+    @AppStorage(BotAvatarStore.storageKey) private var avatarsRaw = ""
+    @AppStorage(BotAvatarStore.glassAllKey) private var glassAll = false
+    /// Every shape ends at a different height (a pill well above the frame, a blob near its
+    /// bottom); the overlap is measured from the shape's real base so each bot sits the same.
+    private var overlap: CGFloat {
+        let shape = BotAvatarStore.choice(for: profile.name).spec(hex: "").shape
+        return 10 - 78 * (1 - BotFace.baseline(of: shape))
+    }
 
     var body: some View {
-        VStack(spacing: -10) {
-            // The bot sits on the pill, a few points over its top edge.
+        VStack(spacing: -overlap) {
+            // The bot sits on the pill, its base a few points over the top edge.
             // Plays while the page scrolls (random per bot), settles when it stops.
             BotAvatar(profile: profile.name, size: 78, active: working || (ambient.scrolling && ambient.enabled),
                       mood: BotFaceView.Mood(profile: profile.name, followsTilt: true))
@@ -144,11 +152,13 @@ enum GroupChats {
     static func create(runtime: GatewayRuntime, name: String, profiles: [ProfileInfo]) async throws -> Room {
         let list: [JSONValue] = profiles.map { .object(["member_id": .string($0.name), "handle": .string($0.name), "profile": .string($0.name), "display_name": .string($0.label)]) }
         let r = try await runtime.rpc("groups.create", ["name": .string(name), "members": .array(list)])
-        if let room: Room = try? r.decode() { return room }
-        if let room: Room = try? (r["room"] ?? .null).decode() { return room }
-        // The gateway answered with less than a room; list and find it by name.
-        let all: GroupsListResult = try await runtime.rpc("groups.list", ["limit": 50]).decode()
-        guard let room = all.rooms.filter({ $0.name == name }).max(by: { $0.updatedAt < $1.updatedAt }) else { throw HermesAPIError.transport("The group chat was not created.") }
+        // Gateways answer in different shapes (the room, {room}, or an id only); the room list is
+        // the one source that always has the full record, so the new room is taken from there.
+        let createdID = r["room_id"]?.stringValue ?? r["room"]?["room_id"]?.stringValue ?? r["id"]?.stringValue
+        let all: GroupsListResult = try await runtime.rpc("groups.list", ["limit": 100]).decode()
+        let room = all.rooms.first { $0.roomId == createdID && !$0.roomId.isEmpty }
+            ?? all.rooms.filter { $0.name == name && $0.disbandedAt == nil }.max { $0.updatedAt < $1.updatedAt }
+        guard let room, !room.roomId.isEmpty else { throw HermesAPIError.transport("The gateway created the group chat but did not list it.") }
         return room
     }
 }

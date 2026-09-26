@@ -482,7 +482,7 @@ struct CompanionUpdateRows: View {
                     Text("Vory Companion \(version)").font(.headline)
                     Text("Vorantx · \(sizeText)").font(.subheadline).foregroundStyle(.secondary)
                     if !setup.updating, setup.updateOutcome == nil, !setup.updateNeedsRestart {
-                        Text("Delivers Live Activity alerts through the Island, picks up config changes without a restart, and reports its health to this app.")
+                        Text("Sends replies as notifications, keeps the Live Activity up to date, and brings approval cards to your phone the moment a bot needs a yes.")
                             .font(.footnote).foregroundStyle(.secondary).padding(.top, 2)
                         if setup.runningCanSelfReload {
                             Label("Installs in place — no Gateway restart.", systemImage: "checkmark.circle")

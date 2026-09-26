@@ -74,6 +74,14 @@ public struct GatewayURL: Hashable, Codable, Sendable, CustomStringConvertible {
     public var description: String { base.absoluteString }
 
     /// Whether the host is on a private network (RFC 1918, link-local, loopback, .local, or an unqualified name).
+    /// A Tailscale address: a MagicDNS name (*.ts.net) or the 100.64.0.0/10 range.
+    public var isTailscaleHost: Bool {
+        let h = host
+        if h.hasSuffix(".ts.net") { return true }
+        let parts = h.split(separator: ".").compactMap { Int($0) }
+        return parts.count == 4 && parts[0] == 100 && (64...127).contains(parts[1])
+    }
+
     public var isPrivateHost: Bool {
         let h = host
         if h == "localhost" || h.hasSuffix(".local") || !h.contains(".") { return true }

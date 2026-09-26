@@ -44,31 +44,27 @@ struct NewChatSheet: View {
             }
             .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 10)
 
-            // To: the chosen bots as chips, then the search text.
-            HStack(alignment: .center, spacing: 8) {
-                Text("To:").foregroundStyle(.secondary)
-                ScrollView(.horizontal, showsIndicators: false) {
-                  HStack(spacing: 6) {
-                        ForEach(chosen) { p in
-                            HStack(spacing: 5) {
-                                BotAvatar(profile: p.name, size: 20)
-                                Text(p.label).font(.subheadline).lineLimit(1).fixedSize()
-                            }
-                            .padding(.leading, 4).padding(.trailing, 10).padding(.vertical, 4)
-                            .background(Color.accentColor.opacity(0.15), in: .capsule)
-                            .onTapGesture { remove(p) }
-                            .accessibilityLabel("\(p.label), tap to remove")
+            // To: the chosen bots as chips that wrap onto more lines, then the search text.
+            HStack(alignment: .top, spacing: 8) {
+                Text("To:").foregroundStyle(.secondary).padding(.top, 4)
+                FlowLayout(spacing: 6) {
+                    ForEach(chosen) { p in
+                        HStack(spacing: 5) {
+                            BotAvatar(profile: p.name, size: 20)
+                            Text(p.label).font(.subheadline).lineLimit(1)
                         }
-                        TextField(chosen.isEmpty ? "Bot name" : "", text: $query)
-                            .focused($focus, equals: .to)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .frame(minWidth: 60, maxWidth: .infinity)
-                            .onSubmit { if let first = candidates.first { add(first) } }
-                            .onKeyPress(.delete) { if query.isEmpty, let last = chosen.last { remove(last); return .handled }; return .ignored }
-                  }
+                        .padding(.leading, 4).padding(.trailing, 10).padding(.vertical, 4)
+                        .background(Color.accentColor.opacity(0.15), in: .capsule)
+                        .onTapGesture { remove(p) }
+                        .accessibilityLabel("\(p.label), tap to remove")
+                    }
+                    TextField(chosen.isEmpty ? "Bot name" : "", text: $query)
+                        .focused($focus, equals: .to)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .frame(minWidth: 90, minHeight: 28)
+                        .onSubmit { if let first = candidates.first { add(first) } }
+                        .onKeyPress(.delete) { if query.isEmpty, let last = chosen.last { remove(last); return .handled }; return .ignored }
                 }
-                .frame(height: 30)
-                .defaultScrollAnchor(.trailing)
                 Button { focus = .to } label: {
                     Image(systemName: "plus").font(.body.weight(.semibold))
                         .frame(width: 32, height: 32).glassEffect(.regular.interactive(), in: .circle)

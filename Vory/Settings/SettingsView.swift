@@ -46,12 +46,12 @@ struct SettingsView: View {
             List {
                 if search.isEmpty, !setupCardDone, model.runtime != nil, model.push.registeredAt == nil {
                     Section {
-                        NavigationLink { SetupWizardHost() } label: {
+                        NavigationLink { SoftwareUpdateView() } label: {
                             HStack(spacing: 12) {
                                 BotFaceView(spec: AboutView.voryBot, size: 46, active: true)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text("Set up notifications").font(.headline)
-                                    Text("Replies, approvals and Live Activities while Vory is closed.").font(.caption).foregroundStyle(.secondary)
+                                    Text("Unlock Vory's full potential").font(.headline)
+                                    Text("Install the Companion for notifications, Live Activities and approval cards.").font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
                                 Button { withAnimation(.snappy) { setupCardDone = true } } label: {
@@ -158,7 +158,7 @@ struct GatewaysView: View {
                                     Text(c.gateway.description).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                     // One line of text, not three columns: side by side the parts
                                     // each wrapped on their own.
-                                    Text(([c.authMode.title] + (c.hasAccessHeaders ? ["Cloudflare Access"] : []) + (c.lastVersion.map { ["Hermes \($0)"] } ?? [])).joined(separator: "  ·  "))
+                                    Text(([GatewayFormView.ConnectionKind(rawValue: c.connectionKind ?? "")?.title, c.authMode.title, c.hasAccessHeaders && c.connectionKind != "cloudflare" ? "Cloudflare Access" : nil, c.lastVersion.map { "Hermes \($0)" }].compactMap { $0 }).joined(separator: "  ·  "))
                                         .font(.caption2).foregroundStyle(.tertiary).lineLimit(2)
                                 }
                             }
@@ -586,7 +586,15 @@ struct SoftwareUpdateView: View {
                     if setup.companionCheckedAt == nil {
                         Label { Text("Checking for updates…") } icon: { ProgressView() }.foregroundStyle(.secondary)
                     } else if setup.installedVersion == nil {
-                        Label("The companion is not installed yet. Set up notifications first.", systemImage: "info.circle").foregroundStyle(.secondary)
+                        NavigationLink { SetupWizardHost() } label: {
+                            HStack(spacing: 12) {
+                                BotFaceView(spec: AboutView.voryBot, size: 44, active: true)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Install the Vory Companion").font(.headline)
+                                    Text("Unlocks notifications, Live Activities and approval cards while Vory is closed.").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
                     } else if setup.updateAvailable || setup.updating || setup.showUpdateConsole || setup.updateOutcome != nil {
                         CompanionUpdateRows(setup: setup, runtime: rt)
                     } else {
@@ -598,7 +606,7 @@ struct SoftwareUpdateView: View {
                         .frame(maxWidth: .infinity).padding(.vertical, 10)
                     }
                 } header: { sectionHeader("Vory Companion") } footer: {
-                    Text("The plugin on your gateway that delivers notifications and Live Activity updates. Installs in place; no restart unless it says so.")
+                    Text("A small plugin on your gateway. It sends replies as notifications, keeps the Live Activity up to date, and gets approval cards to your phone the moment a bot needs a yes. Installs in place; no restart unless it says so.")
                 }
                 Section {
                     LabeledContent("On the gateway", value: setup.installedVersion.map { "v\($0)" } ?? "—")
