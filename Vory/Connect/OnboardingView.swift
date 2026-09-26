@@ -371,8 +371,6 @@ private struct StudioDemo: View {
     var body: some View {
         VStack(spacing: 16) {
             BotFaceView(spec: BotLookSpec(shape: shape, eyes: eyes, hex: hex, finish: "glass"), size: 104, active: false, mood: BotFaceView.Mood(profile: "tour-studio"))
-                .id("\(shape)-\(eyes)-\(hex)")
-                .transition(.scale(scale: 0.8).combined(with: .opacity))
             HStack(spacing: 10) {
                 ForEach(shapes, id: \.self) { s in
                     BotFaceView(spec: BotLookSpec(shape: s, eyes: "classic", hex: hex), size: 30, active: false, drawn: true)

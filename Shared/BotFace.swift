@@ -512,6 +512,8 @@ public struct BotFaceView: View {
             GlassEffectContainer {
                 Color.clear
                     .glassEffect(.regular.tint(tint.opacity(colorScheme == .light ? 0.45 : 0.72)), in: BotBodyShape(spec: spec, time: t, active: active))
+                    // No materialize bloom when a glass bot appears or changes look.
+                    .glassEffectTransition(.identity)
             }
             if spec.eyes == "sleepy" {
                 Canvas(opaque: false, rendersAsynchronously: false) { ctx, sz in
@@ -521,6 +523,7 @@ public struct BotFaceView: View {
                 GlassEffectContainer {
                     Color.clear
                         .glassEffect(.clear.tint(BotFace.ink.opacity(0.92)), in: BotEyesShape(spec: spec, time: t, active: true, gaze: g, strain: mood.thinking, glanceFree: glanceFree))
+                        .glassEffectTransition(.identity)
                 }
             }
         }
@@ -582,8 +585,13 @@ public struct BotFaceView: View {
         }
         .frame(width: size, height: size)
         // A paused TimelineView does not redraw for a changed spec (a bot switched to glass kept
-        // its painted look until something else re-created the row); a new identity does.
-        .id(spec)
+        // its painted look until something else re-created the row): un-pause it for a moment.
+        // Not a new identity — re-creating a glass view makes it "materialize" (bloom in), which
+        // is exactly the pop the studio must not do on every tap.
+        .onChange(of: spec) { _, _ in
+            eyesBusy = true
+            Task { try? await Task.sleep(for: .milliseconds(350)); eyesBusy = false }
+        }
         .accessibilityHidden(true)
     }
 }

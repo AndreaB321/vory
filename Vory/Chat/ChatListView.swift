@@ -123,7 +123,8 @@ struct ChatListView: View {
         } label: {
             // A fixed-size avatar: a text label changed width with each profile name and the bar
             // visibly jumped as it re-laid out.
-            BotAvatar(profile: runtime?.selectedProfile ?? "?", size: 26)
+            // Painted, not glass: this sits on the toolbar's own glass button.
+            BotAvatar(profile: runtime?.selectedProfile ?? "?", size: 26, drawn: true)
                 .accessibilityLabel("Profile: \(runtime?.selectedProfile ?? "none")")
         }
         .id("\(botColorsRaw)|\(botAvatarsRaw)|\(glassAll)")

@@ -72,6 +72,9 @@ struct BotAvatar: View {
     var override: BotAvatarChoice? = nil
     /// Thinking squint, finish spin (by profile), tilt-following eyes.
     var mood: BotFaceView.Mood = BotFaceView.Mood()
+    /// Paint the glass finish instead of using real glass: for a bot inside another glass
+    /// surface (a toolbar button), where glass on glass goes murky.
+    var drawn = false
     @AppStorage(BotColors.storageKey) private var raw = ""
     @AppStorage(BotAvatarStore.storageKey) private var avatarsRaw = ""
     @AppStorage(BotAvatarStore.glassAllKey) private var glassAll = false
@@ -97,7 +100,7 @@ struct BotAvatar: View {
             if choice == .photo, let image = BotAvatarStore.photo(for: profile) {
                 Image(uiImage: image).resizable().scaledToFill().frame(width: size, height: size).clipShape(Circle())
             } else {
-                BotFaceView(spec: choice.spec(hex: hex), size: size, active: active, mood: effectiveMood)
+                BotFaceView(spec: choice.spec(hex: hex), size: size, active: active, drawn: drawn, mood: effectiveMood)
             }
         }
         .frame(width: size, height: size)

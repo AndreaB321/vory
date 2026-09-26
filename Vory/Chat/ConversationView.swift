@@ -205,7 +205,6 @@ struct ChatHeader: View {
                     // small on the first appearance.
                     BotAvatar(profile: chat.profileName, size: 52, active: chat.isRunning,
                               mood: BotFaceView.Mood(thinking: chat.isRunning && (chat.statusLine ?? "Thinking…") == "Thinking…"))
-                        .scaleEffect(popped ? 1 : 0.3)
                         .opacity(popped ? 1 : 0)
                         .zIndex(1)
                     VStack(spacing: 1) {
@@ -227,7 +226,7 @@ struct ChatHeader: View {
                 }
             }
             .buttonStyle(.plain)
-            .onAppear { withAnimation(.spring(response: 0.5, dampingFraction: 0.55).delay(0.05)) { popped = true } }
+            .onAppear { withAnimation(.easeOut(duration: 0.25).delay(0.05)) { popped = true } }
             .accessibilityLabel("Chat info: \(chat.title), \(chat.subtitle)")
             .accessibilityIdentifier("chat.titlePill")
             Spacer(minLength: 0)
