@@ -219,6 +219,15 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
   allowed) shows the bot once, the others keep a 28 pt margin. Toggle "Bot beside replies"
   (`chat.showBots`, on) in Appearance and the chat's display sheet.
 - **Group chat empty state**: the room's bots overlapped + names + "Say something to the group".
+- **Attachment cards** (`Vory/Chat/StagedCard.swift`, modelled on Grok's composer): 92 pt rounded
+  card with the photo, or the document's first page from `QLThumbnailGenerator` (PDF, text, video
+  frame) inset on the card; a glass pill along the bottom edge names the kind (Image / PDF / Audio /
+  Video / Text / EXT); a black × on the top corner removes it; tap → Quick Look.
+- **Long text → file**: `ComposerView.onChange(of: text)` — at 800+ characters (a paste lands in
+  one jump, typing crosses the line once) a glass strip appears above the field: "That's a lot of
+  text." Keep / Attach as file. Attach writes the text to `<first line>.txt`, stages it as
+  `.file` (uploads via `file.attach` as text/plain) and clears the field. Keep holds until the
+  text shrinks under the limit again.
 - **HOLD**: the user wants the bot animations reworked before build 44 ships — they are
   collecting ideas from another model using `scratchpad/vory-bots-brief.md` (a copy is in
   `docs/bots-brief.md`). Do not upload until they say "ship it".

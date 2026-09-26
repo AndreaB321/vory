@@ -21,10 +21,24 @@ struct ComposerView: View {
     @State private var catalog: CommandsCatalog?
     @State private var dictation = DictationController()
     @State private var stagedPreview: URL?
+    /// Shown after a paste that dropped a lot of text into the field.
+    @State private var longTextOffer = false
     /// Re-created after a send: with a pending autocorrect suggestion the vertical TextField keeps
     /// drawing the old text even though the binding is empty; a fresh identity forces the redraw.
     @State private var fieldID = UUID()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The field's text becomes a staged text file and the field is cleared.
+    private func attachTextAsFile() {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, let data = t.data(using: .utf8) else { return }
+        let firstLine = t.split(whereSeparator: \.isNewline).first.map(String.init) ?? "Pasted text"
+        let stem = String(firstLine.prefix(32)).components(separatedBy: CharacterSet.alphanumerics.union(.whitespaces).inverted).joined()
+            .trimmingCharacters(in: .whitespaces)
+        chat.stageAttachment(data: data, name: (stem.isEmpty ? "Pasted text" : stem) + ".txt", kind: .file)
+        withAnimation(.snappy) { longTextOffer = false; text = "" }
+        fieldID = UUID()
+    }
 
     /// Every command the gateway lists, narrowed by what follows the "/" (a bare "/" shows all).
     private var slashSuggestions: [(name: String, description: String)] {
@@ -72,35 +86,30 @@ struct ComposerView: View {
                 // In place, not sliding up from under the keyboard.
                 .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
             }
+            if longTextOffer {
+                // A big paste: offer to send it as a file rather than a wall of text.
+                HStack(spacing: 10) {
+                    Image(systemName: "doc.text").foregroundStyle(.secondary)
+                    Text("That's a lot of text.").font(.subheadline)
+                    Spacer(minLength: 0)
+                    Button("Keep") { withAnimation(.snappy) { longTextOffer = false } }.font(.subheadline)
+                    Button("Attach as file") { attachTextAsFile() }.font(.subheadline.weight(.semibold)).buttonStyle(.glassProminent)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .glassEffect(.regular, in: .rect(cornerRadius: 16))
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
             if !chat.staged.isEmpty {
-                // Photos as thumbnails you can tap to look at before sending; other files as chips.
+                // Cards with a real preview of each file, the kind on a pill, × on the corner.
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
                         ForEach(chat.staged) { a in
-                            ZStack(alignment: .topTrailing) {
-                                Button { stagedPreview = a.localURL } label: {
-                                    if a.kind == .image, let u = a.localURL, let img = UIImage(contentsOfFile: u.path) {
-                                        Image(uiImage: img).resizable().scaledToFill().frame(width: 64, height: 64).clipShape(.rect(cornerRadius: 12))
-                                    } else {
-                                        HStack(spacing: 4) {
-                                            Image(systemName: a.kind == .pdf ? "doc.richtext" : a.kind == .audio ? "waveform" : a.kind == .video ? "video" : "doc")
-                                            Text(a.name).lineLimit(1).font(.caption)
-                                        }
-                                        .padding(.horizontal, 10).padding(.vertical, 6)
-                                        .glassEffect(.regular, in: .capsule)
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                                Button { chat.removeStaged(a.id) } label: {
-                                    Image(systemName: "xmark.circle.fill").font(.body).foregroundStyle(.white, .black.opacity(0.55))
-                                }
-                                .buttonStyle(.plain)
-                                .offset(x: 6, y: -6)
-                                .accessibilityLabel("Remove \(a.name)")
-                            }
+                            StagedCard(attachment: a, onOpen: { stagedPreview = a.localURL },
+                                       onRemove: { withAnimation(.snappy) { chat.removeStaged(a.id) } })
+                                .transition(.scale(scale: 0.9).combined(with: .opacity))
                         }
                     }
-                    .padding(.top, 6).padding(.trailing, 6)
+                    .padding(.leading, 2)
                 }
                 .quickLookPreview($stagedPreview)
             }
@@ -120,6 +129,13 @@ struct ComposerView: View {
                         .onKeyPress(.downArrow) { recallHistory(1) ? .handled : .ignored }
                         .onSubmit { Task { await send() } }
                         .task { catalog = await chat.commandsCatalog() }
+                        .onChange(of: text) { old, new in
+                            // Offered once as the text gets long (a paste lands in one jump;
+                            // typing crosses the line once); "Keep" holds until it shrinks again.
+                            let limit = 800
+                            if new.count >= limit, old.count < limit || new.count - old.count > 400 { withAnimation(.snappy) { longTextOffer = true } }
+                            else if new.count < limit { longTextOffer = false }
+                        }
                     trailingControl
                         .padding(.trailing, 4).padding(.bottom, 4)
                 }
