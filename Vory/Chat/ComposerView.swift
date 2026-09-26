@@ -105,7 +105,9 @@ struct ComposerView: View {
                         .padding(.trailing, 4).padding(.bottom, 4)
                 }
                 .frame(minHeight: 36)
-                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 18))
+                // Plain glass, not interactive: an interactive capsule answers touches itself,
+                // and on the phone that swallowed the taps meant for the text field's Paste menu.
+                .glassEffect(.regular, in: .rect(cornerRadius: 18))
                 .glassEffectID("dock", in: namespace)
             }
             if chat.isRunning, !text.isEmpty {

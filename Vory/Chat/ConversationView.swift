@@ -109,6 +109,9 @@ struct BottomDock: View {
     var namespace: Namespace.ID
 
     var body: some View {
+        // The container is what lets the composer morph into a card; menus presented from
+        // inside it (the + button) did not take taps on the phone, so the container only wraps
+        // what morphs, and the composer draws its own glass.
         GlassEffectContainer(spacing: 12) {
             VStack(spacing: 10) {
                 if let banner = chat.banner {

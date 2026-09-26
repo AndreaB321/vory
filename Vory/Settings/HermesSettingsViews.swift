@@ -571,7 +571,9 @@ enum CronSchedule {
     }
 }
 
-/// One job: what it does and when, editable; run it now, pause or delete it.
+/// One job as a form: the fields of its JSON as native controls (name, on/off, a schedule built
+/// from pickers with the cron line kept in step, the prompt, delivery, profile), and under them
+/// the raw JSON in an editor for anything the form does not cover. Both save to the same job.
 struct CronJobDetailView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -581,35 +583,92 @@ struct CronJobDetailView: View {
     @State private var name = ""
     @State private var schedule = ""
     @State private var prompt = ""
+    @State private var deliver = ""
+    @State private var enabled = true
+    @State private var rawText = ""
+    @State private var rawError: String?
     @State private var loaded = false
     @State private var status: String?
+    @State private var showRaw = false
+    // Schedule pickers
+    @State private var repeatKind = "daily"      // daily, weekdays, weekends, weekly, monthly, custom
+    @State private var weekday = 1               // 0 = Sunday
+    @State private var monthDay = 1
+    @State private var time = Calendar.current.date(from: DateComponents(hour: 9, minute: 0)) ?? Date()
 
     private var rt: GatewayRuntime? { model.runtime }
-    private var dirty: Bool { name != (job.name ?? "") || schedule != (job.schedule ?? "") || prompt != (job.prompt ?? raw["prompt"]?.stringValue ?? "") }
+    private var original: (name: String, schedule: String, prompt: String, deliver: String, enabled: Bool) {
+        (job.name ?? "", job.schedule ?? "", job.prompt ?? raw["prompt"]?.stringValue ?? "", job.deliver ?? raw["deliver"]?.stringValue ?? "",
+         !(job.enabled == false || job.state == "paused"))
+    }
+    private var dirty: Bool {
+        name != original.name || schedule != original.schedule || prompt != original.prompt || deliver != original.deliver || enabled != original.enabled || rawDirty
+    }
+    private var rawDirty: Bool { rawText != Self.pretty(raw) }
+    private var deliverOptions: [String] { Array(Set(["local", "telegram", "discord", "slack", "email", deliver].filter { !$0.isEmpty })).sorted() }
 
     var body: some View {
         List {
             Section {
                 TextField("Name", text: $name)
-                TextField("Schedule (cron: min hour day month weekday)", text: $schedule).font(.body.monospaced()).autocorrectionDisabled().textInputAutocapitalization(.never)
+                Toggle("Enabled", isOn: $enabled)
+            } header: { Text("Task") }
+            Section {
+                Picker("Repeats", selection: $repeatKind) {
+                    Text("Every day").tag("daily")
+                    Text("Weekdays").tag("weekdays")
+                    Text("Weekends").tag("weekends")
+                    Text("Weekly").tag("weekly")
+                    Text("Monthly").tag("monthly")
+                    Text("Custom cron").tag("custom")
+                }
+                if repeatKind == "weekly" {
+                    Picker("Day", selection: $weekday) {
+                        ForEach(0..<7, id: \.self) { Text(Calendar.current.weekdaySymbols[$0]).tag($0) }
+                    }
+                }
+                if repeatKind == "monthly" {
+                    Picker("Day of month", selection: $monthDay) { ForEach(1...28, id: \.self) { Text("\($0)").tag($0) } }
+                }
+                if repeatKind != "custom" {
+                    DatePicker("Time", selection: $time, displayedComponents: .hourAndMinute)
+                } else {
+                    TextField("min hour day month weekday", text: $schedule).font(.body.monospaced()).autocorrectionDisabled().textInputAutocapitalization(.never)
+                }
+                LabeledContent("Cron") { Text(schedule).font(.caption.monospaced()).foregroundStyle(.secondary) }
                 Text(CronSchedule.describe(schedule)).font(.caption).foregroundStyle(.secondary)
-            } header: { Text("When") }
+            } header: { Text("When") } footer: { Text("Times are in the gateway machine's time zone.") }
+            .onChange(of: repeatKind) { _, _ in rebuildSchedule() }
+            .onChange(of: weekday) { _, _ in rebuildSchedule() }
+            .onChange(of: monthDay) { _, _ in rebuildSchedule() }
+            .onChange(of: time) { _, _ in rebuildSchedule() }
             Section {
                 TextEditor(text: $prompt).frame(minHeight: 120).font(.body)
             } header: { Text("What it does") } footer: { Text("The prompt the agent runs on schedule.") }
             Section {
+                Picker("Delivers to", selection: $deliver) {
+                    ForEach(deliverOptions, id: \.self) { Text($0).tag($0) }
+                }
+                if let p = raw["profile"]?.stringValue { LabeledContent("Bot", value: model.runtime?.profiles.first { $0.name == p }?.label ?? p) }
                 LabeledContent("Status", value: job.state ?? (job.enabled == false ? "paused" : "active"))
-                if let d = job.deliver ?? raw["deliver"]?.stringValue { LabeledContent("Delivers to", value: d) }
-                if let p = raw["profile"]?.stringValue { LabeledContent("Profile", value: p) }
-                if let l = job.lastRunAt { LabeledContent("Last run", value: l) }
+                if let n = job.nextRunAt, let d = ISO8601DateFormatter().date(from: n) { LabeledContent("Next run", value: d.formatted(date: .abbreviated, time: .shortened)) }
+                if let l = job.lastRunAt, let d = ISO8601DateFormatter().date(from: l) { LabeledContent("Last run", value: d.formatted(date: .abbreviated, time: .shortened)) }
                 if let s = job.lastStatus { LabeledContent("Last result", value: s) }
-            }
+            } header: { Text("Details") }
+            Section {
+                DisclosureGroup(isExpanded: $showRaw) {
+                    TextEditor(text: $rawText)
+                        .font(.caption.monospaced())
+                        .autocorrectionDisabled().textInputAutocapitalization(.never)
+                        .frame(minHeight: 220)
+                    if let rawError { Text(rawError).font(.caption).foregroundStyle(.red) }
+                } label: {
+                    Label("Raw JSON", systemImage: "curlybraces")
+                }
+            } footer: { Text("Everything the gateway holds for this task. Edit here for fields the form does not show; the form and the JSON save to the same task.") }
             Section {
                 Button { Task { await act("trigger") } } label: { Label("Run now", systemImage: "play.circle") }
-                Button { Task { await act(job.enabled == false || job.state == "paused" ? "resume" : "pause") } } label: {
-                    Label(job.enabled == false || job.state == "paused" ? "Resume" : "Pause", systemImage: job.enabled == false || job.state == "paused" ? "play" : "pause")
-                }
-                Button(role: .destructive) { Task { await act("delete") } } label: { Label("Delete job", systemImage: "trash") }
+                Button(role: .destructive) { Task { await act("delete") } } label: { Label("Delete task", systemImage: "trash") }
             }
             if let status { Section { Text(status).font(.footnote).foregroundStyle(status.hasPrefix("Saved") || status.hasPrefix("Done") ? Color.secondary : Color.red) } }
         }
@@ -619,18 +678,68 @@ struct CronJobDetailView: View {
         .task {
             guard !loaded else { return }
             loaded = true
-            name = job.name ?? ""; schedule = job.schedule ?? ""; prompt = job.prompt ?? raw["prompt"]?.stringValue ?? ""
+            name = original.name; schedule = original.schedule; prompt = original.prompt; deliver = original.deliver; enabled = original.enabled
+            rawText = Self.pretty(raw)
+            readSchedule(schedule)
         }
+    }
+
+    /// The pickers from a cron line, when it is one of the shapes they can express.
+    private func readSchedule(_ s: String) {
+        let p = s.split(separator: " ").map(String.init)
+        guard p.count == 5, let m = Int(p[0]), let h = Int(p[1]) else { repeatKind = "custom"; return }
+        time = Calendar.current.date(from: DateComponents(hour: h, minute: m)) ?? time
+        switch (p[2], p[3], p[4]) {
+        case ("*", "*", "*"): repeatKind = "daily"
+        case ("*", "*", "1-5"): repeatKind = "weekdays"
+        case ("*", "*", "0,6"), ("*", "*", "6,0"): repeatKind = "weekends"
+        case ("*", "*", let d) where Int(d) != nil: repeatKind = "weekly"; weekday = Int(d)! % 7
+        case (let d, "*", "*") where Int(d) != nil: repeatKind = "monthly"; monthDay = Int(d)!
+        default: repeatKind = "custom"
+        }
+    }
+
+    private func rebuildSchedule() {
+        guard repeatKind != "custom" else { return }
+        let c = Calendar.current.dateComponents([.hour, .minute], from: time)
+        let hm = "\(c.minute ?? 0) \(c.hour ?? 0)"
+        switch repeatKind {
+        case "weekdays": schedule = "\(hm) * * 1-5"
+        case "weekends": schedule = "\(hm) * * 0,6"
+        case "weekly": schedule = "\(hm) * * \(weekday)"
+        case "monthly": schedule = "\(hm) \(monthDay) * *"
+        default: schedule = "\(hm) * * *"
+        }
+    }
+
+    private static func pretty(_ v: JSONValue) -> String {
+        guard let data = try? JSONEncoder().encode(v), let obj = try? JSONSerialization.jsonObject(with: data),
+              let out = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]) else { return v.displayText }
+        return String(decoding: out, as: UTF8.self)
     }
 
     private func save() async {
         guard let rt else { return }
         var updates: [String: JSONValue] = [:]
-        if name != (job.name ?? "") { updates["name"] = .string(name) }
-        if schedule != (job.schedule ?? "") { updates["schedule"] = .string(schedule) }
-        if prompt != (job.prompt ?? raw["prompt"]?.stringValue ?? "") { updates["prompt"] = .string(prompt) }
+        // The raw editor wins for whatever it changed; the form's fields go on top of that.
+        if rawDirty {
+            guard let data = rawText.data(using: .utf8), let edited = try? JSONDecoder().decode(JSONValue.self, from: data), let obj = edited.objectValue else {
+                rawError = "The JSON does not parse."; return
+            }
+            rawError = nil
+            for (k, v) in obj where raw[k] != v { updates[k] = v }
+        }
+        if name != original.name { updates["name"] = .string(name) }
+        if schedule != original.schedule { updates["schedule"] = .string(schedule) }
+        if prompt != original.prompt { updates["prompt"] = .string(prompt) }
+        if deliver != original.deliver, !deliver.isEmpty { updates["deliver"] = .string(deliver) }
         do {
-            let _: JSONValue = try await rt.api.send("PUT", "/api/cron/jobs/\(job.identity)", json: .object(["updates": .object(updates)]))
+            if !updates.isEmpty {
+                let _: JSONValue = try await rt.api.send("PUT", "/api/cron/jobs/\(job.identity)", json: .object(["updates": .object(updates)]))
+            }
+            if enabled != original.enabled {
+                let _: JSONValue = try await rt.api.send("POST", "/api/cron/jobs/\(job.identity)/\(enabled ? "resume" : "pause")", body: EmptyBody())
+            }
             status = "Saved."; onChange()
         } catch { status = error.localizedDescription }
     }

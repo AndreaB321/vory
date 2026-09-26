@@ -355,6 +355,7 @@ struct AppearanceView: View {
     @AppStorage(ChatStyle.showReasoning) private var showReasoning = true
     @AppStorage(ChatStyle.showTurnStats) private var showTurnStats = true
     @AppStorage(ChatStyle.showSystemNotes) private var showSystemNotes = true
+    @AppStorage(ChatSummarizer.enabledKey) private var aiSummaries = false
     @Environment(\.editMode) private var editMode
 
     private var layout: TabLayout { TabLayout.parse(layoutRaw) }
@@ -432,6 +433,18 @@ struct AppearanceView: View {
                 Toggle("Show system notes", isOn: $showSystemNotes)
             } header: { Text("Chat") } footer: {
                 Text("Hidden rows are still received and kept; this only changes what the transcript draws. Approval cards are always shown.")
+            }
+            Section {
+                Toggle(isOn: $aiSummaries) {
+                    HStack(spacing: 6) {
+                        Text("Vory Summaries")
+                        Text("BETA").font(.caption2.weight(.bold)).padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Capsule().fill(Color.accentColor.opacity(0.15))).foregroundStyle(Color.accentColor)
+                    }
+                }
+                .disabled(!ChatSummarizer.isAvailable)
+            } header: { Text("Apple Intelligence") } footer: {
+                Text(ChatSummarizer.unavailableReason ?? "Uses the on-device model to give each chat in the list a short title and a two-line summary of where it stands. Nothing leaves your phone and nothing changes on the gateway; off, the list shows the gateway's own titles and previews.")
             }
             Section {
                 Button("Clear chat list cache") { SessionCache.clearAll() }

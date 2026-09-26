@@ -24,6 +24,8 @@ struct ChatListView: View {
     @AppStorage("chats.allBots") private var allBots = false
     @State private var showNewChat = false
     @State private var showNewBot = false
+    @AppStorage(ChatSummarizer.enabledKey) private var aiSummaries = false
+    private var summarizer: ChatSummarizer { ChatSummarizer.shared }
     @State private var rooms: [Room] = []
     // Filters (the funnel button): what to show and in which order.
     @AppStorage("chats.filter.pinned") private var pinnedOnly = false
@@ -210,7 +212,9 @@ struct ChatListView: View {
             ForEach(rows) { s in
                 NavigationLink(value: ChatRoute(storedID: s.id, title: s.displayTitle, profile: allBots ? s.profile : nil)) {
                     SessionRow(session: s, needsYou: runtime.needsAttention.contains(s.id), live: runtime.chatForStored(s.id)?.isRunning ?? false, showBot: allBots,
-                               thinking: runtime.chatForStored(s.id).map { $0.isRunning && ($0.statusLine ?? "Thinking…") == "Thinking…" } ?? false)
+                               thinking: runtime.chatForStored(s.id).map { $0.isRunning && ($0.statusLine ?? "Thinking…") == "Thinking…" } ?? false,
+                               summary: summarizer.summary(for: s))
+                        .task(id: "\(s.id)-\(s.lastActive ?? 0)-\(aiSummaries)") { if aiSummaries { summarizer.refresh(s, runtime: runtime, profile: allBots ? s.profile : nil) } }
                 }
                 .contextMenu {
                     Button { path.append(ChatRoute(storedID: s.id, title: s.displayTitle, profile: allBots ? s.profile : nil)) } label: { Label("Open", systemImage: "bubble.left") }
@@ -313,6 +317,8 @@ struct SessionRow: View {
     var live: Bool
     var showBot = false
     var thinking = false
+    /// The on-device summary, when Vory Summaries is on and one is ready for this chat.
+    var summary: ChatSummarizer.Summary? = nil
 
     var body: some View {
         HStack(spacing: 12) {
@@ -320,9 +326,10 @@ struct SessionRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     if session.pinned == true { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary) }
-                    Text(session.displayTitle).font(.body.weight(.medium)).lineLimit(1)
+                    Text(summary?.title ?? session.displayTitle).font(.body.weight(.medium)).lineLimit(1)
+                    if summary != nil { Image(systemName: "sparkles").font(.caption2).foregroundStyle(.secondary).accessibilityLabel("Summarized on device") }
                 }
-                Text(session.preview ?? "").font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                Text(summary?.summary ?? session.preview ?? "").font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                 HStack(spacing: 8) {
                     if let m = session.model, !m.isEmpty { Text(m).font(.caption2).foregroundStyle(.tertiary).lineLimit(1) }
                     if let d = session.lastDate { Text(d, format: .relative(presentation: .named)).font(.caption2).foregroundStyle(.tertiary) }
