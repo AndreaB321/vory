@@ -7,8 +7,8 @@ at a time, ship a TestFlight build, wait for their verdict.
 
 ## Where things stand
 
-- **Latest TestFlight build: 1.0.1 (37)**, uploaded 2026-09-26 ~11:50 (31–36 earlier that morning). Companion plugin **1.0.25**.
-  Builds 20 and 22 were superseded cuts and are expired. Build 37 = 36 + Settings › Bots with "Liquid Glass for all bots" (greys out the per-bot
+- **Latest TestFlight build: 1.0.1 (38)**, uploaded 2026-09-26 ~12:00 (31–37 earlier that day). Companion plugin **1.0.25**.
+  Builds 20 and 22 were superseded cuts and are expired. Build 38 = 37 + the icon's cloud 10 % larger (layer `position.scale` 1.1). Build 37 = 36 + Settings › Bots with "Liquid Glass for all bots" (greys out the per-bot
   switch with a note). Build 36 = 35 + Liquid Glass bots (beta toggle in the Creator Studio), bots in the profile
   switcher, bigger Bots tab icon, more room above the bar. Build 35 = 34 + the new app icon
   (user approved 34 and 35). Build 34 = 33 + capsule 56 pt (user: 62 felt tall; bottom edge kept) and the lens refracting the
