@@ -7,8 +7,9 @@ at a time, ship a TestFlight build, wait for their verdict.
 
 ## Where things stand
 
-- **Latest TestFlight build: 1.0.1 (33)**, uploaded 2026-09-26 ~11:05 (31 and 32 earlier that morning). Companion plugin **1.0.25**.
-  Builds 20 and 22 were superseded cuts and are expired. Build 33 = 32 + the compose glyph centred on its square (user approved the zoom). Verdict on 31: not
+- **Latest TestFlight build: 1.0.1 (34)**, uploaded 2026-09-26 ~11:30 (31–33 earlier that morning). Companion plugin **1.0.25**.
+  Builds 20 and 22 were superseded cuts and are expired. Build 34 = 33 + capsule 56 pt (user: 62 felt tall; bottom edge kept) and the lens refracting the
+  icons while dragged. Compose glyph centred on its square (user approved the zoom). Verdict on 31: not
   aligned like the system bar, no refracting glass lens, list rows cut off under the bar, labels
   should show only under the selected tab, compose circle should be the bar's height and its
   glyph centred — all addressed in 32.
@@ -143,7 +144,12 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
 
 ## Change log
 
-### 2026-09-26 (builds 31–32)
+### 2026-09-26 (builds 31–34)
+- 34: capsule 56 pt (reserved 43 + 13 overhang), icons 25/21 pt; while dragged the lens moves ABOVE
+  the icons (zIndex) and a second copy of the icon row rides on top of it, masked to the lens minus
+  a 4 pt rim, so the icon inside stays crisp and only the rim refracts — the system bar draws its
+  icons twice for the same reason (two sets of _UITabButton in the dump). Plain `.clear` glass over
+  the icons smears them into a blur.
 - 32: icon-only tabs (27 pt) with the label only under the selected one (22 pt icon + 10 pt label);
   the selection is a clear glass lens (`.glassEffect(.clear.interactive())` in its own
   GlassEffectContainer, drawn UNDER the icons — on top it blurred them); compose circle 62 pt = bar

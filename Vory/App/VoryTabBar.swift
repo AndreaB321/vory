@@ -9,7 +9,7 @@ import VoryCore
 ///
 /// Measurements from a UITabBar dump on iOS 27 / iPhone 17 Pro: capsule 62 pt with 4 pt inset
 /// around 54 pt slots, 21 pt side margins, the bar group 49 pt above the home-indicator area with
-/// the capsule overflowing 13 pt into it.
+/// the capsule overflowing 13 pt into it. Ours is 6 pt shorter at the user's request, same overhang.
 struct VoryTabBar: View {
     @Environment(AppModel.self) private var model
     var tabs: [AppModel.AppTab]
@@ -19,7 +19,8 @@ struct VoryTabBar: View {
     @State private var dragX: CGFloat?
     @State private var pressStart: Date?
 
-    private let barHeight: CGFloat = 62
+    /// The system capsule is 62 pt; the user wanted it a little shorter, bottom edge kept.
+    private let barHeight: CGFloat = 56
     private let inset: CGFloat = 4
     private let sideMargin: CGFloat = 21
     private let circleGap: CGFloat = 12
@@ -27,7 +28,7 @@ struct VoryTabBar: View {
     private let overhang: CGFloat = 13
     /// What the bar reserves above the home-indicator area (the system bar group's 49 pt); the
     /// capsule is drawn overflowing below it.
-    static let reservedHeight: CGFloat = 49
+    static let reservedHeight: CGFloat = 56 - 13
 
     var body: some View {
         GlassEffectContainer(spacing: circleGap) {
@@ -36,7 +37,7 @@ struct VoryTabBar: View {
                 Button(action: compose) {
                     // Centred on the square, not the glyph: the pencil hangs off its top-right
                     // corner. Measured from a simulator screenshot (the square sat 2.5 pt low).
-                    Image(systemName: "square.and.pencil").font(.system(size: 24, weight: .medium))
+                    Image(systemName: "square.and.pencil").font(.system(size: 23, weight: .medium))
                         .offset(x: 0, y: -2.5)
                         .frame(width: barHeight, height: barHeight)
                         .glassEffect(.regular.interactive(), in: .circle)
@@ -65,7 +66,8 @@ struct VoryTabBar: View {
             }()
             ZStack(alignment: .topLeading) {
                 // The lens: clear glass under the selected slot, or wherever the finger holds it
-                // (grown a little while lifted). Under the icons so they stay crisp.
+                // (grown a little while lifted). Under the icons at rest so the selected one stays
+                // crisp; over them while dragged so it refracts them as it passes, like the system's.
                 GlassEffectContainer {
                     Capsule().fill(.clear)
                         .frame(width: slotWidth, height: slotHeight)
@@ -76,12 +78,24 @@ struct VoryTabBar: View {
                 .animation(dragging ? .interactiveSpring(response: 0.18) : .snappy(duration: 0.32), value: lensX)
                 .animation(.snappy(duration: 0.22), value: dragging)
                 .allowsHitTesting(false)
-                HStack(spacing: 0) {
-                    ForEach(tabs, id: \.self) { tab in
-                        slot(tab, dragging: dragging).frame(width: slotWidth, height: slotHeight)
-                    }
+                .zIndex(dragging ? 2 : 0)
+                iconRow(slotWidth: slotWidth, slotHeight: slotHeight, dragging: dragging)
+                    .zIndex(1)
+                // While dragged, a second copy of the icons rides on top of the lens, masked to
+                // the lens minus its rim, so the icon under it stays crisp and only the edge
+                // refracts (the system bar draws its icons twice for the same reason).
+                if dragging {
+                    let lensW = slotWidth * 1.12, lensH = slotHeight * 1.12
+                    iconRow(slotWidth: slotWidth, slotHeight: slotHeight, dragging: true)
+                        .mask {
+                            Capsule()
+                                .frame(width: lensW - 8, height: lensH - 8)
+                                .position(x: lensX + slotWidth / 2, y: inset + slotHeight / 2)
+                        }
+                        .animation(.interactiveSpring(response: 0.18), value: lensX)
+                        .allowsHitTesting(false)
+                        .zIndex(3)
                 }
-                .padding(inset)
             }
             .contentShape(Capsule())
             .gesture(barGesture(slotWidth: slotWidth))
@@ -90,14 +104,23 @@ struct VoryTabBar: View {
         .glassEffect(.regular, in: .capsule)
     }
 
+    private func iconRow(slotWidth: CGFloat, slotHeight: CGFloat, dragging: Bool) -> some View {
+        HStack(spacing: 0) {
+            ForEach(tabs, id: \.self) { tab in
+                slot(tab, dragging: dragging).frame(width: slotWidth, height: slotHeight)
+            }
+        }
+        .padding(inset)
+    }
+
     /// One tab: a large icon on its own, or a smaller icon over its label when it is selected
     /// (no labels at all while the lens is being dragged, like the system bar).
     @ViewBuilder private func slot(_ tab: AppModel.AppTab, dragging: Bool) -> some View {
         let selected = model.selectedTab == tab
         let labelled = selected && !dragging
         VStack(spacing: 2) {
-            icon(for: tab, size: labelled ? 22 : 27)
-                .frame(height: labelled ? 26 : 32)
+            icon(for: tab, size: labelled ? 21 : 25)
+                .frame(height: labelled ? 24 : 30)
             if labelled {
                 Text(tab.title).font(.system(size: 10, weight: .semibold))
                     .lineLimit(1).minimumScaleFactor(0.8)
