@@ -217,7 +217,7 @@ public enum BotFace {
 
         // Eyes: black shapes, blinking by squashing to a line, glancing by sliding.
         let eyes = eyePaths(spec, size: size, time: t, active: active, gaze: gaze)
-        let eyeInk = spec.isGlass ? ink.opacity(0.78) : ink
+        let eyeInk = spec.isGlass ? ink.opacity(0.9) : ink
         if eyes.stroked {
             ctx.stroke(eyes.path, with: .color(eyeInk), style: StrokeStyle(lineWidth: s * 0.045, lineCap: .round))
         } else {
@@ -355,7 +355,7 @@ public struct BotFaceView: View {
             } else {
                 GlassEffectContainer {
                     Color.clear
-                        .glassEffect(.clear.tint(BotFace.ink.opacity(0.7)), in: BotEyesShape(spec: spec, time: t, active: active, gaze: g))
+                        .glassEffect(.clear.tint(BotFace.ink.opacity(0.92)), in: BotEyesShape(spec: spec, time: t, active: active, gaze: g))
                 }
             }
         }
@@ -380,6 +380,9 @@ public struct BotFaceView: View {
             gazeFrom = old; shownGaze = new; gazeChangedAt = Date()
         }
         .frame(width: size, height: size)
+        // A paused TimelineView does not redraw for a changed spec (a bot switched to glass kept
+        // its painted look until something else re-created the row); a new identity does.
+        .id(spec)
         .accessibilityHidden(true)
     }
 }

@@ -340,7 +340,7 @@ public final class ChatSession: @MainActor Identifiable, ChatIdentity {
     public func steer(_ text: String) async {
         do {
             let r = try await runtime.rpc("session.steer", ["session_id": .string(runtimeID), "text": .string(text)])
-            items.append(TranscriptItem(id: UUID().uuidString, kind: .system(text: "Steer (\(r["status"]?.stringValue ?? "queued")): \(text)", symbol: "arrow.turn.down.right")))
+            items.append(TranscriptItem(id: UUID().uuidString, kind: .steer(text: text, status: r["status"]?.stringValue ?? "queued")))
         } catch {
             banner = error.localizedDescription
         }

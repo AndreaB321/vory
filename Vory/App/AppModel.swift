@@ -235,7 +235,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             PushSetupModel.lastPresentedAt = Date()
             if let nonce { PushSetupModel.presentedNonces.insert(nonce) }
         }
-        return [.banner, .sound, .list]
+        // The app is in front: the chat itself shows what arrived, so no banner or sound. The
+        // setup wizard's test push is the exception, since seeing it is the point.
+        let kind = (info["hermes"] as? [String: Any])?["kind"] as? String
+        return kind == "test" ? [.banner, .sound, .list] : []
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {

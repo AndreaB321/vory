@@ -6,6 +6,9 @@ import VoryCore
 struct ComposerView: View {
     @Bindable var chat: ChatSession
     @Binding var text: String
+    /// The dock's morph namespace: the text capsule (alone, not the whole stack — the steer strip
+    /// and the command list come and go under it) is what an approval card morphs from.
+    var namespace: Namespace.ID
     @FocusState private var focused: Bool
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var showPhotos = false
@@ -97,6 +100,7 @@ struct ComposerView: View {
                 }
                 .frame(minHeight: 36)
                 .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 18))
+                .glassEffectID("dock", in: namespace)
             }
             if chat.isRunning, !text.isEmpty {
                 HStack {

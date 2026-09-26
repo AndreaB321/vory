@@ -11,8 +11,11 @@ struct TranscriptView: View {
     var bottomInset: CGFloat = 60
     /// Height of the floating header (the nav bar is hidden in a chat).
     var topInset: CGFloat = 96
+    /// Locked to the bottom: the thread follows every new token, tool call and card. Only the
+    /// user's own drag releases it; the jump button (or scrolling back down) locks it again.
     @State private var stickToBottom = true
     @State private var awayFromBottom = false
+    @State private var userScrolling = false
     /// How much of the scroll view the keyboard covers (beyond the home-indicator safe area). The
     /// thread moves up with the keyboard and, when it was at the bottom, stays there.
     @State private var keyboardInset: CGFloat = 0
@@ -98,16 +101,23 @@ struct TranscriptView: View {
                     if stickToBottom { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
             }
-            .onScrollGeometryChange(for: Bool.self) { g in
-                g.contentSize.height - (g.contentOffset.y + g.containerSize.height) > 120
-            } action: { _, away in
-                withAnimation(.snappy) { awayFromBottom = away }
-                stickToBottom = !away
+            .onScrollGeometryChange(for: CGFloat.self) { g in
+                g.contentSize.height - (g.contentOffset.y + g.containerSize.height)
+            } action: { _, distance in
+                let away = distance > 120
+                if away != awayFromBottom { withAnimation(.snappy) { awayFromBottom = away } }
+                // Content growing under a locked thread also reads as "away" for a frame; only a
+                // finger on the thread unlocks it. Scrolling back to the end locks it again.
+                if userScrolling, distance > 24 { stickToBottom = false }
+                if distance < 4 { stickToBottom = true }
+            }
+            .onScrollPhaseChange { _, phase in
+                userScrolling = phase == .interacting || phase == .decelerating
             }
             .overlay(alignment: .bottomTrailing) {
                 JumpToBottomButton(visible: awayFromBottom) {
-                    withAnimation(.snappy) { proxy.scrollTo("bottom", anchor: .bottom) }
                     stickToBottom = true
+                    withAnimation(.snappy) { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
                 .padding(.trailing, 16).padding(.bottom, bottomInset + 12 + keyboardInset)
             }
@@ -126,11 +136,16 @@ struct TranscriptView: View {
             .defaultScrollAnchor(.bottom)
             // Whole item, not just `.kind`: the tokens/sec footer lands after the text does and
             // must pull the bottom back into view too.
+            // No animation while following: tokens arrive faster than an animated scroll settles,
+            // and an unfinished animation left the thread lagging the bottom.
             .onChange(of: chat.items.last) { _, _ in
-                if stickToBottom { withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo("bottom", anchor: .bottom) } }
+                if stickToBottom, !userScrolling { proxy.scrollTo("bottom", anchor: .bottom) }
             }
             .onChange(of: chat.items.count) { _, _ in
-                if stickToBottom { proxy.scrollTo("bottom", anchor: .bottom) }
+                if stickToBottom, !userScrolling { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
+            .onChange(of: chat.statusLine) { _, _ in
+                if stickToBottom, !userScrolling { proxy.scrollTo("bottom", anchor: .bottom) }
             }
         }
     }
@@ -233,6 +248,23 @@ struct TranscriptRow: View {
                     ShareLink(item: text) { Label("Share", systemImage: "square.and.arrow.up") }
                 }
                 Spacer(minLength: 40)
+            }
+        case .steer(let text, let status):
+            HStack {
+                Spacer(minLength: 56)
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text(text)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 14).padding(.vertical, 9)
+                        .background(Color(.systemGray4), in: .rect(cornerRadius: 18))
+                        .contextMenu {
+                            Button { UIPasteboard.general.string = text } label: { Label("Copy", systemImage: "doc.on.doc") }
+                            Button { onEdit(text) } label: { Label("Edit & resend", systemImage: "pencil") }
+                        }
+                    Label(status == "queued" ? "Steered · queued" : "Steered", systemImage: "arrow.turn.down.right")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
             }
         case .tool(let act):
             ToolCardView(activity: act)

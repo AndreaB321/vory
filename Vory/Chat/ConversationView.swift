@@ -109,8 +109,7 @@ struct BottomDock: View {
                             }
                         }
                 } else {
-                    ComposerView(chat: chat, text: $text)
-                        .glassEffectID("dock", in: namespace)
+                    ComposerView(chat: chat, text: $text, namespace: namespace)
                 }
             }
             .padding(.horizontal, 12)

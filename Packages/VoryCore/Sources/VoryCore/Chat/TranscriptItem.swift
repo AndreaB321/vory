@@ -57,6 +57,9 @@ public struct TranscriptItem: Hashable, Sendable, Identifiable {
         case system(text: String, symbol: String)
         case error(text: String)
         case subagent(goal: String, status: String)
+        /// A message steered into a running turn (queued or delivered), shown as the user's own
+        /// bubble but grey.
+        case steer(text: String, status: String)
     }
     public var id: String
     public var kind: Kind

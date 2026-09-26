@@ -27,6 +27,7 @@ public enum TranscriptCache {
             case .assistant(let t, let r, _): return t.isEmpty ? nil : TranscriptMessage(role: "assistant", text: t, timestamp: ts, rowId: item.rowID, reasoning: r)
             case .tool(let a): return TranscriptMessage(role: "tool", text: a.resultText, timestamp: ts, rowId: item.rowID, name: a.name, context: a.context)
             case .system(let t, _): return TranscriptMessage(role: "system", text: t, timestamp: ts, rowId: item.rowID)
+            case .steer(let t, _): return TranscriptMessage(role: "user", text: t, timestamp: ts, rowId: item.rowID)
             case .error, .subagent: return nil
             }
         }

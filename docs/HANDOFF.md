@@ -10,7 +10,8 @@ at a time, ship a TestFlight build, wait for their verdict.
 - **Latest TestFlight build: 1.0.1 (38)**, uploaded 2026-09-26 ~12:00 (31–37 earlier that day).
   **Build 39 is built and committed, awaiting the user's "ship it":** dark-mode icon blue lighter
   (layer `fill-specializations` for dark, light unchanged), cloud 1.21× and up 20 pt, slash-command
-  list in the composer. Companion plugin **1.0.25**.
+  list in the composer, bottom lock in the transcript, glass bots redraw on change, darker glass
+  eyes, grey steer bubbles, no banners while the app is in front, composer morph id on the capsule. Companion plugin **1.0.25**.
   Builds 20 and 22 were superseded cuts and are expired. Build 38 = 37 + the icon's cloud 10 % larger (layer `position.scale` 1.1). Build 37 = 36 + Settings › Bots with "Liquid Glass for all bots" (greys out the per-bot
   switch with a note). Build 36 = 35 + Liquid Glass bots (beta toggle in the Creator Studio), bots in the profile
   switcher, bigger Bots tab icon, more room above the bar. Build 35 = 34 + the new app icon
@@ -162,6 +163,16 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
   it never reaches the header; typing narrows it; tapping inserts "/name ". Dispatch was already
   there (`ChatSession.dispatchSlash`). Sim note: the composer sits ~13 pt under the keyboard's
   predictive bar on the simulator — pre-existing, not seen on the phone.
+- 39 (cont.): **transcript bottom lock** (`TranscriptView`): `stickToBottom` is released only by the
+  user's own drag (`onScrollPhaseChange` → `userScrolling`, and > 24 pt from the end), re-locked
+  by the jump button or by scrolling back within 4 pt of the end; following scrolls are
+  unanimated (animated ones lagged the stream and the old > 120 pt test unlocked by itself).
+  `BotFaceView` has `.id(spec)` (a paused TimelineView did not redraw a bot switched to glass).
+  Glass eyes: `.clear.tint(ink 92 %)` live, ink 90 % painted. `TranscriptItem.Kind.steer(text:
+  status:)` — grey right-aligned bubble with a "Steered · queued" caption (cache saves it as a
+  user row; the watch draws a grey box). `willPresent` returns `[]` unless `hermes.kind == "test"`.
+  `glassEffectID("dock")` moved from the whole ComposerView onto the text capsule (the stack's
+  shape changes while typing during a run — the steer strip — and the bubble broke).
 - 38: icon cloud 10 % larger.
 - 37: **Settings › Bots** (`BotsSettingsView`, App section): "Liquid Glass for all bots" (BETA),
   `bots.glassAll` in UserDefaults (`BotAvatarStore.glassAllKey`). `BotAvatarStore.effective(raw)`
