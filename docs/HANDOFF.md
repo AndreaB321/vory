@@ -48,6 +48,10 @@ cd ~/claude-sandbox/Vory && ./Tools/release/testflight.sh
   A JWT for the API comes from `swift Tools/release/asc-jwt.swift` with `ASC_KEY_ID`, `ASC_ISSUER_ID`,
   `ASC_KEY_PATH` exported. App Store Connect app id `6814980297`. Escape `[`/`]` as `%5B`/`%5D` in
   API URLs (zsh).
+- **Ask before shipping** (user, 2026-09-26: "Check with me before ship"): show the change, wait for
+  "ship it". **Stale build number:** `testflight.sh` asks App Store Connect for the next number; while
+  the previous upload is still processing it gets the same one back and altool fails with
+  "Redundant Binary Upload" (90189). Within ~10 min of the last upload pass `BUILD_NUMBER=<n>`.
 - **Never kill a running `testflight.sh`**: altool may already have delivered the build (that is how
   builds 20 and 22 slipped out). Check the log for "No errors uploading" first.
 - **USB device build** (user's phone UDID `00008150-001069912108401C`):
