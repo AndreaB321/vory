@@ -598,7 +598,7 @@ struct CronJobDetailView: View {
 
     private var rt: GatewayRuntime? { model.runtime }
     private var original: (name: String, schedule: String, prompt: String, deliver: String, enabled: Bool) {
-        (job.name ?? "", job.schedule ?? "", job.prompt ?? raw["prompt"]?.stringValue ?? "", job.deliver ?? raw["deliver"]?.stringValue ?? "",
+        (job.name ?? "", job.schedule ?? "", job.prompt ?? raw["prompt"]?.stringValue ?? job.promptPreview ?? raw["prompt_preview"]?.stringValue ?? "", job.deliver ?? raw["deliver"]?.stringValue ?? "",
          !(job.enabled == false || job.state == "paused"))
     }
     private var dirty: Bool {

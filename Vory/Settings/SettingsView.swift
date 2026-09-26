@@ -120,8 +120,8 @@ struct SettingsView: View {
 struct GatewayTile: View {
     var body: some View {
         RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.blue)
-            .frame(width: 29, height: 29)
-            .overlay { VoryOutlineIcon().foregroundStyle(.white).frame(width: 22, height: 19) }
+            .frame(width: 28, height: 28)
+            .overlay { VoryOutlineIcon().foregroundStyle(.white).frame(width: 20, height: 17) }
             .accessibilityHidden(true)
     }
 }
@@ -133,7 +133,9 @@ struct SettingsLabel: View {
         Label {
             Text(title)
         } icon: {
-            Image(systemName: symbol).foregroundStyle(.white).frame(width: 28, height: 28).background(color, in: .rect(cornerRadius: 7))
+            // One symbol size for every row (SF Symbols vary in weight and width), centred in the tile.
+            Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(.white)
+                .frame(width: 28, height: 28).background(color, in: .rect(cornerRadius: 7))
         }
     }
 }

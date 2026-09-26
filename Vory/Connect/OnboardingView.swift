@@ -16,7 +16,14 @@ struct OnboardingView: View {
         let demo: TourDemoKind
     }
 
-    private let pages: [Page] = [
+    private var pages: [Page] {
+        var p = Self.basePages
+        if ChatSummarizer.isAvailable {
+            p.insert(Page(title: "Summaries, on your phone.", says: "With Apple Intelligence I can give every chat a short title and a two-line summary, right in the list. It all stays on your phone. Optional — your call.", demo: .summaries), at: 5)
+        }
+        return p
+    }
+    private static let basePages: [Page] = [
         Page(title: "Hi, I'm Vory.", says: "I'm your Hermes gateway, on your phone. Every bot you run lives here — swipe to see what we can do together.", demo: .bots),
         Page(title: "Chats that stream.", says: "Replies arrive word by word, code and tool calls render as they happen, and every chat is a real session on your gateway.", demo: .chat),
         Page(title: "A yes from anywhere.", says: "When a bot needs permission, the card lands on your phone. Once, for the session, always, or deny — it waits for you.", demo: .approval),
@@ -78,7 +85,7 @@ struct OnboardingView: View {
     }
 }
 
-enum TourDemoKind { case bots, chat, approval, island, studio, connect }
+enum TourDemoKind { case bots, chat, approval, island, studio, summaries, connect }
 
 /// One small, self-playing demo per page.
 private struct TourDemo: View {
@@ -93,6 +100,7 @@ private struct TourDemo: View {
         case .approval: ApprovalDemo(live: live, reduceMotion: reduceMotion)
         case .island: IslandDemo(live: live)
         case .studio: StudioDemo(live: live, reduceMotion: reduceMotion)
+        case .summaries: SummariesDemo(live: live, reduceMotion: reduceMotion)
         case .connect: ConnectDemo()
         }
     }
@@ -411,6 +419,67 @@ private struct StudioDemo: View {
                     withAnimation(.snappy) { eyes = eyeStyles[(eyeStyles.firstIndex(of: eyes)! + 1) % eyeStyles.count] }
                 }
                 i += 1
+            }
+        }
+    }
+}
+
+/// A chat row as the gateway sends it, then Apple Intelligence rewrites its title and preview in
+/// place — and the switch that turns the feature on, right here.
+private struct SummariesDemo: View {
+    var live: Bool
+    var reduceMotion: Bool
+    @AppStorage(ChatSummarizer.enabledKey) private var enabled = false
+    @State private var summarized = false
+    @State private var thinking = false
+    private let bot = BotLookSpec(shape: "hexagon", eyes: "round", hex: "#30D158", finish: "glass")
+
+    var body: some View {
+        VStack(spacing: 14) {
+            HStack(spacing: 12) {
+                BotFaceView(spec: bot, size: 40, active: thinking, mood: BotFaceView.Mood(thinking: thinking, profile: "tour-sum"))
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(summarized ? "Log cleanup on the web host" : "Clean up the old logs on the server and then tell me wh…")
+                            .font(.body.weight(.medium)).lineLimit(1)
+                            .contentTransition(.numericText())
+                        if summarized { Image(systemName: "sparkles").font(.caption2).foregroundStyle(.secondary).transition(.scale.combined(with: .opacity)) }
+                    }
+                    Text(summarized ? "Freed 4.2 GB of rotated logs; the bot offered to set up log rotation and is waiting on a yes."
+                                    : "Found 4.2 GB of rotated logs older than 90 days. Clearing those and leaving today's alone. Done — 4.2 GB freed. Want log rotation set up so it")
+                        .font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                        .contentTransition(.numericText())
+                    Text("claude-sonnet · 2 min ago").font(.caption2).foregroundStyle(.tertiary)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(14)
+            .glassEffect(.regular, in: .rect(cornerRadius: 18))
+            Toggle(isOn: $enabled) {
+                HStack(spacing: 6) {
+                    Text("Vory Summaries").font(.subheadline.weight(.medium))
+                    Text("BETA").font(.caption2.weight(.bold)).padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.15))).foregroundStyle(Color.accentColor)
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .glassEffect(.regular, in: .rect(cornerRadius: 18))
+            Text("You can change this later in Settings › Appearance.").font(.caption).foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 4)
+        .task(id: live) {
+            guard live else { return }
+            while !Task.isCancelled {
+                summarized = false; thinking = false
+                if reduceMotion { summarized = true; return }
+                try? await Task.sleep(for: .milliseconds(1400))
+                thinking = true
+                try? await Task.sleep(for: .milliseconds(1300))
+                withAnimation(.snappy(duration: 0.5)) { thinking = false; summarized = true }
+                try? await Task.sleep(for: .seconds(4))
+                guard !Task.isCancelled else { return }
+                withAnimation(.snappy) { summarized = false }
+                try? await Task.sleep(for: .milliseconds(600))
             }
         }
     }
