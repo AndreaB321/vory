@@ -585,16 +585,22 @@ public final class BotAmbient {
     /// When each bot (by profile name) last finished a turn: it spins once at that moment.
     public var finished: [String: Date] = [:]
     private var decayTask: Task<Void, Never>?
+    private var lastGazeAt: Date = .distantPast
 
     public init() {}
 
-    /// A scroll of `dy` points (positive = content moving up, the finger swiping up).
+    /// A scroll of `dy` points (positive = content moving up, the finger swiping up). Every bot
+    /// on screen observes `gaze`, so it moves at most ~16 times a second and only when the change
+    /// is worth a redraw; `scrolling` is set once, not on every tick.
     public func scrolled(dy: CGFloat) {
         guard abs(dy) > 0.5 else { return }
-        if enabled {
-            gaze = CGPoint(x: gaze.x, y: max(-1, min(1, gaze.y * 0.6 + CGFloat(-dy) / 40)))
+        let now = Date()
+        if enabled, now.timeIntervalSince(lastGazeAt) > 0.06 {
+            let y = max(-1, min(1, gaze.y * 0.6 + CGFloat(-dy) / 40))
+            if abs(y - gaze.y) > 0.03 { gaze = CGPoint(x: gaze.x, y: y) }
+            lastGazeAt = now
         }
-        scrolling = true
+        if !scrolling { scrolling = true }
         decayTask?.cancel()
         decayTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(450))
@@ -769,10 +775,14 @@ public struct BotFaceView: View {
     public var body: some View {
         // Tilted well past level (Bots page), the eyes stop wandering and follow the phone; within
         // a few degrees they add a little of the tilt to their own glances.
-        let tiltMag = hypot(ambient.tilt.x, ambient.tilt.y)
-        let held = mood.followsTilt && ambient.enabled && tiltMag > 0.3
+        // Small bots (beside a bubble, on the toolbar) do not follow scrolls or tilt: a long
+        // thread has dozens of them and each would redraw on every scroll tick.
+        let listens = size >= 32 && ambient.enabled
+        let tilt = listens ? ambient.tilt : .zero
+        let tiltMag = hypot(tilt.x, tilt.y)
+        let held = mood.followsTilt && listens && tiltMag > 0.3
         let tiltWeight: CGFloat = held ? 1.0 : 0.5
-        let ambientGaze = ambient.enabled ? CGPoint(x: ambient.gaze.x + ambient.tilt.x * tiltWeight, y: ambient.gaze.y + ambient.tilt.y * tiltWeight) : .zero
+        let ambientGaze = listens ? CGPoint(x: ambient.gaze.x + tilt.x * tiltWeight, y: ambient.gaze.y + tilt.y * tiltWeight) : .zero
         let finished = finishedAt
         let tapped = tappedAt
         let state = state
@@ -804,8 +814,8 @@ public struct BotFaceView: View {
         }
         .animation(.interactiveSpring(response: 0.3), value: ambientGaze)
         // The bot leans with the phone: a few degrees, about the centre.
-        .rotation3DEffect(.degrees(Double(ambient.enabled ? ambient.tilt.y : 0) * -7), axis: (x: 1, y: 0, z: 0))
-        .rotation3DEffect(.degrees(Double(ambient.enabled ? ambient.tilt.x : 0) * 7), axis: (x: 0, y: 1, z: 0))
+        .rotation3DEffect(.degrees(Double(tilt.y) * -7), axis: (x: 1, y: 0, z: 0))
+        .rotation3DEffect(.degrees(Double(tilt.x) * 7), axis: (x: 0, y: 1, z: 0))
         .onChange(of: gaze) { old, new in
             gazeFrom = old; shownGaze = new; gazeChangedAt = Date()
         }

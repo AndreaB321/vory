@@ -23,8 +23,6 @@ struct TranscriptView: View {
     /// does not forget it (the earlier "can't collapse again" bug).
     @State private var openReasoning: Set<String> = []
     @State private var selectText: String?
-    /// 0…1 while the user drags the transcript left, revealing per-message times like Messages.
-    @State private var timeReveal: CGFloat = 0
     @AppStorage(ChatStyle.showToolCalls) private var showToolCalls = true
     @AppStorage(ChatStyle.showReasoning) private var showReasoning = true
     @AppStorage(ChatStyle.showTurnStats) private var showTurnStats = true
@@ -42,10 +40,22 @@ struct TranscriptView: View {
     }
 
     private var rows: [TranscriptRowModel] { TranscriptRowModel.build(visibleItems) }
+    /// True while the last item is a reply still waiting for its first words (that row shows
+    /// the typing bubble itself).
+    private var lastIsEmptyStreamingReply: Bool {
+        if case .assistant(let t, _, let streaming) = chat.items.last?.kind { return streaming && t.isEmpty }
+        return false
+    }
+    /// The tool the bot is running, for the dark typing bubble ("Running terminal…" → "terminal").
+    private var typingTool: String? {
+        guard chat.botState == .usingTool, let s = chat.statusLine else { return nil }
+        return s.replacingOccurrences(of: "Running ", with: "").replacingOccurrences(of: "Preparing ", with: "").trimmingCharacters(in: CharacterSet(charactersIn: "… "))
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
+                TimeRevealColumn {
                 VStack(alignment: .leading, spacing: 10) {
                     if chat.items.isEmpty, chat.resumeError == nil {
                         VStack(spacing: 8) {
@@ -60,18 +70,30 @@ struct TranscriptView: View {
                                 .frame(maxWidth: .infinity).padding(.vertical, 6)
                         }
                         TranscriptRow(item: row.item, profile: showBots ? chat.profileName : nil, botShown: row.lastOfRun,
+                                      typingTool: typingTool,
                                       showReasoning: showReasoning, showStats: showTurnStats, onEdit: onEditMessage,
                                       reasoningOpen: Binding(get: { openReasoning.contains(row.item.id) },
                                                              set: { if $0 { openReasoning.insert(row.item.id) } else { openReasoning.remove(row.item.id) } }),
                                       onSelectText: { selectText = $0 })
                             .id(row.item.id)
                             .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
-                            .offset(x: -timeReveal * 56)
+                            // The time waits just past the right edge; the column slides left to show it.
                             .overlay(alignment: .trailing) {
                                 Text(row.item.timestamp, style: .time).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
-                                    .fixedSize().offset(x: 60 - timeReveal * 56).opacity(timeReveal)
-                                    .accessibilityHidden(timeReveal < 0.5)
+                                    .fixedSize().offset(x: 60)
+                                    .accessibilityHidden(true)
                             }
+                    }
+                    // Working with no bubble to fill (between parts, during a tool): the typing
+                    // bubble stands on its own, dark with the badge while a tool runs.
+                    if chat.isRunning, !lastIsEmptyStreamingReply {
+                        HStack(alignment: .bottom, spacing: 10) {
+                            if showBots { BotAvatar(profile: chat.profileName, size: 28, active: true, mood: BotFaceView.Mood(profile: chat.profileName, state: chat.botState)) }
+                            TypingBubble(tool: typingTool)
+                            Spacer(minLength: 40)
+                        }
+                        .id("typing")
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
                     if let s = chat.statusLine, chat.isRunning {
                         HStack(spacing: 8) {
@@ -85,6 +107,7 @@ struct TranscriptView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
                 .animation(.snappy(duration: 0.28), value: chat.items.count)
+                }
             }
             .contentMargins(.bottom, bottomInset + 8 + keyboardInset, for: .scrollContent)
             .contentMargins(.top, topInset + 8, for: .scrollContent)
@@ -128,15 +151,6 @@ struct TranscriptView: View {
             }
             .sheet(item: Binding(get: { selectText.map { SelectTextItem(text: $0) } }, set: { selectText = $0?.text })) { SelectTextSheet(text: $0.text) }
             .ignoresSafeArea(.container, edges: .top)
-            // Drag from the right edge inward to peek at message times, then it springs back.
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 24)
-                    .onChanged { v in
-                        guard abs(v.translation.width) > abs(v.translation.height), v.translation.width < 0 else { return }
-                        timeReveal = min(1, -v.translation.width / 80)
-                    }
-                    .onEnded { _ in withAnimation(.snappy) { timeReveal = 0 } }
-            )
             .scrollDismissesKeyboard(.interactively)
             .defaultScrollAnchor(.bottom)
             // Whole item, not just `.kind`: the tokens/sec footer lands after the text does and
@@ -153,6 +167,26 @@ struct TranscriptView: View {
                 if stickToBottom, !userScrolling { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) } }
             }
         }
+    }
+}
+
+/// Drag the thread left to peek at each message's time, as in Messages. One transform on the
+/// whole column, with the times laid out just past the right edge, so a drag re-renders nothing
+/// but this wrapper — never the rows.
+struct TimeRevealColumn<Content: View>: View {
+    @ViewBuilder var content: Content
+    @State private var reveal: CGFloat = 0
+    var body: some View {
+        content
+            .offset(x: -reveal * 56)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 24)
+                    .onChanged { v in
+                        guard abs(v.translation.width) > abs(v.translation.height), v.translation.width < 0 else { return }
+                        reveal = min(1, -v.translation.width / 80)
+                    }
+                    .onEnded { _ in withAnimation(.snappy) { reveal = 0 } }
+            )
     }
 }
 
@@ -189,12 +223,16 @@ struct TranscriptRowModel: Identifiable {
             last = item.timestamp
             out.append(TranscriptRowModel(item: item, separator: sep))
         }
-        // A run of replies (with tool cards between them) shows the bot once, on the last one.
+        // A run of replies (with tool cards between them) shows the bot and the tail once, on
+        // the last one; a run of the person's messages gets one tail the same way.
         for i in out.indices {
-            guard case .assistant = out[i].item.kind else { continue }
             var next = i + 1
             while next < out.count, case .tool = out[next].item.kind { next += 1 }
-            if next < out.count, case .assistant = out[next].item.kind { out[i].lastOfRun = false }
+            guard next < out.count else { continue }
+            switch (out[i].item.kind, out[next].item.kind) {
+            case (.assistant, .assistant), (.user, .user): out[i].lastOfRun = false
+            default: break
+            }
         }
         return out
     }
@@ -217,6 +255,9 @@ struct TranscriptRow: View {
     /// run of replies gets the bot (`botShown`); the others keep the same left margin.
     var profile: String? = nil
     var botShown = true
+    /// While the reply has no text yet: nil = a grey typing bubble, a name = the dark one with
+    /// the tool badge.
+    var typingTool: String? = nil
     var showReasoning = true
     var showStats = true
     var onEdit: (String) -> Void = { _ in }
@@ -236,7 +277,7 @@ struct TranscriptRow: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, 14).padding(.vertical, 9)
                             .foregroundStyle(.white)
-                            .background(Color.accentColor, in: .rect(cornerRadius: 18))
+                            .background(Color.accentColor, in: MessageBubbleShape(side: .trailing, tailed: botShown))
                             .contextMenu {
                                 Button { UIPasteboard.general.string = text } label: { Label("Copy", systemImage: "doc.on.doc") }
                                 Button { onSelectText(text) } label: { Label("Select Text", systemImage: "selection.pin.in.out") }
@@ -247,7 +288,7 @@ struct TranscriptRow: View {
                 }
             }
         case .assistant(let text, let reasoning, let streaming):
-            HStack(alignment: .bottom, spacing: 8) {
+            HStack(alignment: .bottom, spacing: 10) {
                 if let profile {
                     if botShown {
                         BotAvatar(profile: profile, size: 28, active: streaming, mood: BotFaceView.Mood(profile: profile, state: streaming ? (text.isEmpty ? .thinking : .streaming) : .idle))
@@ -255,26 +296,41 @@ struct TranscriptRow: View {
                         Color.clear.frame(width: 28, height: 1)
                     }
                 }
+                if streaming && text.isEmpty {
+                    // Nothing to read yet: the typing bubble (dark with a badge while a tool
+                    // runs), the reasoning above it when there is some, the live count below.
+                    VStack(alignment: .leading, spacing: 6) {
+                        if showReasoning, let reasoning, !reasoning.isEmpty {
+                            ReasoningDisclosure(text: reasoning, open: reasoningOpen)
+                                .padding(.horizontal, 14).padding(.vertical, 9)
+                                .background(Color(.systemGray5), in: MessageBubbleShape(side: .leading, tailed: false))
+                        }
+                        TypingBubble(tool: typingTool)
+                        if showStats, let s = item.stats {
+                            Text(s.label).font(.caption2.monospacedDigit()).foregroundStyle(.tertiary).padding(.leading, 6)
+                                .contentTransition(.numericText())
+                                .accessibilityLabel("Turn statistics: \(s.label)")
+                        }
+                    }
+                    Spacer(minLength: 40)
+                } else {
                 VStack(alignment: .leading, spacing: 6) {
                     if showReasoning, let reasoning, !reasoning.isEmpty { ReasoningDisclosure(text: reasoning, open: reasoningOpen) }
                     MarkdownView(text: text)
-                    if streaming && text.isEmpty {
-                        HStack(spacing: 4) { ForEach(0..<3, id: \.self) { _ in Circle().fill(.secondary).frame(width: 6, height: 6) } }
-                            .padding(.vertical, 2)
-                    }
                     if showStats, let s = item.stats {
                         Text(s.label).font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
                             .accessibilityLabel("Turn statistics: \(s.label)")
                     }
                 }
                 .padding(.horizontal, 14).padding(.vertical, 9)
-                .background(Color(.systemGray5), in: .rect(cornerRadius: 18))
+                .background(Color(.systemGray5), in: MessageBubbleShape(side: .leading, tailed: botShown))
                 .contextMenu {
                     Button { UIPasteboard.general.string = text } label: { Label("Copy", systemImage: "doc.on.doc") }
                     Button { onSelectText(text) } label: { Label("Select Text", systemImage: "selection.pin.in.out") }
                     ShareLink(item: text) { Label("Share", systemImage: "square.and.arrow.up") }
                 }
                 Spacer(minLength: 40)
+                }
             }
         case .steer(let text, let status):
             HStack {
@@ -284,7 +340,7 @@ struct TranscriptRow: View {
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 14).padding(.vertical, 9)
-                        .background(Color(.systemGray4), in: .rect(cornerRadius: 18))
+                        .background(Color(.systemGray4), in: MessageBubbleShape(side: .trailing))
                         .contextMenu {
                             Button { UIPasteboard.general.string = text } label: { Label("Copy", systemImage: "doc.on.doc") }
                             Button { onEdit(text) } label: { Label("Edit & resend", systemImage: "pencil") }

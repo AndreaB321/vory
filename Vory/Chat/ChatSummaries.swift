@@ -24,7 +24,8 @@ final class ChatSummarizer {
     private(set) var summaries: [String: Summary] = [:]
     private var inFlight: Set<String> = []
     /// One generation at a time, at utility priority: several at once stuttered the list.
-    private var pending: [(StoredSession, GatewayRuntime, String?)] = []
+    private enum Job { case session(StoredSession, GatewayRuntime, String?); case room(Room, [RoomEvent]) }
+    private var pending: [Job] = []
     private var draining = false
     private static let cacheKey = "chats.aiSummaries.cache"
 
@@ -60,19 +61,70 @@ final class ChatSummarizer {
         guard enabled, Self.isAvailable, !inFlight.contains(session.id) else { return }
         if let s = summaries[session.id], s.stamp == (session.lastActive ?? 0) { return }
         inFlight.insert(session.id)
-        pending.append((session, runtime, profile))
+        pending.append(.session(session, runtime, profile))
+        drain()
+    }
+
+    // MARK: Group chats — keyed "room:<id>", stamped with the last event's sequence number.
+
+    static func roomKey(_ room: Room) -> String { "room:\(room.roomId)" }
+    static func roomStamp(_ events: [RoomEvent]) -> Double { Double(events.last?.seq ?? 0) }
+
+    func summary(forRoom room: Room, events: [RoomEvent]) -> Summary? {
+        guard enabled, let s = summaries[Self.roomKey(room)], s.stamp == Self.roomStamp(events) else { return nil }
+        return s
+    }
+
+    /// The room's recent messages are already in hand (the list fetched its log), so nothing is
+    /// loaded here; the model gets the last ten things said.
+    func refreshRoom(_ room: Room, events: [RoomEvent]) {
+        let key = Self.roomKey(room)
+        guard enabled, Self.isAvailable, !inFlight.contains(key), !events.isEmpty else { return }
+        if let s = summaries[key], s.stamp == Self.roomStamp(events) { return }
+        inFlight.insert(key)
+        pending.append(.room(room, events))
         drain()
     }
 
     private func drain() {
         guard !draining, !pending.isEmpty else { return }
         draining = true
-        let (session, runtime, profile) = pending.removeFirst()
+        let job = pending.removeFirst()
         Task(priority: .utility) {
-            await generate(session, runtime: runtime, profile: profile)
-            inFlight.remove(session.id)
+            switch job {
+            case .session(let session, let runtime, let profile):
+                await generate(session, runtime: runtime, profile: profile)
+                inFlight.remove(session.id)
+            case .room(let room, let events):
+                await generateRoom(room, events: events)
+                inFlight.remove(Self.roomKey(room))
+            }
             draining = false
             drain()
+        }
+    }
+
+    private func generateRoom(_ room: Room, events: [RoomEvent]) async {
+        let lines: [String] = events.compactMap { ev in
+            guard ev.kind.hasPrefix("message.") else { return nil }
+            let text = ev.payload["text"]?.stringValue ?? ev.payload["content"]?.stringValue ?? ""
+            guard !text.isEmpty else { return nil }
+            if ev.kind == "message.user" { return "User: \(text.prefix(600))" }
+            let who = ev.payload["member_id"]?.stringValue ?? ev.actor.id
+            let name = room.members.first { $0.memberId == who || $0.handle == who }?.displayName ?? who
+            return "\(name): \(text.prefix(600))"
+        }
+        guard !lines.isEmpty else { return }
+        do {
+            let ai = LanguageModelSession(instructions: "You summarize a group conversation between a user and several AI assistants for a chat list. Be concrete and neutral. Do not mention that it is a conversation or a summary.")
+            let draft = try await ai.respond(to: "Conversation:\n\(lines.suffix(10).joined(separator: "\n"))", generating: Draft.self).content
+            let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: ".\"'"))
+            let text = draft.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty || !text.isEmpty else { return }
+            summaries[Self.roomKey(room)] = Summary(title: title.isEmpty ? room.name : title, summary: text, stamp: Self.roomStamp(events))
+            save()
+        } catch {
+            // The model can refuse or time out; the row keeps the room's own text.
         }
     }
 

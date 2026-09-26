@@ -53,6 +53,8 @@ struct ProfileCardView: View {
     @State private var options: ModelOptionsResult?
     @State private var status: String?
     @State private var loaded = false
+    @State private var renaming = false
+    @State private var renameText = ""
     @AppStorage(ChatStyle.showToolCalls) private var showToolCalls = true
     @AppStorage(ChatStyle.showReasoning) private var showReasoning = true
     @AppStorage(ChatStyle.showTurnStats) private var showTurnStats = true
@@ -109,6 +111,19 @@ struct ProfileCardView: View {
                     if let u = chat.usage, let pct = u.computedContextPercent {
                         LabeledContent("Context", value: "\(pct)% of \((u.contextMax ?? 0).formatted())")
                     }
+                    Button { renameText = chat.title; renaming = true } label: {
+                        LabeledContent("Name", value: chat.title.isEmpty ? "Untitled" : chat.title)
+                    }
+                    .tint(.primary)
+                    .alert("Rename chat", isPresented: $renaming) {
+                        TextField("Name", text: $renameText)
+                        Button("Save") {
+                            let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !name.isEmpty else { return }
+                            Task { await chat.rename(name) }
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: { Text("The new name shows in the chat list and the header.") }
                 } header: { Text("This chat") }
                 Section {
                     Toggle("Show tool calls", isOn: $showToolCalls)

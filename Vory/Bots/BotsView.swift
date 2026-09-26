@@ -406,12 +406,53 @@ struct RoomView: View {
     @State private var error: String?
     @State private var cursor = 0
     @State private var loaded = false
+    @State private var lastSendAt: Date = .distantPast
     /// One thread per room composer; the gateway wants the same id on every message.
     private let threadID = "main"
 
     /// Which rows draw: the human's messages as blue bubbles, the bots' as grey ones with the
-    /// bot in front, room activity as a quiet line; everything else stays out of the way.
-    private var shown: [RoomEvent] { events.filter { $0.kind.hasPrefix("message.") || $0.kind == "room.activity" } }
+    /// bot in front, room activity as a quiet line (typing becomes the bubble below instead);
+    /// everything else stays out of the way.
+    private var shown: [RoomEvent] {
+        events.filter { $0.kind.hasPrefix("message.") || ($0.kind == "room.activity" && !Self.isTyping($0)) }
+    }
+
+    private static func status(of ev: RoomEvent) -> String {
+        (ev.payload["status"]?.stringValue ?? ev.payload["state"]?.stringValue ?? ev.payload["text"]?.stringValue ?? "").lowercased()
+    }
+    private static func isTyping(_ ev: RoomEvent) -> Bool {
+        let s = status(of: ev); return s.contains("typing") || s.contains("thinking") || s.contains("working") || s.contains("composing")
+    }
+    private func member(named id: String) -> RoomMember? {
+        let k = id.lowercased()
+        return room.members.first { [$0.memberId, $0.handle, $0.profile, $0.displayName].compactMap { $0?.lowercased() }.contains(k) }
+    }
+    private func memberKey(_ m: RoomMember) -> String { m.memberId ?? m.handle ?? m.profile ?? "" }
+
+    /// Who is typing: from each room activity after the last thing they said — the member the
+    /// payload names, or the first word of "hermes is typing…". A message from them, or a
+    /// "settled"/"idle" activity, clears it.
+    private var typing: [RoomMember] {
+        var active: [String: RoomMember] = [:]
+        for ev in events {
+            if ev.kind.hasPrefix("message."), ev.kind != "message.user" {
+                let who = ev.payload["member_id"]?.stringValue ?? ev.actor.id
+                if let m = member(named: who) { active[memberKey(m)] = nil }
+                continue
+            }
+            guard ev.kind == "room.activity" else { continue }
+            let s = Self.status(of: ev)
+            let named = ev.payload["member_id"]?.stringValue ?? ev.payload["handle"]?.stringValue ?? ev.payload["member"]?.stringValue
+                ?? s.split(separator: " ").first.map(String.init) ?? ""
+            let m = member(named: named)
+            if Self.isTyping(ev) {
+                if let m { active[memberKey(m)] = m }
+            } else if s.contains("settled") || s.contains("idle") || s.contains("done") || s.contains("stopped") {
+                if let m { active[memberKey(m)] = nil } else { active.removeAll() }
+            }
+        }
+        return room.members.filter { active[memberKey($0)] != nil }
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -426,18 +467,18 @@ struct RoomView: View {
                                 Text(body).textSelection(.enabled)
                                     .padding(.horizontal, 14).padding(.vertical, 9)
                                     .foregroundStyle(.white)
-                                    .background(Color.accentColor, in: .rect(cornerRadius: 18))
+                                    .background(Color.accentColor, in: MessageBubbleShape(side: .trailing))
                             }
                         case _ where ev.kind.hasPrefix("message."):
                             let member = ev.payload["member_id"]?.stringValue ?? ev.actor.id
                             let profile = room.members.first { $0.memberId == member || $0.handle == member }?.profile ?? member
-                            HStack(alignment: .bottom, spacing: 8) {
+                            HStack(alignment: .bottom, spacing: 10) {
                                 BotAvatar(profile: profile, size: 28)
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(room.members.first { $0.memberId == member || $0.handle == member }?.displayName ?? member).font(.caption2).foregroundStyle(.secondary)
                                     MarkdownView(text: body)
                                         .padding(.horizontal, 14).padding(.vertical, 9)
-                                        .background(Color(.systemGray5), in: .rect(cornerRadius: 18))
+                                        .background(Color(.systemGray5), in: MessageBubbleShape(side: .leading))
                                 }
                                 Spacer(minLength: 40)
                             }
@@ -447,6 +488,15 @@ struct RoomView: View {
                         }
                     }
                     .id("rows")
+                    // Whoever is composing: their bot, thinking, beside a typing bubble.
+                    ForEach(typing, id: \.self) { m in
+                        HStack(alignment: .bottom, spacing: 10) {
+                            BotAvatar(profile: m.profile ?? m.handle ?? "?", size: 28, active: true, mood: BotFaceView.Mood(profile: "room-typing-\(memberKey(m))", state: .thinking))
+                            TypingBubble()
+                            Spacer(minLength: 40)
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
                     if let error { Text(error).foregroundStyle(.red).font(.footnote) }
                     Color.clear.frame(height: 0).id("bottom")
                 }
@@ -483,6 +533,7 @@ struct RoomView: View {
                 .padding(12)
             }
             .onChange(of: events.count) { _, _ in withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo("bottom", anchor: .bottom) } }
+            .animation(.snappy(duration: 0.25), value: typing)
         }
         .navigationTitle(room.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -502,16 +553,19 @@ struct RoomView: View {
         } catch { self.error = error.localizedDescription }
     }
 
+    /// Quick while someone is typing or a send is fresh (replies land within seconds), lazy
+    /// otherwise.
     private func poll() async {
         while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(4))
+            let busy = !typing.isEmpty || Date().timeIntervalSince(lastSendAt) < 30
+            try? await Task.sleep(for: .seconds(busy ? 1.2 : 4))
             await load()
         }
     }
 
     private func send() async {
         guard let rt = model.runtime else { return }
-        let t = text; text = ""
+        let t = text; text = ""; lastSendAt = Date()
         // The gateway wants exactly {text, thread_id} in the payload and an identifier-shaped
         // event_id per send (letters, digits, - . _ :); it hashes the id itself.
         let eventID = "evt-" + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()

@@ -169,6 +169,34 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
 
 ### 2026-09-26 (build 45, from the build-44 review — in progress)
 - Group chat: `RoomView` gets `.hidesTabBar()` so the composer is not under the tab bar.
+- **Scroll performance**: `BotAmbient.scrolled` throttles the gaze to ~16 Hz and only when it
+  changed by > 0.03, and sets `scrolling` once; `BotFaceView` under 32 pt (beside bubbles, the
+  toolbar) does not read the ambient at all, so a long thread's bots do not redraw per tick.
+- **Time reveal** (drag left for timestamps): `TimeRevealColumn` wraps the thread — one `.offset`
+  on the column plus the drag gesture in that small view; each row's time sits at a fixed
+  `offset(x: 60)` past the right edge. Rows no longer read the drag state, so a drag re-renders
+  nothing but the wrapper.
+- **Tails** (`Vory/Chat/MessageBubbleShape.swift`): Messages' curl at the bottom corner on the
+  speaker's side; only the last bubble of a run (`TranscriptRowModel.lastOfRun`, now for user
+  runs too). Used in TranscriptRow (user, reply, steer) and RoomView.
+- **Typing indicators** (`Vory/Chat/TypingBubble.swift`): thought bubble with the two trailing
+  circles and three dots rising in turn (TimelineView); dark with a mint `ToolBadge` when
+  `typingTool` is set. Single chat: a reply row with no text yet shows it (reasoning above in
+  a plain bubble, live `TurnStats` label below), and `TranscriptView` adds a standalone typing
+  row whenever `chat.isRunning` and the last item is not an empty streaming reply (between
+  parts, during a tool) — dark while `chat.botState == .usingTool`. Group chat: `RoomView.typing`
+  derives who is composing from `room.activity` (status containing typing/thinking/working,
+  member from `member_id`/`handle` or the status's first word; a message from them or a
+  settled/idle/done activity clears it); typing activities are not drawn as lines; polling
+  runs at 1.2 s while someone is typing or within 30 s of a send, else 4 s. Mock: `groups.send`
+  now answers 4 s later (`call_later`) with a `settled` activity after.
+- **Chats list**: group chats show only with the "Group chats" filter on (their own list; the
+  sessions' "No chats yet" is suppressed there). Group rows fetch `groups.log` (last 40) into
+  `roomLogs` for a "You: …"/"Hermes: …" preview (markdown marks stripped) and feed
+  `ChatSummarizer.refreshRoom` — summaries keyed `room:<id>`, stamped with the last seq —
+  showing the sparkle title + summary like session rows.
+- **Rename chat**: profile sheet › This chat › Name row → alert with a text field →
+  `chat.rename(_:)` (`session.title`).
 
 ### 2026-09-26 (build 44, from the build-43 review)
 - **Light-mode bot colour everywhere painted**: `BotFace.draw(..., light:)` →

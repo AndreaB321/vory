@@ -27,6 +27,8 @@ struct ChatListView: View {
     @AppStorage(ChatSummarizer.enabledKey) private var aiSummaries = false
     private var summarizer: ChatSummarizer { ChatSummarizer.shared }
     @State private var rooms: [Room] = []
+    /// Each room's recent log, for the row's preview and its summary.
+    @State private var roomLogs: [String: [RoomEvent]] = [:]
     // Filters (the funnel button): what to show and in which order.
     @AppStorage("chats.filter.pinned") private var pinnedOnly = false
     @AppStorage("chats.filter.needsYou") private var needsYouOnly = false
@@ -199,10 +201,16 @@ struct ChatListView: View {
         List {
             if let errorText { Text(errorText).foregroundStyle(.red).font(.footnote) }
             let visibleRooms = rooms.filter { showArchived || !archivedRooms.contains($0.roomId) }
-            if searchText.isEmpty, !visibleRooms.isEmpty, !pinnedOnly, !needsYouOnly, !liveOnly {
+            // Group chats show only with their filter on, as their own list.
+            if groupsOnly, searchText.isEmpty {
+                if visibleRooms.isEmpty {
+                    Section { Text("No group chats yet. Start one from the compose button by adding more than one bot.").font(.footnote).foregroundStyle(.secondary) }
+                }
                 Section("Group chats") {
                     ForEach(visibleRooms) { room in
                         let archived = archivedRooms.contains(room.roomId)
+                        let log = roomLogs[room.roomId] ?? []
+                        let summary = summarizer.summary(forRoom: room, events: log)
                         NavigationLink(value: RoomRoute(room: room, initialText: nil)) {
                             HStack(spacing: 12) {
                                 HStack(spacing: -12) {
@@ -213,11 +221,21 @@ struct ChatListView: View {
                                 VStack(alignment: .leading, spacing: 3) {
                                     HStack(spacing: 6) {
                                         if archived { Image(systemName: "archivebox").font(.caption2).foregroundStyle(.secondary) }
-                                        Text(room.name).font(.body.weight(.medium)).lineLimit(1)
+                                        Text(summary?.title ?? room.name).font(.body.weight(.medium)).lineLimit(1)
+                                        if summary != nil { Image(systemName: "sparkles").font(.caption2).foregroundStyle(.secondary) }
                                     }
-                                    Text(room.members.compactMap { $0.displayName ?? $0.handle ?? $0.profile }.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                    // The summary, else the last thing said, else who is in it.
+                                    Text(summary?.summary ?? Self.lastLine(room, log) ?? room.members.compactMap { $0.displayName ?? $0.handle ?? $0.profile }.joined(separator: ", "))
+                                        .font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                                 }
                             }
+                        }
+                        .task(id: "\(room.roomId)-\(room.latestSeq ?? 0)-\(aiSummaries)") {
+                            if roomLogs[room.roomId] == nil || (room.latestSeq ?? 0) > (roomLogs[room.roomId]?.last?.seq ?? 0),
+                               let r: GroupsLogResult = try? await runtime.rpc("groups.log", ["room_id": .string(room.roomId), "since_seq": 0, "limit": 40], timeout: 10).decode() {
+                                roomLogs[room.roomId] = r.events
+                            }
+                            if aiSummaries, let events = roomLogs[room.roomId] { summarizer.refreshRoom(room, events: events) }
                         }
                         .contextMenu {
                             Button { path.append(RoomRoute(room: room, initialText: nil)) } label: { Label("Open", systemImage: "bubble.left") }
@@ -236,7 +254,7 @@ struct ChatListView: View {
                     }
                 }
             }
-            if rows.isEmpty && !loading {
+            if rows.isEmpty && !loading && !groupsOnly {
                 ContentUnavailableView(searchText.isEmpty ? "No chats yet" : "No results", systemImage: "bubble.left.and.bubble.right",
                                        description: Text(searchText.isEmpty ? "Start a new chat with the compose button." : "Try another search."))
                     .listRowSeparator(.hidden)
@@ -328,6 +346,19 @@ struct ChatListView: View {
             let arr = r["sessions"]?.arrayValue ?? r["results"]?.arrayValue ?? r.arrayValue ?? []
             searchResults = arr.compactMap { try? $0.decode(StoredSession.self) }
         } catch { errorText = error.localizedDescription }
+    }
+
+    /// "You: …" or "Hermes: …" from the last message in a room's log.
+    private static func lastLine(_ room: Room, _ log: [RoomEvent]) -> String? {
+        guard let ev = log.last(where: { $0.kind.hasPrefix("message.") }) else { return nil }
+        // Plain words for a one-line preview: no markdown marks, no line breaks.
+        let text = (ev.payload["text"]?.stringValue ?? ev.payload["content"]?.stringValue ?? "")
+            .replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "").replacingOccurrences(of: "\n", with: " ")
+        guard !text.isEmpty else { return nil }
+        if ev.kind == "message.user" { return "You: \(text)" }
+        let who = ev.payload["member_id"]?.stringValue ?? ev.actor.id
+        let name = room.members.first { $0.memberId == who || $0.handle == who }?.displayName ?? who
+        return "\(name): \(text)"
     }
 
     private func setArchived(_ room: Room, _ on: Bool) {

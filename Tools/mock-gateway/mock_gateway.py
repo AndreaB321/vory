@@ -475,8 +475,13 @@ class Gateway:
                             "kind": kind, "actor": actor, "payload": pl, "created_at": time.time()})
             ev("message.user", {"kind": "user", "id": "user"}, {"text": payload["text"], "thread_id": "main"})
             ev("room.activity", {"kind": "system", "id": "room"}, {"status": "hermes is typing…"})
-            ev("message.member", {"kind": "member", "id": "m1"}, {"text": f"Got it — **{payload['text']}**. On it.", "member_id": "m1", "thread_id": "main"})
-            return ok({"event_id": log[-3]["event_id"], "seq": log[-3]["seq"]})
+            sent = log[-2]
+            # The member answers a few seconds later, as a real bot would; the app polls for it.
+            def reply():
+                ev("message.member", {"kind": "member", "id": "m1"}, {"text": f"Got it — **{payload['text']}**. On it.", "member_id": "m1", "thread_id": "main"})
+                ev("room.activity", {"kind": "system", "id": "room"}, {"status": "settled"})
+            asyncio.get_event_loop().call_later(4.0, reply)
+            return ok({"event_id": sent["event_id"], "seq": sent["seq"]})
         if method == "groups.log":
             log = ROOM_LOGS.get(p.get("room_id"), [])
             since = int(p.get("since_seq") or 0)
