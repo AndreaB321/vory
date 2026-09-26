@@ -7,9 +7,9 @@ at a time, ship a TestFlight build, wait for their verdict.
 
 ## Where things stand
 
-- **Latest TestFlight build: 1.0.1 (40)**, uploaded 2026-09-26 ~13:20 (31–39 earlier that day).
-  **Build 41 is built and committed, awaiting the user's "ship it"** (see its entry). It carries
-  companion **1.0.26**, which the user installs from Settings › Software Update after the build.
+- **Latest TestFlight build: 1.0.1 (41)**, uploaded 2026-09-26 ~14:05 (31–40 earlier that day). It
+  carries companion **1.0.26** (the approval-cards fix), which the user installs from Settings ›
+  Software Update after the build. Awaiting the user's verdict.
   Build 39 (shipped on the user's "ship it"): dark-mode icon blue lighter
   (layer `fill-specializations` for dark, light unchanged), cloud 1.21× and up 20 pt, slash-command
   list in the composer, bottom lock in the transcript, glass bots redraw on change, darker glass
