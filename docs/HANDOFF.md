@@ -9,13 +9,14 @@ at a time, ship a TestFlight build, wait for their verdict.
 
 - **Latest TestFlight build: 1.0.1 (43)** (42 before it), uploaded 2026-09-26 ~15:05 (31–41 earlier that day),
   companion 1.0.26.
-- **Build 44 uploaded 2026-09-26 ~14:40** (user: "Okay ship it" after the motion demo videos) —
-  the build-43 review list plus the motion system v2, attachment cards, bot beside replies, group
-  chat send/empty state. What-to-Test notes posted by `scratchpad/post-notes44.sh` (poll until
-  VALID, then PATCH/POST betaBuildLocalizations). Awaiting the user's verdict; phone-only checks:
-  Preview motion page (Settings › Bots), header states on a real reply (thinking / tool / approval
-  ask), LA poses + glass phase discs, test notification (no reply, glass cloud), attachment card +
-  "Attach as file", group send on the real gateway, Software Update squint + turn, summaries scroll.
+- **Build 45 uploaded 2026-09-26 ~18:05** (user: "Once done go ahead and push it") — the build-44
+  review list (group composer, scroll/side-pull smoothness, tails, typing indicators, group
+  previews + summaries + merged list, rename chat) and the **motion second cut** with its two
+  review passes. Notes posted by `scratchpad/post-notes45.sh`. Awaiting the user's verdict;
+  phone-only checks: header holds on a real reply (pebble → stem → back, "!" on a card), the
+  typing bubble (grey / dark tool), scroll smoothness in long chats, group typing on the real
+  gateway, LA held poses.
+- Build 44 (2026-09-26 ~14:40) reviewed → the list above.
 - Build 43 (2026-09-26 ~15:50) reviewed: approvals work, summaries "look amazing".
 - **Public beta rule (user, 2026-09-26):** nothing user-specific in notes, setup copy, sample data
   or docs — no bot names, gateway names or hostnames. Write for strangers.
@@ -167,7 +168,7 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
 
 ## Change log
 
-### 2026-09-26 (build 45, from the build-44 review — in progress)
+### 2026-09-26 (build 45, from the build-44 review + the motion second cut)
 - Group chat: `RoomView` gets `.hidesTabBar()` so the composer is not under the tab bar.
 - **Scroll performance**: `BotAmbient.scrolled` throttles the gaze to ~16 Hz and only when it
   changed by > 0.03, and sets `scrolling` once; `BotFaceView` under 32 pt (beside bubbles, the
