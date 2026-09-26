@@ -1,37 +1,44 @@
 import SwiftUI
 import VoryCore
 
-/// Our own tab bar, drawn to the system Liquid Glass tab bar's measurements: a glass capsule of
-/// equal-width tabs (icon over a 10 pt label, a glass pill under the selected one) and a detached
-/// glass compose circle to its right. The system TabView cannot draw this on the current iOS
-/// (a search-role tab renders inline), so the tab pages sit in a ZStack behind it instead.
+/// Our own tab bar, drawn to the system Liquid Glass tab bar on iOS 27: a glass capsule of
+/// equal-width, icon-only tabs, a clear glass lens over the selected one (its label shows under
+/// the icon only there), and a detached glass compose circle the full height of the capsule.
+/// The system TabView cannot draw this on the current iOS (a search-role tab renders inline),
+/// so the tab pages sit in a ZStack behind it instead.
 ///
-/// Sizes come from a UITabBar dump on iOS 27 / iPhone 17 Pro: capsule 62 pt tall with 4 pt inset
-/// around 54 pt tab slots, 21 pt side margins, bottom edge 21 pt above the screen edge (13 pt
-/// into the home-indicator area), compose circle 48 pt, centred on the capsule.
+/// Measurements from a UITabBar dump on iOS 27 / iPhone 17 Pro: capsule 62 pt with 4 pt inset
+/// around 54 pt slots, 21 pt side margins, the bar group 49 pt above the home-indicator area with
+/// the capsule overflowing 13 pt into it.
 struct VoryTabBar: View {
     @Environment(AppModel.self) private var model
     var tabs: [AppModel.AppTab]
     var compose: () -> Void
 
-    /// Where the finger is along the capsule while it drags the pill; nil when not dragging.
+    /// Where the finger is along the capsule while it drags the lens; nil when not dragging.
     @State private var dragX: CGFloat?
     @State private var pressStart: Date?
 
-    private let slotHeight: CGFloat = 54
+    private let barHeight: CGFloat = 62
     private let inset: CGFloat = 4
     private let sideMargin: CGFloat = 21
-    private let circleSize: CGFloat = 48
     private let circleGap: CGFloat = 12
-    private let bottomMargin: CGFloat = 21
+    /// How far the capsule hangs into the home-indicator area.
+    private let overhang: CGFloat = 13
+    /// What the bar reserves above the home-indicator area (the system bar group's 49 pt); the
+    /// capsule is drawn overflowing below it.
+    static let reservedHeight: CGFloat = 49
 
     var body: some View {
         GlassEffectContainer(spacing: circleGap) {
             HStack(spacing: circleGap) {
                 capsule
                 Button(action: compose) {
-                    Image(systemName: "square.and.pencil").font(.system(size: 20, weight: .medium))
-                        .frame(width: circleSize, height: circleSize)
+                    // The glyph's ink sits about a point up and right of its layout box (measured
+                    // from its alpha bounds), so centre the ink rather than the box.
+                    Image(systemName: "square.and.pencil").font(.system(size: 24, weight: .medium))
+                        .offset(x: -1, y: 1)
+                        .frame(width: barHeight, height: barHeight)
                         .glassEffect(.regular.interactive(), in: .circle)
                 }
                 .buttonStyle(.plain)
@@ -41,30 +48,37 @@ struct VoryTabBar: View {
             }
         }
         .padding(.horizontal, sideMargin)
-        .padding(.bottom, bottomMargin)
-        .ignoresSafeArea(.container, edges: .bottom)
+        // Reserve only the part above the home-indicator area, like the system bar group; the
+        // capsule itself is drawn overflowing into it.
+        .frame(height: Self.reservedHeight, alignment: .top)
     }
 
     private var capsule: some View {
         GeometryReader { geo in
             let slotWidth = max(1, (geo.size.width - inset * 2) / CGFloat(max(1, tabs.count)))
+            let slotHeight = geo.size.height - inset * 2
             let selectedIndex = CGFloat(tabs.firstIndex(of: model.selectedTab) ?? 0)
             let dragging = dragX != nil
-            let pillX: CGFloat = {
+            let lensX: CGFloat = {
                 guard let x = dragX else { return inset + selectedIndex * slotWidth }
                 return min(max(inset, x - slotWidth / 2), geo.size.width - inset - slotWidth)
             }()
-            ZStack(alignment: .leading) {
-                // The selection pill: sits under the selected slot, or wherever the finger holds it.
-                Capsule().fill(Color.primary.opacity(dragging ? 0.14 : 0.09))
-                    .frame(width: slotWidth, height: slotHeight)
-                    .scaleEffect(dragging ? 1.06 : 1)
-                    .offset(x: pillX, y: inset)
-                    .animation(dragging ? .interactiveSpring(response: 0.18) : .snappy(duration: 0.3), value: pillX)
-                    .animation(.snappy(duration: 0.2), value: dragging)
+            ZStack(alignment: .topLeading) {
+                // The lens: clear glass under the selected slot, or wherever the finger holds it
+                // (grown a little while lifted). Under the icons so they stay crisp.
+                GlassEffectContainer {
+                    Capsule().fill(.clear)
+                        .frame(width: slotWidth, height: slotHeight)
+                        .glassEffect(.clear.interactive(), in: .capsule)
+                }
+                .scaleEffect(dragging ? 1.12 : 1)
+                .offset(x: lensX, y: inset)
+                .animation(dragging ? .interactiveSpring(response: 0.18) : .snappy(duration: 0.32), value: lensX)
+                .animation(.snappy(duration: 0.22), value: dragging)
+                .allowsHitTesting(false)
                 HStack(spacing: 0) {
                     ForEach(tabs, id: \.self) { tab in
-                        slot(tab).frame(width: slotWidth, height: slotHeight)
+                        slot(tab, dragging: dragging).frame(width: slotWidth, height: slotHeight)
                     }
                 }
                 .padding(inset)
@@ -72,25 +86,29 @@ struct VoryTabBar: View {
             .contentShape(Capsule())
             .gesture(barGesture(slotWidth: slotWidth))
         }
-        .frame(height: slotHeight + inset * 2)
+        .frame(height: barHeight)
         .glassEffect(.regular, in: .capsule)
     }
 
-    /// One tab: icon over its label, like the system bar. Taps and drags are handled by the
-    /// capsule's gesture, so this is a plain view with the button's accessibility.
-    @ViewBuilder private func slot(_ tab: AppModel.AppTab) -> some View {
+    /// One tab: a large icon on its own, or a smaller icon over its label when it is selected
+    /// (no labels at all while the lens is being dragged, like the system bar).
+    @ViewBuilder private func slot(_ tab: AppModel.AppTab, dragging: Bool) -> some View {
         let selected = model.selectedTab == tab
+        let labelled = selected && !dragging
         VStack(spacing: 2) {
-            icon(for: tab).frame(height: 28)
-            Text(tab.title).font(.system(size: 10, weight: selected ? .semibold : .medium))
-                .lineLimit(1).minimumScaleFactor(0.8)
+            icon(for: tab, size: labelled ? 22 : 27)
+                .frame(height: labelled ? 26 : 32)
+            if labelled {
+                Text(tab.title).font(.system(size: 10, weight: .semibold))
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
         }
-        .padding(.top, 4).padding(.bottom, 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .foregroundStyle(selected ? Color.accentColor : Color.primary)
-        .animation(.snappy(duration: 0.2), value: selected)
+        .animation(.snappy(duration: 0.24), value: labelled)
         .overlay(alignment: .top) {
-            if let b = badge(for: tab) { b.offset(x: 14, y: 0) }
+            if let b = badge(for: tab) { b.offset(x: 14, y: 4) }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(tab.title)
@@ -98,8 +116,8 @@ struct VoryTabBar: View {
         .accessibilityAction { select(tab) }
     }
 
-    /// A press moves the pill under the finger once it is held for a moment or slides sideways;
-    /// the page switches as the pill passes each tab. A quick press is a tap on that tab.
+    /// A press moves the lens under the finger once it is held for a moment or slides sideways;
+    /// the page switches as the lens passes each tab. A quick press is a tap on that tab.
     private func barGesture(slotWidth: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .local)
             .onChanged { v in
@@ -130,11 +148,11 @@ struct VoryTabBar: View {
         withAnimation(.snappy(duration: 0.28)) { model.selectedTab = tab }
     }
 
-    @ViewBuilder private func icon(for tab: AppModel.AppTab) -> some View {
+    @ViewBuilder private func icon(for tab: AppModel.AppTab, size: CGFloat) -> some View {
         if tab == .bots {
-            VoryOutlineIcon().frame(width: 28, height: 24)
+            VoryOutlineIcon().frame(width: size * 1.3, height: size * 1.1)
         } else {
-            Image(systemName: tab.symbol).font(.system(size: 21, weight: .medium))
+            Image(systemName: tab.symbol).font(.system(size: size, weight: .medium))
         }
     }
 

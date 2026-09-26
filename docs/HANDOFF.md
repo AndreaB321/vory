@@ -7,10 +7,11 @@ at a time, ship a TestFlight build, wait for their verdict.
 
 ## Where things stand
 
-- **Latest TestFlight build: 1.0.1 (31)**, uploaded 2026-09-26 ~10:20. Companion plugin **1.0.25**.
-  Builds 20 and 22 were superseded cuts and are expired. Build 31 is untested by the user; their
-  verdict on build 30 was: bar too small and not uniform between tabs, Settings search over the
-  bar, gap under the Chats search — all addressed in 31.
+- **Latest TestFlight build: 1.0.1 (32)**, uploaded 2026-09-26 ~10:45 (31 at ~10:20). Companion plugin **1.0.25**.
+  Builds 20 and 22 were superseded cuts and are expired. Build 32 is untested by the user. Verdict on 31: not
+  aligned like the system bar, no refracting glass lens, list rows cut off under the bar, labels
+  should show only under the selected tab, compose circle should be the bar's height and its
+  glyph centred — all addressed in 32.
 - **Versioning plan (user's decision):** marketing version stays `1.0.1` through the beta, then
   `1.2`, `1.3`…; `2.0` is the real App Store release. Build numbers are small iteration numbers.
   `Tools/release/testflight.sh` picks the next one from App Store Connect automatically (override
@@ -142,7 +143,14 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
 
 ## Change log
 
-### 2026-09-26 (build 31)
+### 2026-09-26 (builds 31–32)
+- 32: icon-only tabs (27 pt) with the label only under the selected one (22 pt icon + 10 pt label);
+  the selection is a clear glass lens (`.glassEffect(.clear.interactive())` in its own
+  GlassEffectContainer, drawn UNDER the icons — on top it blurred them); compose circle 62 pt = bar
+  height, glyph centred on its ink (offset −1, +1 measured from alpha bounds); the bar reserves 49 pt
+  (`VoryTabBar.reservedHeight`) and the capsule overflows 13 pt into the home area. Lists inside
+  the pages' NavigationStacks do NOT honour the ZStack's `safeAreaInset` on iOS 27, so `MainTabView`
+  also sets `.contentMargins(.bottom, 49, for: .scrollContent)` while the bar is shown.
 - 31: tab bar to the native measurements (equal slots, labels on every tab, lower and taller),
   press-and-hold drag of the selection pill, Settings (+ Config/Env/MCP/Skills) search under the
   title (`.navigationBarDrawer(displayMode: .always)`; iOS 27 then forces the title inline — the

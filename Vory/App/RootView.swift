@@ -63,6 +63,9 @@ struct MainTabView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        // Lists inside the pages' navigation stacks do not pick up the inset above on this iOS
+        // (their last rows ended under the bar), so their scroll content gets the same margin.
+        .contentMargins(.bottom, model.tabBarHidden ? 0 : VoryTabBar.reservedHeight, for: .scrollContent)
         .animation(.snappy(duration: 0.3), value: model.tabBarHidden)
         .onChange(of: tabs) { _, now in
             // The selected tab was removed from the layout: fall back to Chats instead of a blank pane.
