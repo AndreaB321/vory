@@ -207,7 +207,8 @@ struct ProfileView: View {
                 Section("Active profile in this app") {
                     ForEach(rt.profiles) { p in
                         Button { rt.selectedProfile = p.name } label: {
-                            HStack {
+                            HStack(spacing: 12) {
+                                BotAvatar(profile: p.name, size: 36)
                                 VStack(alignment: .leading) {
                                     Text(p.label)
                                     Text([p.model, p.description].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)

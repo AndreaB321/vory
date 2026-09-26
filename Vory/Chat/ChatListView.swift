@@ -23,6 +23,7 @@ struct ChatListView: View {
     /// Every profile's chats in one list, newest first, with the bot's avatar on each row.
     @AppStorage("chats.allBots") private var allBots = false
     @State private var showNewChat = false
+    @State private var showNewBot = false
     @State private var rooms: [Room] = []
     // Filters (the funnel button): what to show and in which order.
     @AppStorage("chats.filter.pinned") private var pinnedOnly = false
@@ -57,13 +58,17 @@ struct ChatListView: View {
             .onChange(of: model.popToRoot[.chats]) { _, _ in path = NavigationPath() }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { profileMenu }
-                ToolbarItem(placement: .topBarTrailing) { filterMenu }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button { showNewBot = true } label: { Image(systemName: "plus") }.accessibilityLabel("New bot")
+                    filterMenu
+                }
             }
             // Compose: the Messages-style sheet (To: bots, first message).
             .onChange(of: model.newChatRequest) { _, r in
                 guard r != nil, model.selectedTab == .chats, runtime != nil else { return }
                 showNewChat = true
             }
+            .sheet(isPresented: $showNewBot) { if let runtime { NewBotSheet(runtime: runtime) } }
             .sheet(isPresented: $showNewChat) {
                 if let runtime {
                     NewChatSheet(runtime: runtime) { start in
@@ -203,7 +208,8 @@ struct ChatListView: View {
             }
             ForEach(rows) { s in
                 NavigationLink(value: ChatRoute(storedID: s.id, title: s.displayTitle, profile: allBots ? s.profile : nil)) {
-                    SessionRow(session: s, needsYou: runtime.needsAttention.contains(s.id), live: runtime.chatForStored(s.id)?.isRunning ?? false, showBot: allBots)
+                    SessionRow(session: s, needsYou: runtime.needsAttention.contains(s.id), live: runtime.chatForStored(s.id)?.isRunning ?? false, showBot: allBots,
+                               thinking: runtime.chatForStored(s.id).map { $0.isRunning && ($0.statusLine ?? "Thinking…") == "Thinking…" } ?? false)
                 }
                 .contextMenu {
                     Button { path.append(ChatRoute(storedID: s.id, title: s.displayTitle, profile: allBots ? s.profile : nil)) } label: { Label("Open", systemImage: "bubble.left") }
@@ -305,10 +311,11 @@ struct SessionRow: View {
     var needsYou: Bool
     var live: Bool
     var showBot = false
+    var thinking = false
 
     var body: some View {
         HStack(spacing: 12) {
-            if showBot { BotAvatar(profile: session.profile ?? "?", size: 34, active: live) }
+            if showBot { BotAvatar(profile: session.profile ?? "?", size: 34, active: live, mood: BotFaceView.Mood(thinking: thinking)) }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     if session.pinned == true { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary) }

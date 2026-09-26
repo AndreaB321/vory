@@ -8,7 +8,8 @@ at a time, ship a TestFlight build, wait for their verdict.
 ## Where things stand
 
 - **Latest TestFlight build: 1.0.1 (40)**, uploaded 2026-09-26 ~13:20 (31–39 earlier that day).
-  Build 40 = the 15 items from the user's build-39 review (see its entry). Awaiting the user's verdict.
+  **Build 41 is built and committed, awaiting the user's "ship it"** (see its entry). It carries
+  companion **1.0.26**, which the user installs from Settings › Software Update after the build.
   Build 39 (shipped on the user's "ship it"): dark-mode icon blue lighter
   (layer `fill-specializations` for dark, light unchanged), cloud 1.21× and up 20 pt, slash-command
   list in the composer, bottom lock in the transcript, glass bots redraw on change, darker glass
@@ -156,6 +157,32 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
   `hermes.text` (≤1200) and `hermes.title`; payload trimmed under Apple's 4 KB.
 
 ## Change log
+
+### 2026-09-26 (build 41, from the build-40 review)
+- **Approval cards — the real cause.** The app's `client.capabilities {server_requests: true}` was
+  always sent; the gateway log said "the attached client predates server→client requests" because
+  the *companion* (`hermes_push.py`) called `session.activate` on every session (discover, thread
+  fetch), which made ITS socket (advertising `server_requests: false`) the attached client. 1.0.26
+  never activates: attribution from the live list + per-profile REST list, the reply-window thread
+  from `GET /api/sessions/{id}/messages`, pending cards from `approval.pending`. If cards still fail,
+  check the gateway log for which client is attached when the approval is raised.
+- **Motion**: routines are now nod / 360° spin / small wiggle / lean (5 s blocks, only while
+  working); the hop and pulse are gone. `BotFace.motion(…, finishedAt:)` plays one 360° whenever a
+  turn ends (`BotAmbient.finished[profile]`, set from `LiveActivityController.end`; the view nudges
+  itself after 1.4 s so the timeline pauses again). `strain` (thinking: `isRunning && statusLine ∈
+  {nil, "Thinking…"}`) squints the eyes to 42 % open. `glanceFree` false (Bots page, tilt > 0.3 of
+  the ±1 range) stops the wandering glance; the eyes follow the tilt fully instead. Bots page bots
+  play random routines while `BotAmbient.scrolling` (450 ms after the last scroll delta).
+- **Light mode**: tinted glass alone rendered dark on white (sky-blue → navy); `liveGlass` now lays
+  the colour down first (`BotBodyShape.fill(tint 62 % light / 28 % dark)`) with lighter glass tint.
+- Pills: capsules, thinner; the bot overlaps the top edge by ~9–10 pt (user tuned by eye: "sitting
+  on it", then "a tiny bit lower"). Chat header `VStack(spacing: -9)`, Bots page `spacing: -10`.
+- `NewBotSheet` (Bots and Chats "+"): name (sanitised to a folder name), description, default
+  model, clone-from, Creator Studio under a draft key that moves to the real name on create; POST
+  /api/profiles then PUT description/model. Settings › Profile rows show the bots.
+- groups.create members now carry `handle` (the real gateway requires it); compose chips scroll
+  instead of truncating; the slash list fades/scales in place instead of sliding from under the
+  keyboard.
 
 ### 2026-09-26 (build 40, from the build-39 review)
 - **Painted glass cloud**: rim = body filled minus body shrunk (destinationOut), not a stroke

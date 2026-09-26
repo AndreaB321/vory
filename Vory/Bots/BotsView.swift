@@ -9,6 +9,7 @@ struct BotsView: View {
     @State private var capabilities: GroupsCapabilities?
     @State private var rooms: [Room] = []
     @State private var error: String?
+    @State private var showNewBot = false
 
     private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
 
@@ -54,6 +55,12 @@ struct BotsView: View {
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in BotAmbient.shared.scrolled(dy: new - old) }
             .navigationTitle("Bots")
             .tabRoot(.bots)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showNewBot = true } label: { Image(systemName: "plus") }.accessibilityLabel("New bot")
+                }
+            }
+            .sheet(isPresented: $showNewBot) { if let rt = model.runtime { NewBotSheet(runtime: rt) } }
             .navigationDestination(for: ProfileInfo.self) { BotDetailView(profile: $0) }
             .navigationDestination(for: Room.self) { RoomView(room: $0) }
             .navigationDestination(for: ChatRoute.self) { ConversationView(route: $0) }
@@ -82,9 +89,14 @@ struct BotCard: View {
     var isActive: Bool
     var working: Bool
 
+    private var ambient: BotAmbient { BotAmbient.shared }
+
     var body: some View {
-        VStack(spacing: -16) {
-            BotAvatar(profile: profile.name, size: 78, active: working)
+        VStack(spacing: -10) {
+            // The bot sits on the pill, a few points over its top edge.
+            // Plays while the page scrolls (random per bot), settles when it stops.
+            BotAvatar(profile: profile.name, size: 78, active: working || (ambient.scrolling && ambient.enabled),
+                      mood: BotFaceView.Mood(profile: profile.name, followsTilt: true))
                 .zIndex(1)
             VStack(spacing: 2) {
                 HStack(spacing: 5) {
@@ -94,9 +106,9 @@ struct BotCard: View {
                 Text(profile.model.map { $0.split(separator: "/").last.map(String.init) ?? $0 } ?? "no model")
                     .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
-            .padding(.horizontal, 14).padding(.top, 22).padding(.bottom, 10)
+            .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 7)
             .frame(maxWidth: .infinity)
-            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 22))
+            .glassEffect(.regular.interactive(), in: .capsule)
         }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
@@ -130,7 +142,7 @@ struct RoomCard: View {
 /// Creates a hosted group chat on the gateway for these bots; the name is what the room is called.
 enum GroupChats {
     static func create(runtime: GatewayRuntime, name: String, profiles: [ProfileInfo]) async throws -> Room {
-        let list: [JSONValue] = profiles.map { .object(["member_id": .string($0.name), "profile": .string($0.name), "display_name": .string($0.label)]) }
+        let list: [JSONValue] = profiles.map { .object(["member_id": .string($0.name), "handle": .string($0.name), "profile": .string($0.name), "display_name": .string($0.label)]) }
         let r = try await runtime.rpc("groups.create", ["name": .string(name), "members": .array(list)])
         if let room: Room = try? r.decode() { return room }
         if let room: Room = try? (r["room"] ?? .null).decode() { return room }
@@ -195,7 +207,7 @@ struct NewRoomSheet: View {
     private func create() async {
         busy = true; defer { busy = false }
         let list: [JSONValue] = runtime.profiles.filter { members.contains($0.name) }.map {
-            .object(["member_id": .string($0.name), "profile": .string($0.name), "display_name": .string($0.label)])
+            .object(["member_id": .string($0.name), "handle": .string($0.name), "profile": .string($0.name), "display_name": .string($0.label)])
         }
         do {
             _ = try await runtime.rpc("groups.create", ["name": .string(name.trimmingCharacters(in: .whitespaces)), "members": .array(list)])

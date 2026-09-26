@@ -70,6 +70,8 @@ struct BotAvatar: View {
     var active: Bool = false
     /// Draw this choice instead of the stored one (the picker's previews).
     var override: BotAvatarChoice? = nil
+    /// Thinking squint, finish spin (by profile), tilt-following eyes.
+    var mood: BotFaceView.Mood = BotFaceView.Mood()
     @AppStorage(BotColors.storageKey) private var raw = ""
     @AppStorage(BotAvatarStore.storageKey) private var avatarsRaw = ""
     @AppStorage(BotAvatarStore.glassAllKey) private var glassAll = false
@@ -77,6 +79,9 @@ struct BotAvatar: View {
     private var overrides: [String: String] {
         guard let d = raw.data(using: .utf8), let m = try? JSONDecoder().decode([String: String].self, from: d) else { return [:] }
         return m
+    }
+    private var effectiveMood: BotFaceView.Mood {
+        var m = mood; if m.profile == nil { m.profile = profile }; return m
     }
     private var choice: BotAvatarChoice {
         if let override { return override }
@@ -92,7 +97,7 @@ struct BotAvatar: View {
             if choice == .photo, let image = BotAvatarStore.photo(for: profile) {
                 Image(uiImage: image).resizable().scaledToFill().frame(width: size, height: size).clipShape(Circle())
             } else {
-                BotFaceView(spec: choice.spec(hex: hex), size: size, active: active)
+                BotFaceView(spec: choice.spec(hex: hex), size: size, active: active, mood: effectiveMood)
             }
         }
         .frame(width: size, height: size)

@@ -53,7 +53,7 @@ except ImportError as exc:  # pragma: no cover
 log = logging.getLogger("hermes-push")
 
 # Keep in step with plugin/vory-push/plugin.yaml; the app compares the two.
-VERSION = "1.0.25"
+VERSION = "1.0.26"
 USER_AGENT = f"Vory-Push/{VERSION} (Hermes companion)"
 try:
     # Fingerprint of the code actually running: the app compares it with the copy it ships, so a
@@ -643,8 +643,8 @@ class Relay:
     _session_profile_at = 0.0
 
     def _refresh_session_profiles(self, profiles: list, force: bool = False) -> None:
-        """`session.activate` reports the profile it was asked with, not the session's own, so the
-        per-profile REST list (what the app's chat list uses) decides which bot a session belongs to."""
+        """The per-profile REST list (what the app's chat list uses) decides which bot a session
+        belongs to; the live list's own profile field is the profile it was listed under."""
         if not force and time.time() - self._session_profile_at < 60:
             return
         found: dict[str, str] = {}
@@ -682,27 +682,30 @@ class Relay:
                 sid = s.get("id")
                 if not sid or sid in self.attached:
                     continue
-                try:
-                    snap = await self.gw.call("session.activate", {**params, "session_id": sid, "omit_messages": True})
-                except Exception as exc:  # noqa: BLE001
-                    log.debug("activate %s failed: %s", sid, exc)
-                    continue
-                # The phone files its Live Activity token under the STORED id (the gateway's session_key);
-                # the activate snapshot does not always carry it, but the live list always does.
-                stored = snap.get("stored_session_id") or s.get("session_key") or sid
-                info = snap.get("info") or {}
-                # The listing for one profile includes other profiles' sessions and the snapshot echoes
-                # the profile it was asked with, so the gateway's per-profile session list decides.
+                # NOT session.activate: activating makes this socket the session's attached client,
+                # and the gateway then sends approval requests here (which this companion cannot
+                # answer) instead of to the phone — "the attached client predates server→client
+                # requests". Everything needed is in the live list, the per-profile REST list and
+                # approval.pending, none of which attach.
+                # The phone files its Live Activity token under the STORED id (the gateway's session_key).
+                stored = s.get("session_key") or s.get("stored_session_id") or sid
+                # The listing for one profile includes other profiles' sessions, so the gateway's
+                # per-profile session list decides which bot a session belongs to.
                 if stored not in self.session_profile:
                     self._refresh_session_profiles(profiles, force=True)
-                pname = self.session_profile.get(stored) or s.get("profile") or info.get("profile_name") or profile or "default"
-                self.attached[sid] = {"stored": stored, "title": s.get("title") or info.get("title") or "Hermes", "profile": pname,
+                pname = self.session_profile.get(stored) or s.get("profile") or profile or "default"
+                self.attached[sid] = {"stored": stored, "title": s.get("title") or "Hermes", "profile": pname,
                                       "bot": self.labels.get(pname, pname), "source": s.get("source") or ""}
-                log.info("attached %s (%s, profile %s)", self.attached[sid]["title"], stored[:12], self.attached[sid]["profile"])
-                for req in snap.get("open_requests") or []:
-                    self.handle_request(sid, req.get("id", ""), req.get("method", ""), req.get("params") or {})
-                if pa := snap.get("pending_approval"):
-                    self.handle_request(sid, "queue-" + str(pa.get("request_id")), "approval", pa)
+                log.info("tracking %s (%s, profile %s)", self.attached[sid]["title"], stored[:12], self.attached[sid]["profile"])
+                try:
+                    pend = await asyncio.wait_for(self.gw.call("approval.pending", {**params, "session_id": sid}), timeout=3)
+                except Exception:  # noqa: BLE001
+                    pend = {}
+                if isinstance(pend, dict):
+                    items = pend.get("pending") or pend.get("approvals") or ([pend] if pend.get("request_id") else [])
+                    for pa in items:
+                        if isinstance(pa, dict) and pa.get("request_id"):
+                            self.handle_request(sid, "queue-" + str(pa.get("request_id")), "approval", pa)
 
     def meta(self, sid: str) -> dict:
         a = self.attached.get(sid, {})
@@ -826,11 +829,14 @@ class Relay:
     async def _recent_thread(self, sid: str, a: dict) -> list:
         """Up to three earlier messages of the session (user and assistant text only, shortened) for
         the notification's reply window. Empty when the gateway is slow or has none."""
+        # REST, not session.activate: activating would make this socket the session's attached
+        # client and steal the approval cards from the phone (see discover()).
         try:
-            params = {"session_id": sid, "omit_messages": False}
+            stored = a.get("stored", sid)
+            q = f"/api/sessions/{urllib.parse.quote(stored)}/messages?order=latest&limit=12"
             if a.get("profile"):
-                params["profile"] = a["profile"]
-            snap = await asyncio.wait_for(self.gw.call("session.activate", params), timeout=1.4)
+                q += "&profile=" + urllib.parse.quote(a["profile"])
+            snap = await asyncio.wait_for(asyncio.get_running_loop().run_in_executor(None, self.gw._http, "GET", q), timeout=1.4)
         except Exception as exc:  # noqa: BLE001
             log.debug("thread fetch failed for %s: %s", sid[:12], exc)
             return []

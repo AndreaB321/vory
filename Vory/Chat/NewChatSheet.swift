@@ -47,11 +47,12 @@ struct NewChatSheet: View {
             // To: the chosen bots as chips, then the search text.
             HStack(alignment: .center, spacing: 8) {
                 Text("To:").foregroundStyle(.secondary)
-                HStack(spacing: 6) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                  HStack(spacing: 6) {
                         ForEach(chosen) { p in
                             HStack(spacing: 5) {
                                 BotAvatar(profile: p.name, size: 20)
-                                Text(p.label).font(.subheadline)
+                                Text(p.label).font(.subheadline).lineLimit(1).fixedSize()
                             }
                             .padding(.leading, 4).padding(.trailing, 10).padding(.vertical, 4)
                             .background(Color.accentColor.opacity(0.15), in: .capsule)
@@ -64,8 +65,10 @@ struct NewChatSheet: View {
                             .frame(minWidth: 60, maxWidth: .infinity)
                             .onSubmit { if let first = candidates.first { add(first) } }
                             .onKeyPress(.delete) { if query.isEmpty, let last = chosen.last { remove(last); return .handled }; return .ignored }
+                  }
                 }
                 .frame(height: 30)
+                .defaultScrollAnchor(.trailing)
                 Button { focus = .to } label: {
                     Image(systemName: "plus").font(.body.weight(.semibold))
                         .frame(width: 32, height: 32).glassEffect(.regular.interactive(), in: .circle)

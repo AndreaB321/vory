@@ -67,7 +67,8 @@ struct ComposerView: View {
                 // this scroll view cannot swallow the keyboard inset.
                 .frame(height: min(commandListCap, CGFloat(slashSuggestions.count) * 38 + 8))
                 .glassEffect(.regular, in: .rect(cornerRadius: 16))
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                // In place, not sliding up from under the keyboard.
+                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
             }
             if !chat.staged.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {

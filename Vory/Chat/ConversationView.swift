@@ -199,10 +199,11 @@ struct ChatHeader: View {
             .buttonStyle(.plain).accessibilityLabel("Back").accessibilityIdentifier("chat.back")
             Spacer(minLength: 0)
             Button(action: onProfile) {
-                VStack(spacing: -10) {
-                    // The bot sits above the pill, overlapping its top edge, like a contact photo in
-                    // Messages; it springs in from small on the first appearance.
-                    BotAvatar(profile: chat.profileName, size: 52, active: chat.isRunning)
+                VStack(spacing: -9) {
+                    // The bot sits on the pill, a few points over its top edge, like a contact
+                    // photo in Messages; it springs in from small on the first appearance.
+                    BotAvatar(profile: chat.profileName, size: 52, active: chat.isRunning,
+                              mood: BotFaceView.Mood(thinking: chat.isRunning && (chat.statusLine ?? "Thinking…") == "Thinking…"))
                         .scaleEffect(popped ? 1 : 0.3)
                         .opacity(popped ? 1 : 0)
                         .zIndex(1)
@@ -219,9 +220,9 @@ struct ChatHeader: View {
                             .contentTransition(.numericText())
                             .animation(.snappy, value: chat.statusLine)
                     }
-                    .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 8)
+                    .padding(.horizontal, 14).padding(.top, 11).padding(.bottom, 6)
                     .fixedSize()
-                    .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 22))
+                    .glassEffect(.regular.interactive(), in: .capsule)
                 }
             }
             .buttonStyle(.plain)

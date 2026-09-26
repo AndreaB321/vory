@@ -169,6 +169,7 @@ public enum BotFace {
     /// a five-second block, so a working bot is lively but not frantic. Idle bots keep still.
     public struct Motion: Equatable, Sendable {
         public var rotation: Double = 0   // radians, about the centre
+        public var dx: CGFloat = 0        // horizontal offset as a fraction of the size
         public var dy: CGFloat = 0        // vertical offset as a fraction of the size (negative = up)
         public var sx: CGFloat = 1
         public var sy: CGFloat = 1
@@ -177,7 +178,12 @@ public enum BotFace {
 
     static func smooth(_ x: Double) -> Double { let u = min(1, max(0, x)); return u * u * (3 - 2 * u) }
 
-    public static func motion(time t: Double, seed: Int, active: Bool) -> Motion {
+    /// A full turn, easing in and out, over 1.1 s from `u` = 0.
+    static func spin(_ u: Double) -> Motion { var m = Motion(); m.rotation = smooth(u / 1.1) * 2 * .pi; return m }
+
+    /// `finishedAt`: the turn just ended — one 360° spin, whatever else is going on.
+    public static func motion(time t: Double, seed: Int, active: Bool, finishedAt: Double? = nil) -> Motion {
+        if let f = finishedAt, t - f >= 0, t - f < 1.1 { return spin(t - f) }
         guard active, t > 0 else { return .still }
         let block = 5.0
         let tt = t + Double(seed % 11) * 0.7
@@ -185,24 +191,20 @@ public enum BotFace {
         let u = tt.truncatingRemainder(dividingBy: block)   // 0…5 within the block
         var m = Motion()
         switch (index + seed) % 5 {
-        case 1: // two hops, squashing on landing
-            guard u < 1.6 else { break }
-            let hop = u < 0.8 ? u / 0.8 : (u - 0.8) / 0.8
-            let air = sin(hop * .pi)
-            m.dy = -0.16 * CGFloat(air)
-            let squash = max(0, 1 - hop * 6) + max(0, (hop - 0.85) / 0.15)   // just before lift-off and on landing
-            m.sy = 1 - 0.12 * CGFloat(min(1, squash)); m.sx = 1 + 0.10 * CGFloat(min(1, squash))
-        case 2: // one full spin, easing in and out
-            guard u < 1.4 else { break }
-            m.rotation = smooth(u / 1.4) * 2 * .pi
-        case 3: // a wiggle: three tilts either way, fading out
-            guard u < 1.8 else { break }
-            let env = 1 - smooth((u - 0.6) / 1.2)
-            m.rotation = 0.20 * sin(u * 2 * .pi * 1.7) * env
-        case 4: // a pulse, twice
+        case 1: // a nod: two small dips
+            guard u < 0.9 else { break }
+            m.dy = 0.035 * CGFloat(abs(sin(u / 0.9 * 2 * .pi))) * CGFloat(1 - smooth((u - 0.6) / 0.3))
+        case 2: // one full spin
+            guard u < 1.1 else { break }
+            m = spin(u)
+        case 3: // a wiggle: a few small tilts, fading out
             guard u < 1.2 else { break }
-            let p = 0.06 * sin(u / 1.2 * 2 * .pi) * sin(u / 1.2 * .pi)
-            m.sx = 1 + CGFloat(p); m.sy = 1 + CGFloat(p)
+            m.rotation = 0.11 * sin(u * 2 * .pi * 2.2) * (1 - smooth((u - 0.5) / 0.7))
+        case 4: // a lean to one side and back
+            guard u < 0.8 else { break }
+            let e = sin(u / 0.8 * .pi)
+            m.rotation = 0.09 * e * (seed % 2 == 0 ? 1 : -1)
+            m.dx = 0.02 * CGFloat(e) * (seed % 2 == 0 ? 1 : -1)
         default: // a rest block: breathing only
             break
         }
@@ -238,7 +240,7 @@ public enum BotFace {
     }
 
     /// Draws body and eyes into `size` (square). `active` animates; otherwise `time` should be 0.
-    public static func draw(_ spec: BotLookSpec, in ctx: inout GraphicsContext, size: CGSize, time t: Double, active: Bool, gaze: CGPoint = .zero, part: Part = .all, breathe: Bool = true, idleEyes: Bool = false, move: Bool = true) {
+    public static func draw(_ spec: BotLookSpec, in ctx: inout GraphicsContext, size: CGSize, time t: Double, active: Bool, gaze: CGPoint = .zero, part: Part = .all, breathe: Bool = true, idleEyes: Bool = false, move: Bool = true, strain: Bool = false, glanceFree: Bool = true, finishedAt: Double? = nil) {
         let box = CGRect(origin: .zero, size: size)
         let s = min(size.width, size.height)
         let seed = spec.shape.utf8.reduce(0) { $0 + Int($1) } + spec.eyes.utf8.reduce(0) { $0 + Int($1) }
@@ -246,9 +248,9 @@ public enum BotFace {
         let live = liveliness(time: (active || idleEyes) ? t : 0, seed: seed)
         let tint = Color(botHex: spec.hex) ?? Color(red: 0.49, green: 0.36, blue: 1)
 
-        if active && move {
-            let m = motion(time: t, seed: seed, active: true)
-            ctx.translateBy(x: size.width / 2, y: size.height / 2 + m.dy * s)
+        let m = move ? motion(time: t, seed: seed, active: active, finishedAt: finishedAt) : .still
+        if m != .still {
+            ctx.translateBy(x: size.width / 2 + m.dx * s, y: size.height / 2 + m.dy * s)
             ctx.rotate(by: .radians(m.rotation))
             ctx.scaleBy(x: m.sx, y: m.sy)
             ctx.translateBy(x: -size.width / 2, y: -size.height / 2)
@@ -278,7 +280,7 @@ public enum BotFace {
         guard part != .body else { return }
 
         // Eyes: black shapes, blinking by squashing to a line, glancing by sliding.
-        let eyes = eyePaths(spec, size: size, time: t, active: active || idleEyes, gaze: gaze)
+        let eyes = eyePaths(spec, size: size, time: t, active: active || idleEyes, gaze: gaze, strain: strain, glanceFree: glanceFree)
         let eyeInk = spec.isGlass ? ink.opacity(0.9) : ink
         if eyes.stroked {
             ctx.stroke(eyes.path, with: .color(eyeInk), style: StrokeStyle(lineWidth: s * 0.045, lineCap: .round))
@@ -324,15 +326,17 @@ public enum BotFace {
     /// The eyes' geometry for a frame: one path (both eyes) and whether it is stroked (sleepy
     /// lids) rather than filled. Both eyes move together: a glance or a gaze shifts the pair,
     /// never their spacing.
-    public static func eyePaths(_ spec: BotLookSpec, size: CGSize, time t: Double, active: Bool, gaze: CGPoint = .zero) -> (path: Path, stroked: Bool) {
+    /// `strain`: the bot is thinking hard — the eyes narrow to a squint. `glanceFree`: false keeps
+    /// the eyes from wandering on their own (they still blink), for when they follow the phone.
+    public static func eyePaths(_ spec: BotLookSpec, size: CGSize, time t: Double, active: Bool, gaze: CGPoint = .zero, strain: Bool = false, glanceFree: Bool = true) -> (path: Path, stroked: Bool) {
         let s = min(size.width, size.height)
         let seed = spec.shape.utf8.reduce(0) { $0 + Int($1) } + spec.eyes.utf8.reduce(0) { $0 + Int($1) }
         let live = liveliness(time: active ? t : 0, seed: seed)
         let anchor = eyeAnchor(spec.shape)
         let dx = s * anchor.spread
-        let cx = size.width / 2 + CGFloat(live.glance) * s * 0.06 + gaze.x * s * 0.06
+        let cx = size.width / 2 + (glanceFree ? CGFloat(live.glance) * s * 0.06 : 0) + gaze.x * s * 0.06
         let cy = s * anchor.y + gaze.y * s * 0.07
-        let open = CGFloat(1 - live.blink * 0.92)
+        let open = min(CGFloat(1 - live.blink * 0.92), strain ? 0.42 : 1)
         var path = Path()
         func eye(at x: CGFloat, w: CGFloat, h: CGFloat, round: Bool) {
             let hh = max(s * 0.025, h * open)
@@ -378,22 +382,32 @@ public final class BotAmbient {
     /// −1…1: roll (x) and pitch (y) away from the resting hold.
     public var tilt: CGPoint = .zero
     public var enabled = true
+    /// True while a list is being scrolled (cleared shortly after the last movement); the Bots
+    /// page bots play while it is.
+    public var scrolling = false
+    /// When each bot (by profile name) last finished a turn: it spins once at that moment.
+    public var finished: [String: Date] = [:]
     private var decayTask: Task<Void, Never>?
 
     public init() {}
 
     /// A scroll of `dy` points (positive = content moving up, the finger swiping up).
     public func scrolled(dy: CGFloat) {
-        guard enabled, abs(dy) > 0.5 else { return }
-        let target = CGPoint(x: gaze.x, y: max(-1, min(1, gaze.y * 0.6 + CGFloat(-dy) / 40)))
-        gaze = target
+        guard abs(dy) > 0.5 else { return }
+        if enabled {
+            gaze = CGPoint(x: gaze.x, y: max(-1, min(1, gaze.y * 0.6 + CGFloat(-dy) / 40)))
+        }
+        scrolling = true
         decayTask?.cancel()
         decayTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(450))
             guard !Task.isCancelled, let self else { return }
             self.gaze = .zero
+            self.scrolling = false
         }
     }
+
+    public func turnFinished(profile: String) { finished[profile] = Date() }
 }
 
 /// The bot's body as a Shape, so the app can give it real Liquid Glass.
@@ -411,8 +425,12 @@ public struct BotEyesShape: Shape {
     public var time: Double
     public var active: Bool
     public var gaze: CGPoint
-    public init(spec: BotLookSpec, time: Double, active: Bool, gaze: CGPoint) { self.spec = spec; self.time = time; self.active = active; self.gaze = gaze }
-    public func path(in rect: CGRect) -> Path { BotFace.eyePaths(spec, size: rect.size, time: time, active: active, gaze: gaze).path.offsetBy(dx: rect.minX, dy: rect.minY) }
+    public var strain = false
+    public var glanceFree = true
+    public init(spec: BotLookSpec, time: Double, active: Bool, gaze: CGPoint, strain: Bool = false, glanceFree: Bool = true) {
+        self.spec = spec; self.time = time; self.active = active; self.gaze = gaze; self.strain = strain; self.glanceFree = glanceFree
+    }
+    public func path(in rect: CGRect) -> Path { BotFace.eyePaths(spec, size: rect.size, time: time, active: active, gaze: gaze, strain: strain, glanceFree: glanceFree).path.offsetBy(dx: rect.minX, dy: rect.minY) }
 }
 
 /// The bot as a view. `active` runs the animation (blink, glance, breathing, the blob's morph);
@@ -428,66 +446,100 @@ public struct BotFaceView: View {
     @State private var gazeChangedAt: Date = .distantPast
     /// Idle bots redraw only while the eyes have something to do (a blink, a glance).
     @State private var eyesBusy = false
+    @State private var spinTick = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var ambient: BotAmbient { BotAmbient.shared }
     private var seed: Int { spec.shape.utf8.reduce(0) { $0 + Int($1) } + spec.eyes.utf8.reduce(0) { $0 + Int($1) } }
 
     /// Paint the glass finish even in the app (for offscreen renders such as menu icons).
     public var drawn: Bool
+    /// What the bot is up to, beyond `active`.
+    public struct Mood: Equatable, Sendable {
+        /// Thinking hard: the eyes squint.
+        public var thinking = false
+        /// Which profile this is, so a finished turn (`BotAmbient.finished`) spins it once.
+        public var profile: String? = nil
+        /// Bots page: past a few degrees of tilt the eyes stop wandering and follow the phone.
+        public var followsTilt = false
+        public init(thinking: Bool = false, profile: String? = nil, followsTilt: Bool = false) {
+            self.thinking = thinking; self.profile = profile; self.followsTilt = followsTilt
+        }
+    }
+    public var mood: Mood
+    @Environment(\.colorScheme) private var colorScheme
     /// The app switcher's snapshot is taken with the glass effects stripped (the bots went
     /// grey), so once the scene is no longer active the painted glass stands in.
     @Environment(\.scenePhase) private var scenePhase
 
-    public init(spec: BotLookSpec, size: CGFloat, active: Bool = false, gaze: CGPoint = .zero, drawn: Bool = false) {
+    public init(spec: BotLookSpec, size: CGFloat, active: Bool = false, gaze: CGPoint = .zero, drawn: Bool = false, mood: Mood = Mood()) {
         self.spec = spec
         self.size = size
         self.active = active
         self.gaze = gaze
         self.drawn = drawn
+        self.mood = mood
+    }
+
+    /// Seconds since the reference date when this bot's turn last finished, while the spin plays.
+    private var finishedAt: Double? {
+        guard let p = mood.profile, let d = ambient.finished[p], Date().timeIntervalSince(d) < 1.3 else { return nil }
+        return d.timeIntervalSinceReferenceDate
     }
 
     /// The glass bot as the icon is built: the body a tinted piece of glass, the eyes a darker
     /// piece in front, each in its own container (in one container they would merge into a
     /// single shape). Sleepy lids are strokes, so they stay painted.
-    @ViewBuilder private func liveGlass(time t: Double, gaze g: CGPoint) -> some View {
+    @ViewBuilder private func liveGlass(time t: Double, gaze g: CGPoint, glanceFree: Bool, finishedAt: Double?) -> some View {
         let tint = Color(botHex: spec.hex) ?? Color(red: 0.49, green: 0.36, blue: 1)
         let sy = BotFace.breathScale(time: t, active: active, spec: spec)
-        let m = reduceMotion ? BotFace.Motion.still : BotFace.motion(time: t, seed: seed, active: active)
+        let m = reduceMotion ? BotFace.Motion.still : BotFace.motion(time: t, seed: seed, active: active, finishedAt: finishedAt)
         ZStack {
+            // The colour itself under the glass: tinted glass alone reads dark on a light
+            // background (a sky-blue bot came out navy), so the hue is laid down first and the
+            // glass adds its rim and refraction on top.
+            BotBodyShape(spec: spec, time: t, active: active)
+                .fill(tint.opacity(colorScheme == .light ? 0.62 : 0.28))
             GlassEffectContainer {
                 Color.clear
-                    .glassEffect(.regular.tint(tint.opacity(0.72)), in: BotBodyShape(spec: spec, time: t, active: active))
+                    .glassEffect(.regular.tint(tint.opacity(colorScheme == .light ? 0.45 : 0.72)), in: BotBodyShape(spec: spec, time: t, active: active))
             }
             if spec.eyes == "sleepy" {
                 Canvas(opaque: false, rendersAsynchronously: false) { ctx, sz in
-                    BotFace.draw(spec, in: &ctx, size: sz, time: t, active: active, gaze: g, part: .eyes, breathe: false, idleEyes: true, move: false)
+                    BotFace.draw(spec, in: &ctx, size: sz, time: t, active: active, gaze: g, part: .eyes, breathe: false, idleEyes: true, move: false, strain: mood.thinking, glanceFree: glanceFree)
                 }
             } else {
                 GlassEffectContainer {
                     Color.clear
-                        .glassEffect(.clear.tint(BotFace.ink.opacity(0.92)), in: BotEyesShape(spec: spec, time: t, active: true, gaze: g))
+                        .glassEffect(.clear.tint(BotFace.ink.opacity(0.92)), in: BotEyesShape(spec: spec, time: t, active: true, gaze: g, strain: mood.thinking, glanceFree: glanceFree))
                 }
             }
         }
         .scaleEffect(x: 1 / sy, y: sy, anchor: UnitPoint(x: 0.5, y: 0.96))
         .scaleEffect(x: m.sx, y: m.sy)
         .rotationEffect(.radians(m.rotation))
-        .offset(y: m.dy * size)
+        .offset(x: m.dx * size, y: m.dy * size)
     }
 
     public var body: some View {
-        let ambientGaze = ambient.enabled ? CGPoint(x: ambient.gaze.x + ambient.tilt.x * 0.5, y: ambient.gaze.y + ambient.tilt.y * 0.5) : .zero
-        TimelineView(.animation(minimumInterval: active ? 1 / 30 : 1 / 24, paused: !active && !eyesBusy && gaze == shownGaze)) { timeline in
+        // Tilted well past level (Bots page), the eyes stop wandering and follow the phone; within
+        // a few degrees they add a little of the tilt to their own glances.
+        let tiltMag = hypot(ambient.tilt.x, ambient.tilt.y)
+        let held = mood.followsTilt && ambient.enabled && tiltMag > 0.3
+        let tiltWeight: CGFloat = held ? 1.0 : 0.5
+        let ambientGaze = ambient.enabled ? CGPoint(x: ambient.gaze.x + ambient.tilt.x * tiltWeight, y: ambient.gaze.y + ambient.tilt.y * tiltWeight) : .zero
+        let finished = finishedAt
+        let _ = spinTick
+        TimelineView(.animation(minimumInterval: active ? 1 / 30 : 1 / 24, paused: !active && !eyesBusy && finished == nil && gaze == shownGaze)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
             let u = min(1, max(0, timeline.date.timeIntervalSince(gazeChangedAt) / 0.35))
             let ease = u * u * (3 - 2 * u)
             let g0 = CGPoint(x: gazeFrom.x + (gaze.x - gazeFrom.x) * ease, y: gazeFrom.y + (gaze.y - gazeFrom.y) * ease)
             let g = CGPoint(x: max(-1, min(1, g0.x + ambientGaze.x)), y: max(-1, min(1, g0.y + ambientGaze.y)))
             if spec.isGlass && BotFace.liveGlass && !drawn && scenePhase == .active {
-                liveGlass(time: t, gaze: g)
+                liveGlass(time: t, gaze: g, glanceFree: !held, finishedAt: finished)
             } else {
                 Canvas(opaque: false, rendersAsynchronously: false) { ctx, sz in
-                    BotFace.draw(spec, in: &ctx, size: sz, time: t, active: active, gaze: g, idleEyes: !drawn, move: !reduceMotion)
+                    BotFace.draw(spec, in: &ctx, size: sz, time: t, active: active, gaze: g, idleEyes: !drawn, move: !reduceMotion, strain: mood.thinking, glanceFree: !held, finishedAt: reduceMotion ? nil : finished)
                 }
             }
         }
@@ -497,6 +549,13 @@ public struct BotFaceView: View {
         .rotation3DEffect(.degrees(Double(ambient.enabled ? ambient.tilt.x : 0) * 7), axis: (x: 0, y: 1, z: 0))
         .onChange(of: gaze) { old, new in
             gazeFrom = old; shownGaze = new; gazeChangedAt = Date()
+        }
+        // Once the finish spin has played, a nudge re-evaluates the body so the timeline pauses
+        // again (nothing else changes after `finished` and it would keep running otherwise).
+        .task(id: finished) {
+            guard finished != nil else { return }
+            try? await Task.sleep(for: .milliseconds(1400))
+            spinTick += 1
         }
         // A quarter-second poll decides whether an idle bot has a blink or a glance coming up;
         // between those it costs nothing.

@@ -168,6 +168,7 @@ final class LiveActivityController: TurnActivityReporting {
     }
 
     func end(for chat: ChatSession, phase: String) {
+        BotAmbient.shared.turnFinished(profile: chat.profileName)
         tokenTask?.cancel()
         tokenTask = nil
         stateTask?.cancel()
