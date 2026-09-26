@@ -111,7 +111,7 @@ struct ConfigFormView: View {
                 }
             }
         }
-        .searchable(text: $search, prompt: "Search config keys")
+        .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search config keys")
         .overlay { if schema == nil && error == nil { ProgressView() } }
         .refreshable { await load() }
         .task(id: rt?.selectedProfile) { await load() }
@@ -234,7 +234,7 @@ struct EnvView: View {
                 }
             }
         }
-        .searchable(text: $search)
+        .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always))
         .toolbar { ToolbarItem(placement: .primaryAction) { Button { showAdd = true } label: { Label("Add", systemImage: "plus") } } }
         .refreshable { await load() }
         .task(id: rt?.selectedProfile) { await load() }
@@ -335,7 +335,7 @@ struct SkillsView: View {
                 }
             }
         }
-        .searchable(text: $search)
+        .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always))
         .refreshable { await load() }
         .task(id: rt?.selectedProfile) { await load() }
     }
@@ -651,7 +651,7 @@ struct SessionsView: View {
                 }
             }
         }
-        .searchable(text: $search)
+        .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always))
         .onChange(of: search) { _, _ in Task { await load() } }
         .refreshable { await load() }
         .task(id: rt?.selectedProfile) { await load() }

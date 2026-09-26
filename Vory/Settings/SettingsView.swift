@@ -101,7 +101,7 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
-            .searchable(text: $search, prompt: "Search settings")
+            .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search settings")
         }
     }
 }

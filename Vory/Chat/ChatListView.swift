@@ -136,6 +136,8 @@ struct ChatListView: View {
             }
         }
         .listStyle(.insetGrouped)
+        // The grouped list otherwise leaves a section's worth of empty space under the search bar.
+        .contentMargins(.top, 0, for: .scrollContent)
         .overlay { if loading && sessions.isEmpty { ProgressView() } }
         .safeAreaInset(edge: .top, spacing: 0) {
             if let msg = runtime.restartRequired {
