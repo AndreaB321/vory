@@ -44,37 +44,36 @@ struct MainTabView: View {
     @AppStorage(TabLayout.storageKey) private var layoutRaw = ""
 
     var body: some View {
-        @Bindable var model = model
         let tabs = TabLayout.parse(layoutRaw).visible()
-        TabView(selection: $model.selectedTab) {
+        ZStack {
+            // Every page stays alive (its navigation stack, scroll position, drafts); only the
+            // selected one is visible and touchable, which is what the system TabView does too.
             ForEach(tabs, id: \.self) { tab in
-                Tab(tab.title, systemImage: tab.symbol, value: tab) {
-                    content(for: tab)
-                }
-                .badge(badge(for: tab))
+                content(for: tab)
+                    .opacity(model.selectedTab == tab ? 1 : 0)
+                    .allowsHitTesting(model.selectedTab == tab)
+                    .accessibilityHidden(model.selectedTab != tab)
             }
         }
-        // The bar stays expanded, so the floating compose circle above it never has to move.
-        .tabBarMinimizeBehavior(.never)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            // Reserves the bar's height so lists end above it; the bar itself is hidden (slid down)
+            // inside a chat and the setup wizard, and the pages then use the full height.
+            if !model.tabBarHidden {
+                VoryTabBar(tabs: tabs) { compose() }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy(duration: 0.3), value: model.tabBarHidden)
         .onChange(of: tabs) { _, now in
             // The selected tab was removed from the layout: fall back to Chats instead of a blank pane.
-            if !now.contains(model.selectedTab), model.selectedTab != .compose { model.selectedTab = .chats }
+            if !now.contains(model.selectedTab) { model.selectedTab = .chats }
         }
     }
 
-    /// Chats counts waiting cards; Settings flags a gateway that needs a restart, or a companion
-    /// update waiting under Notifications › Background Notifications.
-    private func badge(for tab: AppModel.AppTab) -> Text? {
-        switch tab {
-        case .chats:
-            let n = model.runtime?.needsAttention.count ?? 0
-            return n > 0 ? Text("\(n)") : nil
-        case .settings:
-            if model.runtime?.restartRequired != nil { return Text("!") }
-            return model.companionUpdateAvailable ? Text("1") : nil
-        default:
-            return nil
-        }
+    /// The compose circle: a chat with the bot whose page is in front, otherwise a new chat on Chats.
+    private func compose() {
+        if model.selectedTab != .bots || model.composeProfile == nil { model.selectedTab = .chats }
+        model.newChatRequest = UUID()
     }
 
     @ViewBuilder private func content(for tab: AppModel.AppTab) -> some View {
@@ -87,7 +86,6 @@ struct MainTabView: View {
         case .cron: NavigationStack { CronView().navigationTitle("Cron Jobs") }
         case .approvals: NavigationStack { ApprovalsView().navigationTitle("Approvals") }
         case .system: NavigationStack { SystemView().navigationTitle("System") }
-        case .compose: Color.clear
         }
     }
 }

@@ -99,7 +99,7 @@ struct PushSetupView: View {
         }
         .background(Color(.systemGroupedBackground))
         .toolbar(.hidden, for: .navigationBar)
-        .toolbar(.hidden, for: .tabBar)
+        .hidesTabBar()
         .navigationBarBackButtonHidden(true)
         .fileImporter(isPresented: $showKeyPicker, allowedContentTypes: [UTType(filenameExtension: "p8") ?? .data, .data]) { result in
             if case .success(let url) = result { setup.importKey(url) }

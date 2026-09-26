@@ -47,7 +47,7 @@ struct ConversationView: View {
             }
         }
         // Like Messages: inside a conversation the composer owns the bottom edge.
-        .toolbarVisibility(.hidden, for: .tabBar)
+        .hidesTabBar()
         // The navigation bar is hidden, which switches off UIKit's edge-swipe back; put it back.
         .background(InteractivePopEnabler())
         .task { await open() }

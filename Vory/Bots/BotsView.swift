@@ -165,6 +165,7 @@ struct BotDetailView: View {
     @State private var sessions: [StoredSession] = []
     @State private var error: String?
     @State private var pendingDelete: StoredSession?
+    @State private var composing = false
 
     var body: some View {
         List {
@@ -191,16 +192,14 @@ struct BotDetailView: View {
         }
         .navigationTitle(profile.label)
         .navigationBarTitleDisplayMode(.inline)
-        .overlay(alignment: .bottomTrailing) {
-            NavigationLink(value: ChatRoute(storedID: nil, title: nil, profile: profile.name)) {
-                Image(systemName: "square.and.pencil").font(.title3.weight(.semibold))
-                    .frame(width: 50, height: 50)
-                    .glassEffect(.regular.interactive(), in: .circle)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("New chat with \(profile.label)")
-            .padding(.trailing, 20).padding(.bottom, 8)
+        .onAppear { model.composeProfile = profile.name }
+        .onDisappear { if model.composeProfile == profile.name { model.composeProfile = nil } }
+        // The compose circle in the tab bar, while this bot's page is in front: a chat with it.
+        .onChange(of: model.newChatRequest) { _, r in
+            guard r != nil, model.selectedTab == .bots, model.composeProfile == profile.name else { return }
+            composing = true
         }
+        .navigationDestination(isPresented: $composing) { ConversationView(route: ChatRoute(storedID: nil, title: nil, profile: profile.name)) }
         .refreshable { await load() }
         .task { await load() }
         .alert("Delete chat?", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })) {

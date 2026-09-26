@@ -48,8 +48,6 @@ final class AppModel {
 
     enum AppTab: String, Hashable, CaseIterable, Sendable {
         case chats, bots, files, sessions, cron, approvals, system, settings
-        /// Not a real tab: the detached compose circle beside the bar (the layout Messages uses).
-        case compose
 
         var title: String {
             switch self {
@@ -61,7 +59,6 @@ final class AppModel {
             case .approvals: return "Approvals"
             case .system: return "System"
             case .settings: return "Settings"
-            case .compose: return "New Chat"
             }
         }
 
@@ -75,7 +72,6 @@ final class AppModel {
             case .approvals: return "checkmark.shield"
             case .system: return "server.rack"
             case .settings: return "gear"
-            case .compose: return "square.and.pencil"
             }
         }
     }
@@ -85,6 +81,11 @@ final class AppModel {
     var newChatRequest: UUID?
     /// The bot's page in front, if any, so compose there starts a chat with that bot.
     var composeProfile: String?
+    /// The custom tab bar hides while a chat is open on the Chats tab (path-driven, instant)…
+    var chatsPathOpen = false
+    /// …and while any view marked `hidesTabBar()` is on screen on another tab.
+    var tabBarHiders = 0
+    var tabBarHidden: Bool { chatsPathOpen || tabBarHiders > 0 }
 
     init() {
         NotificationCenter.default.addObserver(forName: .hermesPushRegistrationNeedsSync, object: nil, queue: .main) { [weak self] _ in
