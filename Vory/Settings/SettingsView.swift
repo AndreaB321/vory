@@ -453,29 +453,31 @@ struct AboutView: View {
     }
 }
 
-/// A little speech bubble with its tail at the bottom centre, pointing down at whoever said it.
+/// A little speech bubble whose tail (bottom centre) is part of the same shape, pointing down at
+/// whoever said it.
 struct SpeechBubble: View {
     var text: String
     var body: some View {
         Text(text)
             .font(.subheadline.weight(.medium))
             .padding(.horizontal, 12).padding(.vertical, 8)
-            .background {
-                let fill = Color(uiColor: .secondarySystemFill)
-                RoundedRectangle(cornerRadius: 16, style: .continuous).fill(fill)
-                    .overlay(alignment: .bottom) {
-                        Path { p in
-                            p.move(to: CGPoint(x: 0, y: 0))
-                            p.addQuadCurve(to: CGPoint(x: 9, y: 10), control: CGPoint(x: 6, y: 3))
-                            p.addQuadCurve(to: CGPoint(x: 18, y: 0), control: CGPoint(x: 12, y: 3))
-                            p.closeSubpath()
-                        }
-                        .fill(fill)
-                        .frame(width: 18, height: 10)
-                        .offset(y: 9)
-                    }
-            }
+            .padding(.bottom, 8)
+            .background(Color(uiColor: .secondarySystemFill), in: SpeechBubbleShape())
             .fixedSize()
+    }
+}
+
+struct SpeechBubbleShape: Shape {
+    func path(in r: CGRect) -> Path {
+        let body = CGRect(x: r.minX, y: r.minY, width: r.width, height: r.height - 8)
+        var p = Path(roundedRect: body, cornerRadius: 16, style: .continuous)
+        var tail = Path()
+        tail.move(to: CGPoint(x: r.midX - 9, y: body.maxY - 1))
+        tail.addQuadCurve(to: CGPoint(x: r.midX, y: r.maxY), control: CGPoint(x: r.midX - 4, y: body.maxY + 3))
+        tail.addQuadCurve(to: CGPoint(x: r.midX + 9, y: body.maxY - 1), control: CGPoint(x: r.midX + 4, y: body.maxY + 3))
+        tail.closeSubpath()
+        p.addPath(tail)
+        return p
     }
 }
 
