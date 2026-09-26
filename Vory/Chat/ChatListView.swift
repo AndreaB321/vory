@@ -20,6 +20,11 @@ struct ChatListView: View {
     @State private var lastRouted: PendingRoute?
     /// Every profile's chats in one list, newest first, with the bot's avatar on each row.
     @AppStorage("chats.allBots") private var allBots = false
+    /// The profile menu's icons are rendered images; UIKit keeps the built menu, so it is given a
+    /// new identity whenever a bot's colour or look changes.
+    @AppStorage(BotColors.storageKey) private var botColorsRaw = ""
+    @AppStorage(BotAvatarStore.storageKey) private var botAvatarsRaw = ""
+    @AppStorage(BotAvatarStore.glassAllKey) private var glassAll = false
     /// Mirrors the tab bar's minimize-on-scroll so the compose circle drops beside the collapsed bar.
 
     private var runtime: GatewayRuntime? { model.runtime }
@@ -91,6 +96,7 @@ struct ChatListView: View {
             BotAvatar(profile: runtime?.selectedProfile ?? "?", size: 26)
                 .accessibilityLabel("Profile: \(runtime?.selectedProfile ?? "none")")
         }
+        .id("\(botColorsRaw)|\(botAvatarsRaw)|\(glassAll)")
     }
 
     private func connectionSymbol(_ s: SocketState) -> String {
