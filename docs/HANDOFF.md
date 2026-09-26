@@ -53,6 +53,15 @@ at a time, ship a TestFlight build, wait for their verdict.
   #18 in-chat iMessage-style reply UI (the notification reply window part is done); #20 notifications
   on/off toggle; #21 plain-language status screen; #22 general plugins list; #23 @mention bot picker.
 
+## Promo (video + vory.dev site), 2026-09-26
+
+`docs/promo/`: `VORY-PRODUCT-BRIEF.md` (public-beta-safe product brief), `PROMPT-claude-session.md`
+(paste into a fresh session in this repo: asks questions → full plan → `/go` → video then site,
+branch `promo`, output in `docs/promo/video` and `docs/promo/site`), `grok-package/` +
+`vory-grok-package.zip` (self-contained package for Grok: prompt, brief, motion briefs,
+BotFace.swift, icon renders, screenshots, demo video). Icon renders come from `ictool` (see
+`docs/agent-memory/icon-composer-cli.md`).
+
 ## Build, install, ship
 
 ```bash
