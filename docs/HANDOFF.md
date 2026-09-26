@@ -190,10 +190,13 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
   Nothing in the transport changed — Cloudflare Access headers and local http work as before.
 - **Tour** (`Vory/Connect/OnboardingView.swift`): Vory at the top, a typed speech bubble
   (`TypedBubble`), a 360° on every page (`BotAmbient.turnFinished("vory-tour")`), a squint on the
-  approvals page; per-page demos: `BotsDemo`, `ChatDemo` (typing reply + tool card),
-  `ApprovalDemo` (card slides in, "Once" picked), `IslandDemo` (island + notification),
-  `StudioDemo` (cycling looks), `ConnectDemo` (the four connection types). All copy generic; the
-  sample bot is "Ada".
+  approvals page; per-page demos loop on their own: `BotsDemo` (six bots, all `active`, own
+  clocks), `ChatDemo` (question pops in → typing dots → reply types → tool card slides in and
+  ticks → second reply; repeats), `ApprovalDemo` (card slides up → "Once" is pressed with a
+  ring → green; repeats), `IslandDemo` (compact Island on a wallpaper gradient panel → expands →
+  Finished → notification drops in; repeats), `StudioDemo` (a body, then a colour, then eyes are
+  "tapped" in turn), `ConnectDemo`. All copy generic; the sample bot is "Ada". The 3D turn uses
+  `perspective: 0` — any perspective stretched the glass body near edge-on.
 - Compose chips wrap (`FlowLayout`); `GroupChats.create` takes the room from `groups.list` (by the
   returned id, else newest by name) — the real gateway's create response is not the room.
 

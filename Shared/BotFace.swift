@@ -553,7 +553,7 @@ public struct BotFaceView: View {
             }
             // The routines: a turn about the vertical axis (3D, on the spot), a small tilt, a
             // tiny nod or lean. Nothing scales and nothing leaves the bot's footprint.
-            .rotation3DEffect(.radians(m.yaw), axis: (x: 0, y: 1, z: 0), perspective: 0.6)
+            .rotation3DEffect(.radians(m.yaw), axis: (x: 0, y: 1, z: 0), perspective: 0)
             .rotationEffect(.radians(m.roll))
             .offset(x: m.dx * size, y: m.dy * size)
         }

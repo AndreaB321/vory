@@ -32,7 +32,7 @@ struct OnboardingView: View {
             VStack(spacing: 0) {
                 // Vory, talking. A full turn on every page; a squint on the page about waiting.
                 VStack(spacing: 6) {
-                    BotFaceView(spec: AboutView.voryBot, size: 108, active: true, gaze: CGPoint(x: 0, y: 0.5),
+                    BotFaceView(spec: AboutView.voryBot, size: 96, active: true, gaze: CGPoint(x: 0, y: 0.5),
                                 mood: BotFaceView.Mood(thinking: pages[page].demo == .approval, profile: "vory-tour"))
                         .padding(.top, 8)
                     TypedBubble(text: pages[page].says, pageID: page, reduceMotion: reduceMotion)
@@ -42,15 +42,13 @@ struct OnboardingView: View {
 
                 TabView(selection: $page) {
                     ForEach(Array(pages.enumerated()), id: \.offset) { i, p in
-                        VStack(spacing: 16) {
+                        VStack(spacing: 14) {
                             Text(p.title).font(.title.weight(.bold)).multilineTextAlignment(.center)
-                            Spacer(minLength: 0)
                             TourDemo(kind: p.demo, live: page == i, reduceMotion: reduceMotion)
                                 .frame(maxWidth: .infinity)
                             Spacer(minLength: 0)
-                            Spacer(minLength: 0)
                         }
-                        .padding(.horizontal, 24).padding(.top, 14)
+                        .padding(.horizontal, 20).padding(.top, 10)
                         .tag(i)
                     }
                 }
@@ -139,7 +137,7 @@ private struct TourDemo: View {
     }
 }
 
-/// A handful of bots, each its own shape and colour, blinking on their own time.
+/// A handful of bots, each its own shape and colour, each doing its own thing.
 private struct BotsDemo: View {
     var live: Bool
     private let looks: [BotLookSpec] = [
@@ -147,176 +145,313 @@ private struct BotsDemo: View {
         BotLookSpec(shape: "triangle", eyes: "bold", hex: "#FF9F0A", finish: "glass"),
         BotLookSpec(shape: "hexagon", eyes: "round", hex: "#30D158", finish: "glass"),
         BotLookSpec(shape: "drop", eyes: "curious", hex: "#64D2FF", finish: "glass"),
+        BotLookSpec(shape: "cloud", eyes: "wide", hex: "#FF375F", finish: "glass"),
+        BotLookSpec(shape: "square", eyes: "tall", hex: "#FFD60A", finish: "glass"),
     ]
+    private let columns = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
     var body: some View {
-        HStack(spacing: 18) {
+        LazyVGrid(columns: columns, spacing: 22) {
             ForEach(Array(looks.enumerated()), id: \.offset) { i, l in
-                BotFaceView(spec: l, size: 58, active: live && i == 1, mood: BotFaceView.Mood(profile: "tour-bot-\(i)"))
+                BotFaceView(spec: l, size: 72, active: live, mood: BotFaceView.Mood(profile: "tour-bot-\(i)"))
             }
         }
-        .padding(.vertical, 18).padding(.horizontal, 22)
-        .glassEffect(.regular, in: .rect(cornerRadius: 24))
+        .padding(.vertical, 22).padding(.horizontal, 18)
+        .glassEffect(.regular, in: .rect(cornerRadius: 26))
     }
 }
 
-/// A two-line chat: the question, then the answer typing itself, then a tool card ticking done.
+/// A chat playing out: the question pops in, the bot types, a tool card slides in and ticks
+/// done, then a second line — and it starts again.
 private struct ChatDemo: View {
     var live: Bool
     var reduceMotion: Bool
+    @State private var showUser = false
+    @State private var typing = false
     @State private var reply = ""
+    @State private var showTool = false
     @State private var toolDone = false
-    private let full = "Found 4.2 GB of rotated logs older than 90 days. I'll clear them and leave today's alone."
+    @State private var reply2 = ""
+    private let full = "Found 4.2 GB of rotated logs older than 90 days. Clearing those and leaving today's alone."
+    private let full2 = "Done — 4.2 GB freed. Want log rotation set up so it stays that way?"
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack { Spacer(minLength: 60); bubble("Clean up the old logs on the server", user: true) }
-            HStack { bubble(reply.isEmpty ? "…" : reply, user: false); Spacer(minLength: 40) }
-            HStack(spacing: 8) {
-                Image(systemName: toolDone ? "checkmark.circle.fill" : "gear").foregroundStyle(toolDone ? .green : .secondary)
-                    .symbolEffect(.rotate, isActive: !toolDone && live)
-                Text("terminal").font(.caption.weight(.semibold))
-                Text("du -sh /var/log/* | sort -rh").font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
-                Spacer()
+        VStack(alignment: .leading, spacing: 10) {
+            if showUser {
+                HStack { Spacer(minLength: 50); bubble("Clean up the old logs on the server", user: true) }
+                    .transition(.scale(scale: 0.6, anchor: .bottomTrailing).combined(with: .opacity))
             }
-            .padding(10)
-            .glassEffect(.regular, in: .rect(cornerRadius: 12))
-            .opacity(reply.count > 20 ? 1 : 0)
+            if typing || !reply.isEmpty {
+                HStack(alignment: .bottom, spacing: 8) {
+                    BotFaceView(spec: bot, size: 26, active: typing, mood: BotFaceView.Mood(thinking: typing && reply.isEmpty, profile: "tour-chat"))
+                    bubble(reply.isEmpty ? "•••" : reply, user: false)
+                    Spacer(minLength: 30)
+                }
+                .transition(.scale(scale: 0.6, anchor: .bottomLeading).combined(with: .opacity))
+            }
+            if showTool {
+                HStack(spacing: 8) {
+                    Image(systemName: toolDone ? "checkmark.circle.fill" : "gearshape.2").foregroundStyle(toolDone ? .green : .secondary)
+                        .symbolEffect(.rotate, isActive: !toolDone && live)
+                        .contentTransition(.symbolEffect(.replace))
+                    Text("terminal").font(.caption.weight(.semibold))
+                    Text("find /var/log -mtime +90 -delete").font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                    Spacer()
+                    if toolDone { Text("1.4s").font(.caption2).foregroundStyle(.tertiary) }
+                }
+                .padding(12)
+                .glassEffect(.regular, in: .rect(cornerRadius: 14))
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            if !reply2.isEmpty {
+                HStack(alignment: .bottom, spacing: 8) {
+                    BotFaceView(spec: bot, size: 26, active: false, mood: BotFaceView.Mood(profile: "tour-chat2"))
+                    bubble(reply2, user: false)
+                    Spacer(minLength: 30)
+                }
+                .transition(.scale(scale: 0.6, anchor: .bottomLeading).combined(with: .opacity))
+            }
         }
+        .frame(maxWidth: .infinity, minHeight: 250, alignment: .top)
+        .padding(16)
+        .glassEffect(.regular, in: .rect(cornerRadius: 24))
         .task(id: live) {
             guard live else { return }
-            reply = ""; toolDone = false
-            if reduceMotion { reply = full; toolDone = true; return }
-            try? await Task.sleep(for: .milliseconds(500))
-            for ch in full { guard !Task.isCancelled else { return }; reply.append(ch); try? await Task.sleep(for: .milliseconds(24)) }
-            try? await Task.sleep(for: .milliseconds(700))
-            withAnimation(.snappy) { toolDone = true }
+            while !Task.isCancelled {
+                showUser = false; typing = false; reply = ""; showTool = false; toolDone = false; reply2 = ""
+                if reduceMotion { showUser = true; reply = full; showTool = true; toolDone = true; reply2 = full2; return }
+                try? await Task.sleep(for: .milliseconds(400))
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) { showUser = true }
+                try? await Task.sleep(for: .milliseconds(900))
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) { typing = true }
+                try? await Task.sleep(for: .milliseconds(1100))
+                for ch in full { guard !Task.isCancelled else { return }; reply.append(ch); try? await Task.sleep(for: .milliseconds(20)) }
+                try? await Task.sleep(for: .milliseconds(400))
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { showTool = true }
+                try? await Task.sleep(for: .milliseconds(1400))
+                withAnimation(.snappy) { toolDone = true; typing = false }
+                try? await Task.sleep(for: .milliseconds(600))
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) { reply2 = " " }
+                for ch in full2 { guard !Task.isCancelled else { return }; reply2.append(ch); try? await Task.sleep(for: .milliseconds(20)) }
+                try? await Task.sleep(for: .seconds(4))
+                guard !Task.isCancelled else { return }
+                withAnimation(.snappy) { showUser = false; typing = false; reply = ""; showTool = false; toolDone = false; reply2 = "" }
+                try? await Task.sleep(for: .milliseconds(600))
+            }
         }
     }
 
+    private var bot: BotLookSpec { BotLookSpec(shape: "blob", eyes: "classic", hex: "#BF5AF2", finish: "glass") }
     private func bubble(_ t: String, user: Bool) -> some View {
         Text(t).font(.subheadline)
-            .padding(.horizontal, 12).padding(.vertical, 8)
+            .padding(.horizontal, 13).padding(.vertical, 9)
             .foregroundStyle(user ? .white : .primary)
-            .background(user ? Color.accentColor : Color(.systemGray5), in: .rect(cornerRadius: 16))
+            .background(user ? Color.accentColor : Color(.systemGray5), in: .rect(cornerRadius: 17))
     }
 }
 
-/// The approval card slides in, "Once" gets picked, the card turns green.
+/// The approval card slides in, a finger taps "Once", the card turns green — and again.
 private struct ApprovalDemo: View {
     var live: Bool
     var reduceMotion: Bool
     @State private var shown = false
+    @State private var pressing = false
     @State private var picked = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: picked ? "checkmark.shield.fill" : "exclamationmark.triangle.fill").foregroundStyle(picked ? .green : .yellow)
-                Text(picked ? "Allowed once" : "Approval needed").font(.headline)
+                    .contentTransition(.symbolEffect(.replace))
+                    .symbolEffect(.pulse, isActive: !picked)
+                Text(picked ? "Allowed once" : "Approval needed").font(.headline).contentTransition(.numericText())
             }
             Text("delete rotated log files older than 90 days").font(.subheadline).foregroundStyle(.secondary)
             Text("find /var/log -name '*.log.*' -mtime +90 -delete").font(.caption.monospaced()).lineLimit(1)
-                .padding(8).frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.systemGray6), in: .rect(cornerRadius: 8))
+                .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.systemGray6), in: .rect(cornerRadius: 10))
             HStack(spacing: 8) {
                 ForEach(["Once", "Session", "Always", "Deny"], id: \.self) { c in
                     Text(c).font(.subheadline.weight(.medium))
-                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .padding(.horizontal, 13).padding(.vertical, 8)
                         .background(picked && c == "Once" ? Color.accentColor : Color(.systemGray5), in: .capsule)
                         .foregroundStyle(picked && c == "Once" ? .white : .primary)
+                        .scaleEffect(pressing && c == "Once" ? 0.88 : 1)
+                        .overlay {
+                            // The tap itself: a ring that blooms out of the button.
+                            if pressing && c == "Once" {
+                                Circle().stroke(Color.accentColor, lineWidth: 2).frame(width: 30, height: 30)
+                                    .scaleEffect(2.2).opacity(0)
+                                    .animation(.easeOut(duration: 0.5), value: pressing)
+                            }
+                        }
                 }
             }
         }
-        .padding(14)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
-        .offset(y: shown ? 0 : 40).opacity(shown ? 1 : 0)
+        .padding(16)
+        .glassEffect(.regular, in: .rect(cornerRadius: 20))
+        .offset(y: shown ? 0 : 60).opacity(shown ? 1 : 0)
         .task(id: live) {
             guard live else { return }
-            shown = false; picked = false
-            if reduceMotion { shown = true; picked = true; return }
-            try? await Task.sleep(for: .milliseconds(400))
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { shown = true }
-            try? await Task.sleep(for: .milliseconds(1800))
-            withAnimation(.snappy) { picked = true }
+            while !Task.isCancelled {
+                shown = false; pressing = false; picked = false
+                if reduceMotion { shown = true; picked = true; return }
+                try? await Task.sleep(for: .milliseconds(500))
+                withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) { shown = true }
+                try? await Task.sleep(for: .milliseconds(1900))
+                withAnimation(.easeOut(duration: 0.12)) { pressing = true }
+                try? await Task.sleep(for: .milliseconds(160))
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) { pressing = false; picked = true }
+                try? await Task.sleep(for: .seconds(3))
+                guard !Task.isCancelled else { return }
+                withAnimation(.snappy) { shown = false }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
         }
     }
 }
 
-/// A Dynamic Island with a bot working in it, then the reply as a notification.
+/// The Dynamic Island: a compact pill with the bot working, expanding into the full card, then
+/// the reply dropping in as a notification, the way it lands on the Home Screen.
 private struct IslandDemo: View {
     var live: Bool
+    @State private var expanded = false
     @State private var seconds = 0
-    @State private var replied = false
+    @State private var finished = false
+    @State private var notified = false
     private let bot = BotLookSpec(shape: "blob", eyes: "classic", hex: "#BF5AF2", finish: "glass")
 
     var body: some View {
-        VStack(spacing: 14) {
+        // On a wallpaper-like panel, so the black Island reads as the Island in both appearances.
+        VStack(spacing: 16) {
+            // Notification, dropping from the top.
             HStack(spacing: 10) {
-                BotFaceView(spec: bot, size: 30, active: live && !replied, mood: BotFaceView.Mood(profile: "tour-island"))
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Ada").font(.subheadline.weight(.semibold)).foregroundStyle(.white)
-                    Text(replied ? "Finished" : "Writing").font(.caption2).foregroundStyle(.white.opacity(0.7))
-                }
-                Spacer()
-                Text(String(format: "0:%02d", seconds)).font(.subheadline.monospacedDigit()).foregroundStyle(.white)
-                Image(systemName: replied ? "checkmark" : "ellipsis.message.fill").foregroundStyle(replied ? .green : Color(botHex: bot.hex) ?? .purple)
-            }
-            .padding(.horizontal, 16).padding(.vertical, 12)
-            .background(Color.black, in: .capsule)
-            .frame(maxWidth: 300)
-            HStack(spacing: 10) {
-                BotFaceView(spec: bot, size: 34, active: false, mood: BotFaceView.Mood(profile: "tour-note"))
+                BotFaceView(spec: bot, size: 36, active: false, mood: BotFaceView.Mood(profile: "tour-note"))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Ada").font(.subheadline.weight(.semibold))
+                    HStack { Text("Ada").font(.subheadline.weight(.semibold)); Spacer(); Text("now").font(.caption2).foregroundStyle(.secondary) }
                     Text("Done — 4.2 GB freed. Want me to set up log rotation?").font(.caption).lineLimit(2)
                 }
-                Spacer(minLength: 0)
             }
             .padding(12)
-            .glassEffect(.regular, in: .rect(cornerRadius: 16))
-            .opacity(replied ? 1 : 0).offset(y: replied ? 0 : -12)
+            .background(.ultraThinMaterial, in: .rect(cornerRadius: 18))
+            .opacity(notified ? 1 : 0).offset(y: notified ? 0 : -40)
+
+            // The Island.
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    BotFaceView(spec: bot, size: expanded ? 34 : 24, active: live && !finished, mood: BotFaceView.Mood(profile: "tour-island"))
+                    if expanded {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Ada").font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                            Text(finished ? "Finished" : "Writing").font(.caption2).foregroundStyle(.white.opacity(0.7))
+                        }
+                        .transition(.opacity)
+                    }
+                    Spacer(minLength: 8)
+                    Text(String(format: "0:%02d", seconds)).font(.subheadline.monospacedDigit()).foregroundStyle(.white)
+                    Image(systemName: finished ? "checkmark" : "ellipsis.message.fill").foregroundStyle(finished ? .green : Color(botHex: bot.hex) ?? .purple)
+                        .symbolEffect(.pulse, isActive: !finished)
+                }
+                if expanded {
+                    Text("Clean up the old logs").font(.caption.weight(.medium)).foregroundStyle(.white)
+                    Text(finished ? "Turn finished" : "Clearing 34 rotated files under /var/log…").font(.caption).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+                    HStack(spacing: 10) {
+                        Label("624 tokens", systemImage: "text.alignleft").font(.caption2)
+                        Text("Context").font(.caption2)
+                        Capsule().fill(.white.opacity(0.25)).frame(width: 60, height: 4).overlay(alignment: .leading) { Capsule().fill(.green).frame(width: 18) }
+                        Spacer()
+                    }
+                    .foregroundStyle(.white.opacity(0.8))
+                    .transition(.opacity)
+                }
+            }
+            .padding(.horizontal, expanded ? 16 : 12).padding(.vertical, expanded ? 14 : 8)
+            .background(Color.black, in: .rect(cornerRadius: expanded ? 28 : 22))
+            .frame(maxWidth: expanded ? 320 : 180)
         }
+        .padding(.horizontal, 14).padding(.top, 18).padding(.bottom, 22)
+        .frame(maxWidth: .infinity, minHeight: 300, alignment: .top)
+        .background(
+            LinearGradient(colors: [Color(red: 0.30, green: 0.36, blue: 0.62), Color(red: 0.55, green: 0.32, blue: 0.55), Color(red: 0.92, green: 0.52, blue: 0.40)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing),
+            in: .rect(cornerRadius: 26))
         .task(id: live) {
             guard live else { return }
-            seconds = 0; replied = false
-            for i in 1...4 { try? await Task.sleep(for: .milliseconds(650)); guard !Task.isCancelled else { return }; seconds = i }
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { replied = true }
+            while !Task.isCancelled {
+                expanded = false; seconds = 0; finished = false; notified = false
+                try? await Task.sleep(for: .milliseconds(700))
+                for i in 1...2 { try? await Task.sleep(for: .milliseconds(600)); guard !Task.isCancelled else { return }; seconds = i }
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.78)) { expanded = true }
+                for i in 3...5 { try? await Task.sleep(for: .milliseconds(600)); guard !Task.isCancelled else { return }; seconds = i }
+                withAnimation(.snappy) { finished = true }
+                try? await Task.sleep(for: .milliseconds(700))
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) { notified = true }
+                try? await Task.sleep(for: .seconds(4))
+                guard !Task.isCancelled else { return }
+                withAnimation(.snappy) { notified = false; expanded = false }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
         }
     }
 }
 
-/// One bot changing body, eyes and colour, as the Creator Studio would.
+/// The Creator Studio at work: a finger picks a body, then a colour, then eyes, and the bot
+/// changes each time.
 private struct StudioDemo: View {
     var live: Bool
     var reduceMotion: Bool
-    @State private var index = 0
-    private let looks: [BotLookSpec] = [
-        BotLookSpec(shape: "blob", eyes: "classic", hex: "#7C5CFF", finish: "glass"),
-        BotLookSpec(shape: "cloud", eyes: "round", hex: "#0A84FF", finish: "glass"),
-        BotLookSpec(shape: "square", eyes: "wide", hex: "#FF375F", finish: "glass"),
-        BotLookSpec(shape: "hexagon", eyes: "tall", hex: "#30D158", finish: "glass"),
-        BotLookSpec(shape: "drop", eyes: "tiny", hex: "#FFD60A", finish: "glass"),
-        BotLookSpec(shape: "pill", eyes: "sleepy", hex: "#FF9F0A", finish: "glass"),
-    ]
+    @State private var shape = "blob"
+    @State private var eyes = "classic"
+    @State private var hex = "#7C5CFF"
+    @State private var pressed: String?
+    private let shapes = ["blob", "cloud", "square", "hexagon", "drop", "triangle"]
+    private let eyeStyles = ["classic", "round", "wide", "tall", "curious", "tiny"]
+    private let colours = ["#7C5CFF", "#0A84FF", "#FF375F", "#30D158", "#FFD60A", "#FF9F0A"]
+
     var body: some View {
-        VStack(spacing: 12) {
-            BotFaceView(spec: looks[index], size: 96, active: false, mood: BotFaceView.Mood(profile: "tour-studio"))
-                .id(index)
-                .transition(.scale(scale: 0.7).combined(with: .opacity))
-            HStack(spacing: 8) {
-                ForEach(Array(looks.enumerated()), id: \.offset) { i, l in
-                    Circle().fill(Color(botHex: l.hex) ?? .gray).frame(width: i == index ? 14 : 10, height: i == index ? 14 : 10)
+        VStack(spacing: 16) {
+            BotFaceView(spec: BotLookSpec(shape: shape, eyes: eyes, hex: hex, finish: "glass"), size: 104, active: false, mood: BotFaceView.Mood(profile: "tour-studio"))
+                .id("\(shape)-\(eyes)-\(hex)")
+                .transition(.scale(scale: 0.8).combined(with: .opacity))
+            HStack(spacing: 10) {
+                ForEach(shapes, id: \.self) { s in
+                    BotFaceView(spec: BotLookSpec(shape: s, eyes: "classic", hex: hex), size: 30, active: false, drawn: true)
+                        .padding(4)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Color(.tertiarySystemFill).opacity(shape == s ? 1 : 0)))
+                        .scaleEffect(pressed == "shape-\(s)" ? 0.85 : 1)
+                }
+            }
+            HStack(spacing: 12) {
+                ForEach(colours, id: \.self) { c in
+                    Circle().fill(Color(botHex: c) ?? .gray).frame(width: 24, height: 24)
+                        .overlay(Circle().stroke(Color.primary.opacity(hex == c ? 0.9 : 0), lineWidth: 2).padding(-3))
+                        .scaleEffect(pressed == "colour-\(c)" ? 0.8 : 1)
                 }
             }
         }
-        .padding(.vertical, 14).padding(.horizontal, 22)
-        .glassEffect(.regular, in: .rect(cornerRadius: 24))
+        .padding(.vertical, 18).padding(.horizontal, 22)
+        .frame(maxWidth: .infinity)
+        .glassEffect(.regular, in: .rect(cornerRadius: 26))
         .task(id: live) {
             guard live, !reduceMotion else { return }
+            var i = 0
             while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(1400))
+                try? await Task.sleep(for: .milliseconds(1300))
                 guard !Task.isCancelled else { return }
-                withAnimation(.snappy) { index = (index + 1) % looks.count }
+                let step = i % 3
+                if step == 0 {
+                    let s = shapes[(shapes.firstIndex(of: shape)! + 1) % shapes.count]
+                    withAnimation(.easeOut(duration: 0.12)) { pressed = "shape-\(s)" }
+                    try? await Task.sleep(for: .milliseconds(150))
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) { pressed = nil; shape = s }
+                } else if step == 1 {
+                    let c = colours[(colours.firstIndex(of: hex)! + 1) % colours.count]
+                    withAnimation(.easeOut(duration: 0.12)) { pressed = "colour-\(c)" }
+                    try? await Task.sleep(for: .milliseconds(150))
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) { pressed = nil; hex = c }
+                } else {
+                    withAnimation(.snappy) { eyes = eyeStyles[(eyeStyles.firstIndex(of: eyes)! + 1) % eyeStyles.count] }
+                }
+                i += 1
             }
         }
     }
