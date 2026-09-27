@@ -8,3 +8,7 @@ __pycache__/
 Tools/release/.env
 .dev.vars
 server/push-relay/node_modules/
+
+# Claude Code session files stay local
+.claude/
+docs/agent-memory/
