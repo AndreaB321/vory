@@ -5,19 +5,19 @@
   html, body { margin: 0; background: #333; }
   .banner { position: relative; width: 1500px; height: 500px; overflow: hidden; background: #F2F2F7; font-family: -apple-system, system-ui, sans-serif; color: #0A0A0C; }
   .glow { position: absolute; inset: 0; background:
-    radial-gradient(34% 80% at 78% 52%, rgba(62,196,238,0.38), transparent 72%),
-    radial-gradient(30% 70% at 62% 70%, rgba(59,123,255,0.26), transparent 72%),
-    radial-gradient(26% 60% at 95% 30%, rgba(11,40,104,0.16), transparent 72%),
-    radial-gradient(40% 90% at 20% 30%, rgba(59,123,255,0.10), transparent 70%); }
-  .copy { position: absolute; left: 330px; top: 112px; }
-  .eyebrow { font-size: 22px; font-weight: 650; color: #0A84FF; letter-spacing: 0.02em; margin: 0 0 10px; }
-  h1 { font-family: "SF Rounded", system-ui, sans-serif; font-size: 78px; line-height: 1.02; font-weight: 800; letter-spacing: -0.025em; margin: 0; }
-  .tag { margin: 22px 0 0; font-size: 26px; color: #3A3A3C; font-weight: 500; }
+    radial-gradient(34% 80% at 33% 50%, rgba(62,196,238,0.38), transparent 72%),
+    radial-gradient(30% 70% at 48% 72%, rgba(59,123,255,0.26), transparent 72%),
+    radial-gradient(26% 60% at 6% 30%, rgba(11,40,104,0.16), transparent 72%),
+    radial-gradient(40% 90% at 82% 30%, rgba(59,123,255,0.10), transparent 70%); }
+  .copy { position: absolute; left: 690px; top: 150px; width: 440px; }
+  .eyebrow { font-size: 19px; font-weight: 650; color: #0A84FF; letter-spacing: 0.02em; margin: 0 0 10px; }
+  h1 { font-family: "SF Rounded", system-ui, sans-serif; font-size: 56px; line-height: 1.02; font-weight: 800; letter-spacing: -0.025em; margin: 0; }
+  .tag { margin: 18px 0 0; font-size: 22px; color: #3A3A3C; font-weight: 500; }
   .tag b { color: #0A0A0C; font-weight: 650; }
-  .url { position: absolute; left: 330px; bottom: 44px; font-size: 22px; font-weight: 600; color: #6E6E73; }
-  .pill { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 999px; background: rgba(255,255,255,0.7); border: 1px solid rgba(255,255,255,0.9); box-shadow: 0 6px 18px rgba(20,30,60,0.10); font-size: 20px; font-weight: 650; }
+  .url { position: absolute; left: 690px; bottom: 44px; font-size: 22px; font-weight: 600; color: #6E6E73; }
+  .pill { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; font-size: 18px !important; border-radius: 999px; background: rgba(255,255,255,0.7); border: 1px solid rgba(255,255,255,0.9); box-shadow: 0 6px 18px rgba(20,30,60,0.10); font-size: 20px; font-weight: 650; }
   .pill i { width: 10px; height: 10px; border-radius: 50%; background: #30D158; display: inline-block; }
-  .stage { position: absolute; right: 150px; top: 26px; width: 400px; height: 460px; display: grid; justify-items: center; align-content: start; }
+  .stage { position: absolute; left: 270px; top: 52px; width: 400px; height: 460px; display: grid; justify-items: center; align-content: start; }
   .stage canvas, .cast canvas { position: relative; z-index: 1; }
   .shelf { position: relative; align-self: start; display: inline-flex; padding: 5px 28px; line-height: 1.05; border-radius: 999px; background: rgba(255,255,255,0.72); border: 1px solid rgba(255,255,255,0.9); box-shadow: 0 10px 30px rgba(20,30,60,0.10); font-size: 26px; font-weight: 700; }
   .cast { position: absolute; display: grid; justify-items: center; }
@@ -27,15 +27,15 @@
 <div class="banner" id="banner">
   <div class="glow"></div>
   <div class="copy">
-    <p class="eyebrow">Vory · the iPhone remote for your Hermes agents</p>
+    <p class="eyebrow">The iPhone remote for your Hermes agents</p>
     <h1>Your agents,<br>in your pocket.</h1>
     <p class="tag"><span class="pill"><i></i>Now in beta testing &nbsp;·&nbsp; TestFlight</span></p>
   </div>
   <div class="url">vory.dev</div>
   <div class="stage"><canvas id="vory"></canvas><div class="shelf">Vory</div></div>
-  <div class="cast" style="left: 1350px; top: 318px;"><canvas id="c1"></canvas><div class="shelf">Pip</div></div>
-  <div class="cast" style="left: 1385px; top: 96px;"><canvas id="c2"></canvas><div class="shelf">Nova</div></div>
-  <div class="cast" style="left: 975px; top: 330px;"><canvas id="c3"></canvas><div class="shelf">Otto</div></div>
+  <div class="cast" style="left: 590px; top: 322px;"><canvas id="c1"></canvas><div class="shelf">Pip</div></div>
+  <div class="cast" style="left: 120px; top: 126px;"><canvas id="c2"></canvas><div class="shelf">Nova</div></div>
+  <div class="cast" style="left: 585px; top: 122px;"><canvas id="c3"></canvas><div class="shelf">Otto</div></div>
 </div>
 <script type="module">
   import { paintStill, VORY, stillMotion, bodyPieces } from "../site/public/assets/vory-bot.js";
