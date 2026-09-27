@@ -465,7 +465,7 @@ export function eyePath(spec, size, t, active, gaze = { x: 0, y: 0 }, strain = f
   const path = new Path2D();
   const eye = (x, w, h, round) => {
     const hh = Math.max(s * 0.025, h * open);
-    if (round && open > 0.5) path.ellipse(x, cy, w / 2, hh / 2, 0, 0, TAU);
+    if (round && open > 0.5) { path.moveTo(x + w / 2, cy); path.ellipse(x, cy, w / 2, hh / 2, 0, 0, TAU); }
     else { const r = Math.min(w, hh) / 2; path.roundRect(x - w / 2, cy - hh / 2, w, hh, r); }
   };
   if (spec.eyes === "sleepy") {
