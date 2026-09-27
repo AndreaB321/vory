@@ -44,7 +44,8 @@
   const seat = (canvas, shape, size) => {
     let bottom = 0; for (const piece of bodyPieces(shape, { x: 0, y: 0, w: size, h: size }, 0, false)) for (const q of piece) if (q.y > bottom) bottom = q.y;
     const shelf = canvas.nextElementSibling; const h = shelf.getBoundingClientRect().height;
-    shelf.style.marginTop = `${-((size - bottom) + h * 0.26)}px`;
+    // Tuck a hair less than the app's quarter so the name never touches the bot.
+    shelf.style.marginTop = `${-((size - bottom) + h * 0.12)}px`;
   };
   await document.fonts.load('800 40px "SF Rounded"').catch(() => {});
   const m = stillMotion();
