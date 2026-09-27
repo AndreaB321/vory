@@ -107,6 +107,6 @@ address. Material changes that affect the relay will also be noted in the app's 
 
 ## Contact
 
-Questions about this policy or your data: **[FEEDBACK_EMAIL]**.
+Questions about this policy or your data: **matt@vory.dev**.
 
 *Vory is not affiliated with Nous Research or the Hermes project.*
