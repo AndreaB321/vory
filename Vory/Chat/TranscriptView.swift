@@ -80,7 +80,9 @@ struct TranscriptView: View {
                             // The time waits just past the right edge; the column slides left to show it.
                             .overlay(alignment: .trailing) {
                                 Text(row.item.timestamp, style: .time).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
-                                    .fixedSize().offset(x: 60)
+                                    // Its leading edge sits 20 pt past the row (beyond the screen's
+                                    // 16 pt margin), so nothing of it shows until the column slides.
+                                    .fixedSize().alignmentGuide(.trailing) { d in d[.leading] - 20 }
                                     .accessibilityHidden(true)
                             }
                     }
@@ -178,12 +180,12 @@ struct TimeRevealColumn<Content: View>: View {
     @State private var reveal: CGFloat = 0
     var body: some View {
         content
-            .offset(x: -reveal * 56)
+            .offset(x: -reveal * 80)
             .simultaneousGesture(
                 DragGesture(minimumDistance: 24)
                     .onChanged { v in
                         guard abs(v.translation.width) > abs(v.translation.height), v.translation.width < 0 else { return }
-                        reveal = min(1, -v.translation.width / 80)
+                        reveal = min(1, -v.translation.width / 100)
                     }
                     .onEnded { _ in withAnimation(.snappy) { reveal = 0 } }
             )
