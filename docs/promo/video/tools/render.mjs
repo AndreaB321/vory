@@ -14,10 +14,10 @@ const here = dirname(fileURLToPath(import.meta.url)), root = join(here, "..");
 const cues = JSON.parse(readFileSync(join(root, "cues.json"), "utf8"));
 const args = process.argv.slice(2);
 const stillsOnly = args.includes("stills");
-const aspects = args.filter((a) => ["916", "169", "11"].includes(a));
+const aspects = args.filter((a) => ["916", "169", "11", "45"].includes(a));
 if (!aspects.length) aspects.push("916");
 const FPS = cues.fps, DUR = cues.duration, N = FPS * DUR;
-const SIZES = { 916: [1080, 1920], 169: [1920, 1080], 11: [1080, 1080] };
+const SIZES = { 916: [1080, 1920], 169: [1920, 1080], 11: [1080, 1080], 45: [1080, 1350] };
 const FRAMES = process.env.FRAMES_DIR || join(root, "frames");
 const OUT = join(root, "out");
 mkdirSync(OUT, { recursive: true });
@@ -46,8 +46,9 @@ try {
       const cols = 5, rows = Math.ceil(list.length / cols);
       const inputs = list.map((f) => `-i "${f}"`).join(" ");
       const scaled = list.map((_, i) => `[${i}]scale=${aspect === "169" ? 640 : 360}:-1[s${i}]`).join(";");
+      const tileH = aspect === "169" ? 360 : aspect === "11" ? 360 : aspect === "45" ? 450 : 640;
       const tiles = list.map((_, i) => `[s${i}]`).join("");
-      execSync(`ffmpeg -v error -y ${inputs} -filter_complex "${scaled};${tiles}xstack=inputs=${list.length}:layout=${layout(list.length, cols, aspect === "169" ? 640 : 360, aspect === "169" ? 360 : aspect === "11" ? 360 : 640)}:fill=#F2F2F7[o]" -map "[o]" "${join(OUT, `storyboard-${aspect}.png`)}"`);
+      execSync(`ffmpeg -v error -y ${inputs} -filter_complex "${scaled};${tiles}xstack=inputs=${list.length}:layout=${layout(list.length, cols, aspect === "169" ? 640 : 360, tileH)}:fill=#F2F2F7[o]" -map "[o]" "${join(OUT, `storyboard-${aspect}.png`)}"`);
       console.log("stills →", dir, "and", `storyboard-${aspect}.png`);
       await page.close(); continue;
     }
@@ -59,7 +60,7 @@ try {
     }
     await page.close();
     const music = join(OUT, "music.wav");
-    const name = { 916: "vory-promo-9x16", 169: "vory-promo-16x9", 11: "vory-promo-1x1" }[aspect];
+    const name = { 916: "vory-promo-9x16", 169: "vory-promo-16x9", 11: "vory-promo-1x1", 45: "vory-promo-4x5" }[aspect];
     const seq = join(dir, "f%05d.png");
     const audio = existsSync(music) ? `-i "${music}" -shortest -c:a aac -b:a 192k` : "";
     execSync(`ffmpeg -v error -y -framerate ${FPS} -i "${seq}" ${audio} -c:v libx264 -preset slow -crf 17 -pix_fmt yuv420p -movflags +faststart -r ${FPS} "${join(OUT, name + ".mp4")}"`, { stdio: "inherit" });
@@ -68,7 +69,7 @@ try {
     execSync(`ffmpeg -v error -y -i "${join(OUT, name + ".mp4")}" -r 30 -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p -movflags +faststart -c:a copy "${join(OUT, name + "-30fps.mp4")}"`, { stdio: "inherit" });
     copyFileSync(join(dir, `f${String(Math.round(2.9 * FPS)).padStart(5, "0")}.png`), join(OUT, `${name}-poster.png`));
     // Contact sheet: one frame per second, 6 columns
-    const tw = aspect === "169" ? 480 : 270, th = aspect === "169" ? 270 : aspect === "11" ? 270 : 480;
+    const tw = aspect === "169" ? 480 : 270, th = aspect === "169" ? 270 : aspect === "11" ? 270 : aspect === "45" ? 338 : 480;
     execSync(`ffmpeg -v error -y -framerate ${FPS} -i "${seq}" -vf "select='not(mod(n,${FPS}))',scale=${tw}:${th},tile=6x4:padding=6:color=#F2F2F7" -frames:v 1 "${join(OUT, `${name}-contact-sheet.png`)}"`, { stdio: "inherit" });
     console.log(`${aspect}: done →`, name);
   }

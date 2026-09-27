@@ -6,8 +6,6 @@
 <title>Vory — Your agents, in your pocket</title>
 <meta name="description" content="Vory is the iPhone remote for your Hermes agent gateway. Your self-hosted AI agents, as characters you can talk to. Approve from your pocket. TestFlight beta coming soon.">
 <meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <link rel="canonical" href="https://vory.dev/">
 <link rel="icon" type="image/png" sizes="32x32" href="/assets/img/favicon-32.png">
 <link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png">
@@ -50,8 +48,9 @@
 
 <!-- ============================================================ Hero -->
 <section class="hero" aria-labelledby="hero-title">
+  <div class="glow" aria-hidden="true"></div>
+  <div class="hero-inner">
   <div class="hero-stage">
-    <div class="glow" aria-hidden="true"></div>
     <figure class="vory-figure">
       <div class="bot-seat bot-seat--hero">
         <canvas id="hero-bot" class="bot" aria-hidden="true"></canvas>
@@ -72,6 +71,7 @@
     </div>
     <p class="fineprint">Public beta opening soon. Talks to a gateway you run. No account, no middleman cloud.</p>
   </div>
+  </div>
 </section>
 
 <!-- ============================================================ What it is -->
@@ -83,7 +83,7 @@
   </div>
   <div class="cards three">
     <article class="card glass reveal">
-      <canvas class="bot bot-card" data-bot='{"shape":"circle","eyes":"classic","hex":"#111111","finish":"glass"}' data-size="64" data-profile="yours-machine" aria-hidden="true"></canvas>
+      <canvas class="bot bot-card" data-bot='{"shape":"circle","eyes":"classic","hex":"#FF453A","finish":"glass"}' data-size="64" data-profile="yours-machine" aria-hidden="true"></canvas>
       <h3>Your machine</h3>
       <p>Your agents run where you put them. Vory talks to your gateway directly, over your LAN, Tailscale or a Cloudflare Tunnel. No port‑forwarding, no middleman.</p>
     </article>
@@ -129,7 +129,7 @@
       <p>When a bot needs a yes, an approval card appears in the chat, in a notification, and in the Live Activity on the Lock Screen and Dynamic Island. Approve and Deny are right there.</p></div>
     </li>
     <li class="step glass reveal">
-      <canvas class="bot" data-bot='{"shape":"pill","eyes":"wide","hex":"#F4F4F5","finish":"glass"}' data-size="56" data-state="usingTool" data-profile="step-told" aria-hidden="true"></canvas>
+      <canvas class="bot" data-bot='{"shape":"pill","eyes":"wide","hex":"#FF9F0A","finish":"glass"}' data-size="56" data-state="usingTool" data-profile="step-told" aria-hidden="true"></canvas>
       <div><span class="step-n">5</span><h3>Get told</h3>
       <p>The Vory Companion, a small plugin installed on the gateway from the app, sends replies as notifications from the bot, keeps the Live Activity on its phase, and delivers approval requests instantly. Reply from the notification.</p></div>
     </li>
@@ -148,7 +148,7 @@
       <p>Settings for every profile: model, config, API keys, tools, skills, MCP servers, approvals policy, scheduled tasks, sessions, channels, system health, logs, restarts and updates.</p></div>
     </li>
     <li class="step glass reveal">
-      <canvas class="bot" data-bot='{"shape":"cloud","eyes":"sleepy","hex":"#FFFFFF","finish":"flat"}' data-size="56" data-profile="step-sum" aria-hidden="true"></canvas>
+      <canvas class="bot" data-bot='{"shape":"cloud","eyes":"sleepy","hex":"#5AC8FA","finish":"flat"}' data-size="56" data-profile="step-sum" aria-hidden="true"></canvas>
       <div><span class="step-n">8</span><h3>Summaries <span class="tag">beta</span></h3>
       <p>Apple Intelligence, on‑device, gives every chat a title and a two‑line summary in the list. Nothing leaves the phone.</p></div>
     </li>
@@ -304,9 +304,32 @@
       </ul>
     </div>
     <div class="phones phones--single">
-      <figure class="phone reveal">
-        <img src="/assets/img/bots-shapes-603.webp" srcset="/assets/img/bots-shapes-603.webp 603w, /assets/img/bots-shapes-1206.webp 1206w" sizes="(min-width: 900px) 300px, 70vw" width="1206" height="2622" alt="The Bots tab in Vory: eight blue bots on glass pills, one per body shape: circle, blob, square, pill, triangle, hexagon, cloud and drop." loading="lazy" decoding="async">
-      </figure>
+      <div class="phone phone--mock reveal" role="img" aria-label="The Bots tab in Vory: eight bots on glass pills, each with its own shape and colour: Pip, Juno, Otto, Nova, Remy, Ivy, Bo and Sol.">
+        <div class="mock">
+          <div class="mock-status"><span>9:41</span><span class="mock-island" aria-hidden="true"></span><span class="mock-signal" aria-hidden="true"></span></div>
+          <div class="mock-head"><span class="mock-plus" aria-hidden="true">+</span></div>
+          <p class="mock-title" aria-hidden="true">Bots</p>
+          <div class="mock-grid" aria-hidden="true">
+            <div class="mock-card"><canvas class="bot" data-bot='{"shape":"circle","eyes":"classic","hex":"#FF453A","finish":"glass"}' data-size="62" data-profile="mock-pip"></canvas><div class="mock-pill"><b>Pip</b><span>model</span></div></div>
+            <div class="mock-card"><canvas class="bot" data-bot='{"shape":"blob","eyes":"curious","hex":"#E07A5F","finish":"flat"}' data-size="62" data-profile="mock-juno"></canvas><div class="mock-pill"><b>Juno</b><span>model</span></div></div>
+            <div class="mock-card"><canvas class="bot" data-bot='{"shape":"square","eyes":"round","hex":"#30D158","finish":"glass"}' data-size="62" data-profile="mock-ivy"></canvas><div class="mock-pill"><b>Ivy</b><span>model</span></div></div>
+            <div class="mock-card"><canvas class="bot" data-bot='{"shape":"pill","eyes":"wide","hex":"#FFD60A","finish":"flat"}' data-size="62" data-profile="mock-bo"></canvas><div class="mock-pill"><b>Bo</b><span>model</span></div></div>
+            <div class="mock-card"><canvas class="bot" data-bot='{"shape":"triangle","eyes":"bold","hex":"#F5A524","finish":"flat"}' data-size="62" data-profile="mock-otto"></canvas><div class="mock-pill"><b>Otto</b><span>model</span></div></div>
+            <div class="mock-card"><canvas class="bot" data-bot='{"shape":"hexagon","eyes":"round","hex":"#BF5AF2","finish":"glass"}' data-size="62" data-profile="mock-remy"></canvas><div class="mock-pill"><b>Remy</b><span>model</span></div></div>
+            <div class="mock-card"><canvas class="bot" data-bot='{"shape":"cloud","eyes":"classic","hex":"#3B7BFF","finish":"glass"}' data-size="62" data-profile="mock-sol"></canvas><div class="mock-pill"><b>Sol</b><span>model</span></div></div>
+            <div class="mock-card"><canvas class="bot" data-bot='{"shape":"drop","eyes":"tiny","hex":"#2BB5A0","finish":"flat"}' data-size="62" data-profile="mock-nova"></canvas><div class="mock-pill"><b>Nova</b><span>model</span></div></div>
+          </div>
+          <div class="mock-tabs" aria-hidden="true">
+            <div class="mock-tabbar">
+              <svg viewBox="0 0 24 24" width="22" height="22"><path d="M4 5h12a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H9l-4 3v-3H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M20 9h1a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-1v3l-3-3h-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+              <span class="mock-tab--on"><svg viewBox="0 0 24 24" width="24" height="24"><path d="M7 18h10a4 4 0 0 0 .6-7.95A5.5 5.5 0 0 0 7.2 9.1 4.5 4.5 0 0 0 7 18Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><rect x="9.5" y="11.5" width="1.8" height="3.6" rx=".9" fill="currentColor"/><rect x="12.7" y="11.5" width="1.8" height="3.6" rx=".9" fill="currentColor"/></svg><small>Bots</small></span>
+              <svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+              <svg viewBox="0 0 24 24" width="22" height="22"><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            </div>
+            <div class="mock-compose"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M4 20h4l10-10-4-4L4 16v4Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12.5 7.5l4 4" stroke="currentColor" stroke-width="1.8"/></svg></div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </section>

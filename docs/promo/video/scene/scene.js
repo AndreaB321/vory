@@ -5,13 +5,13 @@
  * glances, coin-turns and state holds are the app's. Everything around them (camera, type, cards,
  * bubbles) is this file.
  *
- * ?aspect=916 (1080×1920, the master) · 169 (1920×1080) · 11 (1080×1080)
+ * ?aspect=916 (1080×1920, the master) · 169 (1920×1080) · 11 (1080×1080) · 45 (1080×1350)
  */
 import { drawBot, motion, stillMotion, VORY, baseline, isLight } from "./vory-bot.js";
 
 const params = new URLSearchParams(location.search);
 const ASPECT = params.get("aspect") || "916";
-const SIZES = { 916: [1080, 1920], 169: [1920, 1080], 11: [1080, 1080] };
+const SIZES = { 916: [1080, 1920], 169: [1920, 1080], 11: [1080, 1080], 45: [1080, 1350] };
 const [W, H] = SIZES[ASPECT];
 const canvas = document.getElementById("stage");
 canvas.width = W; canvas.height = H;
@@ -171,6 +171,13 @@ const L = {
     chat: { x: 1300, w: 960, userY: 110, botY: 470, botS: 240, cardY: 870, replyY: 250, subY: 500, subSize: 64, subX: 470 },
     end: { urlY: 470, betaY: 580, x: 1400 },
   },
+  45: {
+    vory: { x: 540, y: 700, s: 520 }, voryTop: { x: 540, y: 250, s: 210 }, voryEnd: { x: 540, y: 520, s: 440 },
+    head: { x: 540, y: 190, size: 92, align: "center", lh: 104 },
+    bots: [[180, 770], [540, 770], [900, 770], [360, 1040], [720, 1040]], botS: 190, botLabel: { x: 540, y: 1268, size: 52 },
+    chat: { x: 540, w: 960, userY: 300, botY: 660, botS: 260, cardY: 1030, replyY: 440, subY: 130, subSize: 56 },
+    end: { urlY: 1000, betaY: 1100 },
+  },
   11: {
     vory: { x: 540, y: 600, s: 460 }, voryTop: { x: 540, y: 220, s: 180 }, voryEnd: { x: 540, y: 440, s: 380 },
     head: { x: 540, y: 150, size: 78, align: "center", lh: 88 },
@@ -313,7 +320,7 @@ function shotEnd(t) {
   const ua = inOut(t, 20.9, Infinity, 0.8);
   if (ua > 0) text("vory.dev", L.end.x ?? W / 2, L.end.urlY + (1 - ua) * 50, { size: ASPECT === "11" ? 76 : 92, weight: 800, alpha: ua, rounded: true, align: "center", spacing: -2 });
   const ba = inOut(t, 21.25, Infinity, 0.8);
-  if (ba > 0) text("Public beta · TestFlight coming soon", L.end.x ?? W / 2, L.end.betaY + (1 - ba) * 40, { size: ASPECT === "11" ? 34 : 40, weight: 500, color: MUTED, alpha: ba, align: "center" });
+  if (ba > 0) text("Public beta · Now on TestFlight", L.end.x ?? W / 2, L.end.betaY + (1 - ba) * 40, { size: ASPECT === "11" ? 34 : 40, weight: 500, color: MUTED, alpha: ba, align: "center" });
 }
 
 export function seek(t) {
