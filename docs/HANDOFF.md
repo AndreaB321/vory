@@ -10,9 +10,11 @@ at a time, ship a TestFlight build, wait for their verdict.
 - **Latest: 1.1 (4)** (2026-09-27, build-3 review fixes: studio taps, header pill, top inset, To:
   chips, list keeps new chats, scroll perf, time reveal), companion **1.0.27**. Uploaded ~14:00 and
   NOT submitted: build 3 keeps its place in Beta App Review; internal testers get 4 at once
-  (internal groups take every build automatically). Once 3 is approved, add 4 to the Public beta
-  group (POST betaGroups/<public id>/relationships/builds); later builds of an approved train
-  usually need no new review.
+  (internal groups take every build automatically). Build 3 was approved later that day; 4 was
+  added to the Public beta group and submitted, and went BETA_APPROVED within seconds. **Later 1.1
+  builds:** add to the public group + POST betaAppReviewSubmissions; `buildBetaDetail.
+  externalBuildState == BETA_APPROVED` means live for the public. See memory
+  vory-public-beta-launch.md for the recipe.
 - 1.1 (3): Live Activity + snapshot-order fixes, uploaded 2026-09-27 ~02:40.
 - Earlier: 1.0.1 (43) uploaded 2026-09-26 ~15:05 (31–41 earlier that day), companion 1.0.26.
 - **Build 45 uploaded 2026-09-26 ~18:05** (user: "Once done go ahead and push it") — the build-44
