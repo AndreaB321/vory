@@ -1,0 +1,1 @@
+{ "name": "vory-promo-video", "private": true, "type": "module", "scripts": { "music": "node tools/music.mjs out/music.wav", "stills": "node tools/render.mjs 916 stills", "render": "node tools/render.mjs 916 169 11" }, "devDependencies": { "playwright": "1.63.0" } }

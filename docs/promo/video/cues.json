@@ -1,0 +1,17 @@
+{
+  "fps": 60,
+  "duration": 24,
+  "cps": 26,
+  "blinks": [0.7, 2.6, 22.4],
+  "typing": [
+    { "at": 1.5, "text": "Hi, I'm Vory." },
+    { "at": 4.1, "text": "I'm the iPhone remote for your Hermes gateway." },
+    { "at": 8.1, "text": "Every bot you run lives here." },
+    { "at": 20.6, "text": "Your agents, in your pocket." }
+  ],
+  "coin": [10.2, 18.6],
+  "morph": [13.0, 14.2, 16.1],
+  "tap": 17.9,
+  "success": 18.9,
+  "rises": [4.5, 8.7, 12.4, 12.6, 16.2, 20.9]
+}

@@ -1,0 +1,4 @@
+frames/
+node_modules/
+out/*.mov
+out/*.mp4
