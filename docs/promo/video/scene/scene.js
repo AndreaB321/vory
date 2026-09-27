@@ -75,14 +75,16 @@ function drawnBottom(shape, size) {
   return bottomCache.get(key);
 }
 /** Speech bubble with a tail pointing up (under a bot) or down-left (a chat reply). */
-function bubble(cx, top, str, { alpha = 1, tail = "top", size = 34, maxW = 700, fill = "#FFFFFF", color = INK, caret = false, minW = 0, scale = 1, align = "center" } = {}) {
+function bubble(cx, top, str, { alpha = 1, tail = "top", size = 34, maxW = 700, fill = "#FFFFFF", color = INK, caret = false, caretSpace = caret, minW = 0, scale = 1, align = "center" } = {}) {
   if (alpha <= 0.002) return 0;
   ctx.font = FONT(500, size);
   const words = str.split(" "); const lines = []; let cur = "";
   for (const w of words) { const test = cur ? cur + " " + w : w; if (ctx.measureText(test).width > maxW - 64 * scale && cur) { lines.push(cur); cur = w; } else cur = test; }
   lines.push(cur);
   const lh = size * 1.28, padX = 32 * scale, padY = 22 * scale;
-  const caretW = caret ? size * 0.22 : 0;
+  // The caret's slot is reserved whenever a typed line is up (caretSpace), so the bubble keeps
+  // its width while the caret itself blinks.
+  const caretW = caretSpace ? size * 0.22 : 0;
   const tw = Math.max(minW, ...lines.map((l) => ctx.measureText(l).width)) + caretW;
   const w = tw + padX * 2, h = lines.length * lh + padY * 2, x = cx - w / 2, y = top;
   ctx.save(); ctx.globalAlpha = alpha;
@@ -233,7 +235,7 @@ function shotVory(t) {
   // The typed bubble under the shelf.
   const ty = typedLine(t);
   const bubbleA = Math.min(p.alpha, t >= 20 ? inOut(t, 20.4, Infinity, 0.6) : inOut(t, 1.35, 12.0, 0.6, 0.4));
-  if (ty.show || t >= 20.4) bubble(p.x, shelfBottom + 30 * (p.s / 440), ty.str || " ", { alpha: bubbleA, size: 34 * Math.max(0.78, p.s / 440), caret: ty.caret, scale: Math.max(0.78, p.s / 440) });
+  if (ty.show || t >= 20.4) bubble(p.x, shelfBottom + 30 * (p.s / 440), ty.str || " ", { alpha: bubbleA, size: 34 * Math.max(0.78, p.s / 440), caret: ty.caret, caretSpace: ty.show, scale: Math.max(0.78, p.s / 440) });
   ctx.restore();
 }
 
