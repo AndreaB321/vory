@@ -65,14 +65,15 @@ function shelf(cx, cy, size, shape, label, { alpha = 1, status = null, scale = 1
   return y + h;
 }
 /** Speech bubble with a tail pointing up (under a bot) or down-left (a chat reply). */
-function bubble(cx, top, str, { alpha = 1, tail = "top", size = 34, maxW = 700, fill = "#FFFFFF", color = INK, caret = false, minW = 0, scale = 1 } = {}) {
+function bubble(cx, top, str, { alpha = 1, tail = "top", size = 34, maxW = 700, fill = "#FFFFFF", color = INK, caret = false, minW = 0, scale = 1, align = "center" } = {}) {
   if (alpha <= 0.002) return 0;
   ctx.font = FONT(500, size);
   const words = str.split(" "); const lines = []; let cur = "";
   for (const w of words) { const test = cur ? cur + " " + w : w; if (ctx.measureText(test).width > maxW - 64 * scale && cur) { lines.push(cur); cur = w; } else cur = test; }
   lines.push(cur);
   const lh = size * 1.28, padX = 32 * scale, padY = 22 * scale;
-  const tw = Math.max(minW, ...lines.map((l) => ctx.measureText(l).width + (caret ? size * 0.35 : 0)));
+  const caretW = caret ? size * 0.22 : 0;
+  const tw = Math.max(minW, ...lines.map((l) => ctx.measureText(l).width)) + caretW;
   const w = tw + padX * 2, h = lines.length * lh + padY * 2, x = cx - w / 2, y = top;
   ctx.save(); ctx.globalAlpha = alpha;
   shadow("rgba(20,30,60,0.12)", 28, 8);
@@ -84,8 +85,9 @@ function bubble(cx, top, str, { alpha = 1, tail = "top", size = 34, maxW = 700, 
   ctx.closePath(); ctx.fill();
   shadow("transparent", 0, 0);
   ctx.fillStyle = color; ctx.font = FONT(500, size); ctx.textAlign = "left"; ctx.textBaseline = "middle";
-  lines.forEach((l, i) => ctx.fillText(l, x + padX, y + padY + lh * (i + 0.5)));
-  if (caret) { const last = lines[lines.length - 1]; const cw = ctx.measureText(last).width; ctx.globalAlpha = alpha * 0.45; ctx.fillRect(x + padX + cw + 4, y + padY + lh * (lines.length - 0.5) - size * 0.5, 3, size); }
+  const lineX = (l) => align === "center" ? x + padX + (tw - caretW - ctx.measureText(l).width) / 2 : x + padX;
+  lines.forEach((l, i) => ctx.fillText(l, lineX(l), y + padY + lh * (i + 0.5)));
+  if (caret) { const last = lines[lines.length - 1]; const cw = ctx.measureText(last).width; ctx.globalAlpha = alpha * 0.45; ctx.fillRect(lineX(last) + cw + 4, y + padY + lh * (lines.length - 0.5) - size * 0.5, 3, size); }
   ctx.restore();
   return h;
 }
@@ -138,12 +140,13 @@ function bot(track, cx, cy, size, t, { alpha = 1, gaze = { x: 0, y: 0 }, dpr = 1
 const vory = new Track(VORY, "vory-promo", [{ at: -10, state: "guide" }]);
 vory.blinks = cues.blinks;
 const cast = [
-  new Track({ shape: "circle", eyes: "classic", hex: "#111111", finish: "glass" }, "cast-a", [{ at: -10, state: "idle" }]),
+  new Track({ shape: "circle", eyes: "classic", hex: "#FF453A", finish: "glass" }, "cast-a", [{ at: -10, state: "idle" }]),
   new Track({ shape: "blob", eyes: "curious", hex: "#E07A5F", finish: "flat" }, "cast-b", [{ at: -10, state: "idle" }]),
   new Track({ shape: "triangle", eyes: "bold", hex: "#F5A524", finish: "flat" }, "cast-c", [{ at: -10, state: "idle" }]),
-  new Track({ shape: "pill", eyes: "wide", hex: "#F4F4F5", finish: "glass" }, "cast-d", [{ at: -10, state: "idle" }]),
+  new Track({ shape: "drop", eyes: "wide", hex: "#F4F4F5", finish: "glass" }, "cast-d", [{ at: -10, state: "idle" }]),
   new Track({ shape: "hexagon", eyes: "round", hex: "#BF5AF2", finish: "glass" }, "cast-e", [{ at: -10, state: "idle" }]),
 ];
+const castNames = ["Pip", "Juno", "Otto", "Nova", "Remy"];
 cast[0].finishes = [cues.coin[0]];
 cast[2].blinks = [9.9]; cast[4].blinks = [11.2];
 const worker = new Track({ shape: "drop", eyes: "tiny", hex: "#2BB5A0", finish: "flat" }, "worker", [
@@ -213,7 +216,7 @@ function shotVory(t) {
   // The typed bubble under the shelf.
   const ty = typedLine(t);
   const bubbleA = Math.min(p.alpha, t >= 20 ? inOut(t, 20.4, Infinity, 0.6) : inOut(t, 1.35, 12.0, 0.6, 0.4));
-  if (ty.show || t >= 20.4) bubble(p.x, shelfBottom + 30 * (p.s / 440), ty.str, { alpha: bubbleA, size: 34 * Math.max(0.78, p.s / 440), caret: ty.caret, minW: 220 * (p.s / 440), scale: Math.max(0.78, p.s / 440) });
+  if (ty.show || t >= 20.4) bubble(p.x, shelfBottom + 30 * (p.s / 440), ty.str || " ", { alpha: bubbleA, size: 34 * Math.max(0.78, p.s / 440), caret: ty.caret, scale: Math.max(0.78, p.s / 440) });
   ctx.restore();
 }
 
@@ -232,7 +235,7 @@ function shotBots(t) {
     const a = inOut(t, 8.7 + i * 0.12, 11.95 + i * 0.03, 0.8, 0.4);
     if (a <= 0) return;
     const [x, y0] = L.bots[i]; const y = y0 + (1 - a) * 160;
-    shelf(x, y, L.botS, tr.spec.shape, "", { alpha: a, scale: 0.7 });
+    shelf(x, y, L.botS, tr.spec.shape, castNames[i], { alpha: a, scale: 0.8 });
     bot(tr, x, y, L.botS, t, { alpha: a });
   });
   const a = inOut(t, 9.6, 11.9, 0.8, 0.4);
