@@ -7,6 +7,7 @@ it. It is plain HTML, CSS and JavaScript (one ES module for the page, one for th
 public/
   index.html                 the whole site (one page, anchored sections)
   privacy/index.html         the privacy policy (served at /privacy/ and /privacy via the CloudFront function)
+  beta/index.html            fallback redirect to the TestFlight invite (see BETA-REDIRECT.md for the edge 302)
   assets/
     site.css                 design system + layout (mobile first, desktop from 900 px)
     site.js                  page script: hero, studio, Live Activity stills, reveals
@@ -23,11 +24,13 @@ tools/
 DESIGN.md                    sitemap, copy, design system, targets
 ```
 
-## When the TestFlight link exists
+## The beta link
 
-The two CTAs are "TestFlight coming soon" (`<span class="btn btn-primary btn-soon">` in
-`public/index.html`, hero and `#beta`). Swap each for `<a class="btn btn-primary" href="<invite URL>"
-rel="noopener">Join the TestFlight beta</a>` and adjust the sentence above the second one.
+Every beta button links to `/beta` (relative). `public/beta/index.html` is a static fallback that
+sends the visitor to the TestFlight invite (meta refresh + `location.replace` + a tap link). The
+edge redirect (a true 302 from CloudFront) is described in `docs/promo/BETA-REDIRECT.md`, Part 2;
+when it is in place the static page is never served. If the TestFlight code changes, only
+`beta/index.html` and the edge rule change.
 
 ## S3 + CloudFront
 
@@ -38,7 +41,7 @@ rel="noopener">Join the TestFlight beta</a>` and adjust the sentence above the s
   `assets/…` is a prefix). Set `Content-Type` correctly: `.webp` → `image/webp`, `.js` →
   `text/javascript`, `.css` → `text/css`, `.html` → `text/html; charset=utf-8`, `.png` → `image/png`.
 - **Cache-Control** (set as object metadata at upload time):
-  - `index.html` and `privacy/index.html`: `public, max-age=0, must-revalidate`
+  - `index.html`, `privacy/index.html`, `beta/index.html`: `public, max-age=0, must-revalidate`
   - `assets/**`: `public, max-age=31536000, immutable` is fine for images; for `site.css`,
     `site.js` and `vory-bot.js` use `public, max-age=3600, stale-while-revalidate=86400` unless you
     add content hashes to their filenames (they are referenced unhashed today).

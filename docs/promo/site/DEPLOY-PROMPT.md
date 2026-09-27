@@ -23,7 +23,7 @@ use `us-east-1` unless told otherwise. Report every resource id you create at th
 
 | Files | Content-Type | Cache-Control |
 |---|---|---|
-| `index.html`, `privacy/index.html` | `text/html; charset=utf-8` | `public, max-age=0, must-revalidate` |
+| `index.html`, `privacy/index.html`, `beta/index.html` | `text/html; charset=utf-8` | `public, max-age=0, must-revalidate` |
 | `assets/*.css` | `text/css; charset=utf-8` | `public, max-age=3600, stale-while-revalidate=86400` |
 | `assets/*.js` | `text/javascript; charset=utf-8` | `public, max-age=3600, stale-while-revalidate=86400` |
 | `assets/img/*.webp` | `image/webp` | `public, max-age=31536000, immutable` |
