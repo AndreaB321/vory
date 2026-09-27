@@ -55,7 +55,7 @@ struct TranscriptView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                TimeRevealColumn {
+                TimeRevealColumn { reveal in
                 VStack(alignment: .leading, spacing: 10) {
                     if chat.items.isEmpty, chat.resumeError == nil {
                         VStack(spacing: 8) {
@@ -77,13 +77,18 @@ struct TranscriptView: View {
                                       onSelectText: { selectText = $0 })
                             .id(row.item.id)
                             .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
-                            // The time waits just past the right edge; the column slides left to show it.
+                            // A pull to the left slides the time in from the right edge over the
+                            // row; the bubbles stay where they are. Nothing is built until a pull.
                             .overlay(alignment: .trailing) {
-                                Text(row.item.timestamp, style: .time).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
-                                    // Its leading edge sits 20 pt past the row (beyond the screen's
-                                    // 16 pt margin), so nothing of it shows until the column slides.
-                                    .fixedSize().alignmentGuide(.trailing) { d in d[.leading] - 20 }
-                                    .accessibilityHidden(true)
+                                if reveal > 0 {
+                                    Text(row.item.timestamp, style: .time).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                                        .padding(.horizontal, 7).padding(.vertical, 3)
+                                        .background(.thinMaterial, in: .capsule)
+                                        .fixedSize()
+                                        .offset(x: (1 - reveal) * 70)
+                                        .opacity(reveal)
+                                        .accessibilityHidden(true)
+                                }
                             }
                     }
                     // Working with no bubble to fill (between parts, during a tool): the typing
@@ -173,14 +178,13 @@ struct TranscriptView: View {
 }
 
 /// Drag the thread left to peek at each message's time, as in Messages. One transform on the
-/// whole column, with the times laid out just past the right edge, so a drag re-renders nothing
-/// but this wrapper — never the rows.
+/// whole column and hands the rows `reveal` (0…1); the rows do not move, each slides its time in
+/// from the right. Only a pull to the LEFT counts; a pull to the right does nothing.
 struct TimeRevealColumn<Content: View>: View {
-    @ViewBuilder var content: Content
+    @ViewBuilder var content: (CGFloat) -> Content
     @State private var reveal: CGFloat = 0
     var body: some View {
-        content
-            .offset(x: -reveal * 80)
+        content(reveal)
             .simultaneousGesture(
                 DragGesture(minimumDistance: 24)
                     .onChanged { v in

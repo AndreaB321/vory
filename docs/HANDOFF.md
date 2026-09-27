@@ -7,8 +7,10 @@ at a time, ship a TestFlight build, wait for their verdict.
 
 ## Where things stand
 
-- **Latest: 1.1 (3)** (2026-09-27, Live Activity + snapshot-order fixes), companion **1.0.27**.
-  Uploaded 2026-09-27 ~02:40, build 2 expired to withdraw its review, 3 submitted (WAITING_FOR_REVIEW).
+- **Latest: 1.1 (4)** (2026-09-27, build-3 review fixes: studio taps, header pill, top inset, To:
+  chips, list keeps new chats, scroll perf, time reveal), companion **1.0.27**. Build 3 expired to
+  withdraw its review; 4 submitted in its place.
+- 1.1 (3): Live Activity + snapshot-order fixes, uploaded 2026-09-27 ~02:40.
 - Earlier: 1.0.1 (43) uploaded 2026-09-26 ~15:05 (31–41 earlier that day), companion 1.0.26.
 - **Build 45 uploaded 2026-09-26 ~18:05** (user: "Once done go ahead and push it") — the build-44
   review list (group composer, scroll/side-pull smoothness, tails, typing indicators, group
@@ -211,7 +213,10 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
 
 ## Change log
 
-### 2026-09-27 (after 1.1 build 3, from the build-3 review; not yet shipped)
+### 2026-09-27 (1.1 build 4, from the build-3 review)
+- **Time reveal.** The bubbles no longer move: `TimeRevealColumn` hands `reveal` (0…1) to its
+  content and each row overlays its time (thin-material capsule) sliding in from the right edge,
+  built only while a pull is in progress. A pull to the right does nothing.
 - **A new chat vanished from the list.** The gateway creates a session's DB row only on the first
   prompt ("no Untitled litter") and the row fills in as the turn flushes, so `/api/sessions` can
   miss a chat started moments ago or still running; leaving it (via the Live Activity, say) showed
