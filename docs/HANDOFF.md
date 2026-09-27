@@ -212,6 +212,15 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
 ## Change log
 
 ### 2026-09-27 (after 1.1 build 3, from the build-3 review; not yet shipped)
+- **A new chat vanished from the list.** The gateway creates a session's DB row only on the first
+  prompt ("no Untitled litter") and the row fills in as the turn flushes, so `/api/sessions` can
+  miss a chat started moments ago or still running; leaving it (via the Live Activity, say) showed
+  a list without it. `ChatListView.load` now appends a row for every chat open in the app
+  (`runtime.chats`) that the gateway did not list, if it is running or has a prompt.
+- **Scroll stutter.** Every finished reply drew a live bot view (glass + timeline) beside its
+  bubble and every tool card was interactive glass; both composite per frame. Finished replies
+  now show a painted bot (`BotAvatarImage.cached`, memoised by look), only the streaming reply
+  keeps the live bot, and tool cards are painted (secondary grouped fill + hairline).
 - **Creator Studio tiles did not respond to a tap on the face.** `BotFaceView` marks its layers
   `allowsHitTesting(false)`, which leaves a hole in any SwiftUI `Button` it sits in exactly where
   people tap (the label text still worked). Rule: a button or tap target that contains a bot face

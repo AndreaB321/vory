@@ -265,6 +265,7 @@ struct TranscriptRow: View {
     var onEdit: (String) -> Void = { _ in }
     var reasoningOpen: Binding<Bool> = .constant(false)
     var onSelectText: (String) -> Void = { _ in }
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         switch item.kind {
@@ -292,8 +293,12 @@ struct TranscriptRow: View {
         case .assistant(let text, let reasoning, let streaming):
             HStack(alignment: .bottom, spacing: 10) {
                 if let profile {
-                    if botShown {
-                        BotAvatar(profile: profile, size: 28, active: streaming, mood: BotFaceView.Mood(profile: profile, state: streaming ? (text.isEmpty ? .thinking : .streaming) : .idle))
+                    if botShown, streaming {
+                        BotAvatar(profile: profile, size: 28, active: true, mood: BotFaceView.Mood(profile: profile, state: text.isEmpty ? .thinking : .streaming))
+                    } else if botShown {
+                        // A finished reply keeps a painted bot: a live one per row is what stuttered.
+                        Image(uiImage: BotAvatarImage.cached(profile: profile, size: 28, scheme: scheme))
+                            .resizable().frame(width: 28, height: 28)
                     } else {
                         Color.clear.frame(width: 28, height: 1)
                     }
@@ -498,7 +503,10 @@ struct ToolCardView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 14))
+        // A painted card, not glass: a thread can hold dozens of these, and each live glass
+        // layer is composited every frame while the thread scrolls (the stutter on device).
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
         .contentShape(.rect)
         .onTapGesture { withAnimation(.snappy) { expanded.toggle() } }
         .accessibilityElement(children: .combine)

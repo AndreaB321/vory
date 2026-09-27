@@ -31,6 +31,17 @@ enum SessionCache {
 
 /// A bot avatar rendered to a UIImage, for places SwiftUI cannot draw a view — menu item icons.
 enum BotAvatarImage {
+    @MainActor private static let cache = NSCache<NSString, UIImage>()
+    /// `make`, memoised by look: the thread draws one of these beside every reply, and a live
+    /// bot view per row (glass, timeline) is what made a long thread stutter while scrolling.
+    @MainActor static func cached(profile: String, size: CGFloat = 28, scheme: ColorScheme = .light) -> UIImage {
+        let key = "\(profile)|\(size)|\(scheme == .dark ? "d" : "l")|\(BotAvatarStore.choice(for: profile).raw)|\(BotColors.hex(for: profile))|\(BotAvatarStore.glassAll)" as NSString
+        if let hit = cache.object(forKey: key) { return hit }
+        let img = make(profile: profile, size: size, scheme: scheme)
+        cache.setObject(img, forKey: key)
+        return img
+    }
+
     @MainActor static func make(profile: String, size: CGFloat = 28, scheme: ColorScheme = .light) -> UIImage {
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
         if BotAvatarStore.choice(for: profile) == .photo, let photo = BotAvatarStore.photo(for: profile) {

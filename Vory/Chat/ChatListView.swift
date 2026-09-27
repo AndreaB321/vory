@@ -256,6 +256,22 @@ struct ChatListView: View {
                 let r: SessionListResponse = try await runtime.api.get("/api/sessions", query: [URLQueryItem(name: "order", value: "recent"), URLQueryItem(name: "limit", value: "100")], profile: runtime.selectedProfile)
                 all = r.sessions
             }
+            // Chats open in the app that the gateway does not list yet: a new chat gets its
+            // stored row on the first prompt and the row fills in as the turn flushes, so a chat
+            // started moments ago (or one still running) could vanish from the list on the way
+            // back from it. They stay listed from the live session until the gateway has them.
+            let listed = Set(all.map(\.id))
+            let now = Date().timeIntervalSince1970
+            for chat in runtime.chats where !listed.contains(chat.storedID) && !chat.storedID.isEmpty
+                && (chat.isRunning || !chat.items.isEmpty)
+                && (allBots || chat.profileName == (runtime.selectedProfile ?? chat.profileName)) {
+                let last = chat.items.last?.timestamp.timeIntervalSince1970 ?? now
+                all.append(StoredSession(id: chat.storedID, title: chat.title == "New chat" ? nil : chat.title,
+                                         preview: chat.items.first.flatMap { if case .user(let t, _) = $0.kind { return t }; return nil },
+                                         source: "ios", model: chat.modelName.isEmpty ? nil : chat.modelName,
+                                         startedAt: chat.items.first?.timestamp.timeIntervalSince1970 ?? now, lastActive: max(last, now - 1),
+                                         messageCount: chat.items.count, isActive: chat.isRunning, archived: false, pinned: false, profile: chat.profileName))
+            }
             sessions = all.sorted { ($0.pinned ?? false ? 1 : 0, $0.lastActive ?? 0) > ($1.pinned ?? false ? 1 : 0, $1.lastActive ?? 0) }
             SessionCache.save(sessions, connection: runtime.connection.id, profile: cacheProfile)
             errorText = nil
