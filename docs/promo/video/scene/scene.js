@@ -7,7 +7,7 @@
  *
  * ?aspect=916 (1080×1920, the master) · 169 (1920×1080) · 11 (1080×1080) · 45 (1080×1350)
  */
-import { drawBot, motion, stillMotion, VORY, baseline, isLight } from "./vory-bot.js";
+import { drawBot, motion, stillMotion, VORY, baseline, isLight, bodyPieces } from "./vory-bot.js";
 
 const params = new URLSearchParams(location.search);
 const ASPECT = params.get("aspect") || "916";
@@ -54,15 +54,22 @@ function glassPlate(x, y, w, h, r, { alpha = 1, fill = "rgba(255,255,255,0.72)" 
 }
 /** The app's header pill: the bot's base sits 9 px (scaled) into it. */
 function shelf(cx, cy, size, shape, label, { alpha = 1, status = null, scale = 1 } = {}) {
-  const base = cy - size / 2 + size * baseline(shape);
+  const base = cy - size / 2 + drawnBottom(shape, size);
   const h = 66 * scale, pad = 34 * scale, fs = 30 * scale;
   ctx.font = FONT(700, fs); const lw = ctx.measureText(label).width;
   let sw = 0; if (status) { ctx.font = FONT(500, fs * 0.86); sw = ctx.measureText(status).width + 12 * scale; }
-  const w = Math.max(lw + sw + pad * 2, label ? 0 : size * 0.62), x = cx - w / 2, y = base - 9 * scale;
+  const w = Math.max(lw + sw + pad * 2, label ? 0 : size * 0.62), x = cx - w / 2, y = base - 5 * scale;
   glassPlate(x, y, w, h, h / 2, { alpha });
   text(label, x + pad, y + h / 2, { size: fs, weight: 700, align: "left", alpha });
   if (status) text(status, x + pad + lw + 12 * scale, y + h / 2 + 1, { size: fs * 0.86, weight: 500, color: MUTED, align: "left", alpha });
   return y + h;
+}
+/** Where a shape's drawn outline actually ends (px from the square's top), so the shelf meets it. */
+const bottomCache = new Map();
+function drawnBottom(shape, size) {
+  const key = `${shape}|${Math.round(size)}`;
+  if (!bottomCache.has(key)) { let m = 0; for (const piece of bodyPieces(shape, { x: 0, y: 0, w: size, h: size }, 0, false)) for (const q of piece) if (q.y > m) m = q.y; bottomCache.set(key, m); }
+  return bottomCache.get(key);
 }
 /** Speech bubble with a tail pointing up (under a bot) or down-left (a chat reply). */
 function bubble(cx, top, str, { alpha = 1, tail = "top", size = 34, maxW = 700, fill = "#FFFFFF", color = INK, caret = false, minW = 0, scale = 1, align = "center" } = {}) {
@@ -161,7 +168,7 @@ const L = {
     vory: { x: 540, y: 900, s: 600 }, voryTop: { x: 540, y: 400, s: 260 }, voryEnd: { x: 540, y: 720, s: 520 },
     head: { x: 540, y: 270, size: 108, align: "center", lh: 122 },
     bots: [[240, 1000], [540, 1000], [840, 1000], [390, 1340], [690, 1340]], botS: 230, botLabel: { x: 540, y: 1640, size: 60 },
-    chat: { x: 540, w: 960, userY: 600, botY: 1060, botS: 320, cardY: 1400, replyY: 790, subY: 300, subSize: 64 },
+    chat: { x: 540, w: 960, userY: 600, botY: 1040, botS: 320, cardY: 1400, approvalDy: 80, replyY: 790, subY: 300, subSize: 64 },
     end: { urlY: 1340, betaY: 1450 },
   },
   169: {
@@ -175,14 +182,14 @@ const L = {
     vory: { x: 540, y: 700, s: 520 }, voryTop: { x: 540, y: 250, s: 210 }, voryEnd: { x: 540, y: 520, s: 440 },
     head: { x: 540, y: 190, size: 92, align: "center", lh: 104 },
     bots: [[180, 770], [540, 770], [900, 770], [360, 1040], [720, 1040]], botS: 190, botLabel: { x: 540, y: 1268, size: 52 },
-    chat: { x: 540, w: 960, userY: 300, botY: 660, botS: 260, cardY: 1030, replyY: 440, subY: 130, subSize: 56 },
+    chat: { x: 540, w: 960, userY: 300, botY: 650, botS: 260, cardY: 1030, approvalDy: 40, replyY: 440, subY: 130, subSize: 56 },
     end: { urlY: 1000, betaY: 1100 },
   },
   11: {
     vory: { x: 540, y: 600, s: 460 }, voryTop: { x: 540, y: 220, s: 180 }, voryEnd: { x: 540, y: 440, s: 380 },
     head: { x: 540, y: 150, size: 78, align: "center", lh: 88 },
     bots: [[150, 680], [345, 680], [540, 680], [735, 680], [930, 680]], botS: 170, botLabel: { x: 540, y: 960, size: 44 },
-    chat: { x: 540, w: 960, userY: 150, botY: 500, botS: 210, cardY: 830, replyY: 280, subY: 70, subSize: 48 },
+    chat: { x: 540, w: 960, userY: 150, botY: 490, botS: 210, cardY: 830, approvalDy: 36, replyY: 280, subY: 70, subSize: 48 },
     end: { urlY: 820, betaY: 920 },
   },
 }[ASPECT];
@@ -290,7 +297,7 @@ function shotChat(t) {
   });
   // Approval card
   const aa = inOut(t, 16.2, 19.95, 0.8, 0.4);
-  const ah = 330 * sc, ay = C.cardY - (ah - ch) + (1 - aa) * 90;
+  const ah = 330 * sc, ay = C.cardY - (ah - ch) + (C.approvalDy ?? 0) + (1 - aa) * 90;
   const approved = t >= cues.tap + 0.25;
   card(cx, ay, cw, ah, aa, () => {
     // shield + title
@@ -320,7 +327,7 @@ function shotEnd(t) {
   const ua = inOut(t, 20.9, Infinity, 0.8);
   if (ua > 0) text("vory.dev", L.end.x ?? W / 2, L.end.urlY + (1 - ua) * 50, { size: ASPECT === "11" ? 76 : 92, weight: 800, alpha: ua, rounded: true, align: "center", spacing: -2 });
   const ba = inOut(t, 21.25, Infinity, 0.8);
-  if (ba > 0) text("Public beta · Now on TestFlight", L.end.x ?? W / 2, L.end.betaY + (1 - ba) * 40, { size: ASPECT === "11" ? 34 : 40, weight: 500, color: MUTED, alpha: ba, align: "center" });
+  if (ba > 0) text("Beta now in TestFlight", L.end.x ?? W / 2, L.end.betaY + (1 - ba) * 40, { size: ASPECT === "11" ? 34 : 40, weight: 500, color: MUTED, alpha: ba, align: "center" });
 }
 
 export function seek(t) {

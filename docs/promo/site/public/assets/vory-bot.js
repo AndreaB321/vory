@@ -524,7 +524,7 @@ function drawGlassBody(ctx, pieces, hex, size, dpr, light, dim, pale) {
   const rg = lc.createLinearGradient(0, 0, size, size);
   rg.addColorStop(0, white(0.9 * lit)); rg.addColorStop(0.5, white(0.15 * lit)); rg.addColorStop(1, black(light ? 0.10 : 0.28));
   fillPieces(lc, pieces, rg);
-  lc.globalCompositeOperation = "destination-out"; fillPieces(lc, rimInner(pieces, s * 0.0225), "#000");
+  lc.globalCompositeOperation = "destination-out"; fillPieces(lc, rimInner(pieces, Math.min(s * 0.0225, 3.5)), "#000");
   ctx.drawImage(L, 0, 0, size, size);
 }
 
@@ -542,7 +542,7 @@ function drawSheen(ctx, pieces, size, dpr, sheen, angle, glass) {
   const peak = (glass ? 0.95 : 0.55) * sheen;
   g.addColorStop(0, white(peak)); g.addColorStop(0.4, white(peak * 0.45)); g.addColorStop(1, white(0));
   fillPieces(lc, pieces, g);
-  lc.globalCompositeOperation = "destination-out"; fillPieces(lc, rimInner(pieces, s * 0.025), "#000");
+  lc.globalCompositeOperation = "destination-out"; fillPieces(lc, rimInner(pieces, Math.min(s * 0.025, 5)), "#000");
   ctx.drawImage(L, 0, 0, size, size);
 }
 
