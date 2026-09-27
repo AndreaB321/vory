@@ -33,6 +33,9 @@ const inOut = (t, at, off = Infinity, dur = 0.7, odur = 0.45) => {
   return outExpo(seg(t, at, at + dur));
 };
 
+/** Entrance/exit offset for a rising element: +dist below its spot on the way in, −dist above on the way out. */
+const riseDy = (t, a, off, dist) => (t >= off ? -(1 - a) * dist : (1 - a) * dist);
+
 // ---- palette
 const BG = "#F2F2F7", INK = "#0A0A0C", MUTED = "#6E6E73", ACCENT = "#0A84FF", GREEN = "#30D158", AMBER = "#F5A524", ORANGE = "#FF9500";
 const FONT = (w, s, rounded = false) => `${w} ${s}px ${rounded ? '"SF Rounded", ' : ""}system-ui, -apple-system, sans-serif`;
@@ -239,7 +242,7 @@ function shotHeadline(t) {
   lines.forEach((s, i) => {
     const a = inOut(t, 4.5 + i * 0.14, 7.9 + i * 0.06, 0.8, 0.4);
     if (a <= 0) return;
-    const dy = (1 - a) * 60;
+    const dy = riseDy(t, a, 7.9 + i * 0.06, 60);
     text(s, L.head.x, L.head.y + i * L.head.lh + dy, { size: L.head.size, weight: 800, align: L.head.align, alpha: a, rounded: true, spacing: -2 });
   });
 }
@@ -253,7 +256,7 @@ function shotBots(t) {
     bot(tr, x, y, L.botS, t, { alpha: a });
   });
   const a = inOut(t, 9.6, 11.9, 0.8, 0.4);
-  text("Every agent is a character.", L.botLabel.x, L.botLabel.y + (1 - a) * 40, { size: L.botLabel.size, weight: 700, alpha: a, rounded: true, color: INK });
+  text("Every agent is a character.", L.botLabel.x, L.botLabel.y + riseDy(t, a, 11.9, 40), { size: L.botLabel.size, weight: 700, alpha: a, rounded: true, color: INK });
 }
 
 function card(x, y, w, h, alpha, draw) {
@@ -279,10 +282,11 @@ function shotChat(t) {
   const status = t < cues.morph[0] ? "idle" : t < cues.morph[1] ? "Thinking…" : t < 15.5 ? "Using tools" : t < cues.morph[2] ? "Writing…" : t < cues.tap + 0.25 ? "Needs approval" : t < 19.4 ? "Working…" : "Done";
   if (ba > 0) { shelf(C.x, by, C.botS, "drop", "work", { alpha: ba, status, scale: 0.9 * sc }); bot(worker, C.x, by, C.botS, t, { alpha: ba }); }
   // Sub-captions
-  const subs = [["It thinks.", 13.1, 14.3], ["It uses its tools.", 14.4, 16.2], ["And it waits for your yes.", 16.5, 18.9], ["Approve from your pocket.", 19.0, 19.95]];
-  for (const [s, a0, a1] of subs) { const a = inOut(t, a0, a1, 0.6, 0.3); if (a > 0) text(s, C.subX ?? C.x, C.subY + (1 - a) * 40, { size: C.subSize, weight: 800, alpha: a, rounded: true, align: C.subX ? "left" : "center", spacing: -1 }); }
+  // Each caption is fully gone (0.25 s exit) before the next one rises, so two never overlap.
+  const subs = [["It thinks.", 13.1, 14.15], ["It uses its tools.", 14.45, 16.25], ["And it waits for your yes.", 16.55, 18.7], ["Approve from your pocket.", 19.0, 19.95]];
+  for (const [s, a0, a1] of subs) { const a = inOut(t, a0, a1, 0.55, 0.25); if (a > 0) text(s, C.subX ?? C.x, C.subY + riseDy(t, a, a1, 40), { size: C.subSize, weight: 800, alpha: a, rounded: true, align: C.subX ? "left" : "center", spacing: -1 }); }
   // Tool card
-  const ta = inOut(t, 14.45, 16.05, 0.7, 0.35);
+  const ta = inOut(t, 14.45, 15.9, 0.7, 0.3);
   const cw = C.w, ch = 170 * sc, cx = x0, cy = C.cardY + (1 - ta) * 80;
   card(cx, cy, cw, ch, ta, () => {
     const done = t > 15.4;
@@ -296,7 +300,7 @@ function shotChat(t) {
     if (done) text("10 entries, 4.2 GB total", cx + 40 * sc, cy + 146 * sc, { size: 24 * sc, weight: 500, align: "left" });
   });
   // Approval card
-  const aa = inOut(t, 16.2, 19.95, 0.8, 0.4);
+  const aa = inOut(t, 16.25, 19.95, 0.8, 0.4);
   const ah = 330 * sc, ay = C.cardY - (ah - ch) + (C.approvalDy ?? 0) + (1 - aa) * 90;
   const approved = t >= cues.tap + 0.25;
   card(cx, ay, cw, ah, aa, () => {

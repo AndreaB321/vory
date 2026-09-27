@@ -48,6 +48,7 @@ scene/fonts/SFNSRounded.ttf         the system rounded face for headlines (not c
 cues.json                           timings shared by the scene and the score
 tools/music.mjs                     synthesizes out/music.wav (120 BPM, Cmaj7 · Am7 · Fmaj7 · G6 · Cmaj7)
 tools/render.mjs                    Playwright/Chromium renders every frame, ffmpeg encodes
+tools/audit-text.mjs                checks every frame of every aspect for overlapping text (run after edits)
 ```
 
 ```bash
