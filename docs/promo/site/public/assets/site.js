@@ -119,7 +119,7 @@ const stateButtons = $$("#pick-state button");
 let finishTimer = null;
 function setState(state) {
   clearTimeout(finishTimer);
-  if (state === "finished") {
+  if (state === "finish" || state === "finished") {
     studio.state = "idle"; studio.finishTurn();
     stateButtons.forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.state === "idle")));
     status.textContent = "idle"; $("#state-hint").textContent = hints.finished;
