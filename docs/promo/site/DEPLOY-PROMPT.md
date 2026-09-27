@@ -23,7 +23,7 @@ use `us-east-1` unless told otherwise. Report every resource id you create at th
 
 | Files | Content-Type | Cache-Control |
 |---|---|---|
-| `index.html` | `text/html; charset=utf-8` | `public, max-age=0, must-revalidate` |
+| `index.html`, `privacy/index.html` | `text/html; charset=utf-8` | `public, max-age=0, must-revalidate` |
 | `assets/*.css` | `text/css; charset=utf-8` | `public, max-age=3600, stale-while-revalidate=86400` |
 | `assets/*.js` | `text/javascript; charset=utf-8` | `public, max-age=3600, stale-while-revalidate=86400` |
 | `assets/img/*.webp` | `image/webp` | `public, max-age=31536000, immutable` |
@@ -118,6 +118,8 @@ curl -sI http://vory.dev/ | head -5            # 301 → https://vory.dev/
 curl -sI https://vory.dev/assets/vory-bot.js | grep -i "content-type\|cache-control\|content-encoding"
 curl -sI https://vory.dev/assets/img/og.png | grep -i "content-type\|content-length"   # image/png, ~1200×630
 curl -s https://vory.dev/ | grep -c "Your agents"  # 1
+curl -sI https://vory.dev/privacy/ | head -1        # 200 (the function serves privacy/index.html)
+curl -sI https://vory.dev/privacy | head -1         # 200
 ```
 
 Open https://vory.dev/ in a browser: the blue cloud mascot should be animating in the hero, and the

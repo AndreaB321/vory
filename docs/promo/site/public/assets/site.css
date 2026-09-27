@@ -410,3 +410,20 @@ figcaption { font-size: 14px; color: var(--muted); margin-top: 10px; }
   :root:not([data-theme="light"]) .mock-island { outline: 1px solid #333; }
   :root:not([data-theme="light"]) .mock-signal { background: #F5F5F7; }
 }
+
+/* ---- quiet links + prose pages (privacy) */
+.quiet { color: inherit; text-decoration: underline; text-decoration-color: var(--hair); text-underline-offset: 3px; }
+.quiet:hover { text-decoration-color: currentColor; }
+.prose { max-width: 720px; margin: 0 auto; padding: 40px var(--gutter) 72px; }
+.prose-head { margin-bottom: 22px; }
+.prose-head h1 { font-size: clamp(34px, 7vw, 52px); }
+.prose-meta { color: var(--muted); font-size: 15px; margin-top: 12px; }
+.prose-summary { padding: 20px 22px; margin: 18px 0 30px; font-size: 18px; line-height: 1.5; }
+.prose h2 { font-size: 24px; margin: 38px 0 10px; }
+.prose p { margin: 0 0 12px; }
+.prose ul { padding-left: 22px; margin: 0 0 14px; }
+.prose li { margin-bottom: 8px; }
+.prose li strong { color: var(--text); }
+.prose a { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.prose-note { color: var(--muted); font-size: 15px; margin-top: 36px; }
+@media (min-width: 900px) { .prose { padding-top: 64px; } }

@@ -6,6 +6,7 @@ it. It is plain HTML, CSS and JavaScript (one ES module for the page, one for th
 ```
 public/
   index.html                 the whole site (one page, anchored sections)
+  privacy/index.html         the privacy policy (served at /privacy/ and /privacy via the CloudFront function)
   assets/
     site.css                 design system + layout (mobile first, desktop from 900 px)
     site.js                  page script: hero, studio, Live Activity stills, reveals
@@ -37,7 +38,7 @@ rel="noopener">Join the TestFlight beta</a>` and adjust the sentence above the s
   `assets/…` is a prefix). Set `Content-Type` correctly: `.webp` → `image/webp`, `.js` →
   `text/javascript`, `.css` → `text/css`, `.html` → `text/html; charset=utf-8`, `.png` → `image/png`.
 - **Cache-Control** (set as object metadata at upload time):
-  - `index.html`: `public, max-age=0, must-revalidate`
+  - `index.html` and `privacy/index.html`: `public, max-age=0, must-revalidate`
   - `assets/**`: `public, max-age=31536000, immutable` is fine for images; for `site.css`,
     `site.js` and `vory-bot.js` use `public, max-age=3600, stale-while-revalidate=86400` unless you
     add content hashes to their filenames (they are referenced unhashed today).

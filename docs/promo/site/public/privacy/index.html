@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Vory — Privacy</title>
+<meta name="description" content="Vory's privacy policy. No accounts, no analytics, no servers that can read your messages. Your conversations live on your phone and on the gateway you run.">
+<meta name="color-scheme" content="light dark">
+<link rel="canonical" href="https://vory.dev/privacy/">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/img/favicon-32.png">
+<link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Vory">
+<meta property="og:title" content="Vory — Privacy">
+<meta property="og:description" content="No accounts, no analytics, no servers that can read your messages.">
+<meta property="og:url" content="https://vory.dev/privacy/">
+<meta property="og:image" content="https://vory.dev/assets/img/og.png">
+<meta name="robots" content="index, follow">
+<link rel="stylesheet" href="/assets/site.css">
+</head>
+<body class="page-prose">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" id="top">
+  <a class="brand" href="/" aria-label="Vory, home">
+    <img src="/assets/img/favicon-32.png" srcset="/assets/img/apple-touch-icon.png 2x" width="28" height="28" alt="">
+    <span>Vory</span>
+  </a>
+  <nav class="nav-links" aria-label="Sections">
+    <a href="/#how">How it works</a>
+    <a href="/#bots">The bots</a>
+    <a href="/#approve">Approvals</a>
+    <a href="/#faq">FAQ</a>
+  </nav>
+  <a class="btn btn-glass btn-small" href="/#beta">The beta</a>
+</header>
+
+<main id="main" class="prose">
+  <header class="prose-head">
+    <p class="eyebrow">Privacy</p>
+    <h1>Vory Privacy Policy</h1>
+    <p class="prose-meta">Last updated 26 September 2026 · Applies to the Vory iPhone app, its Apple Watch app and extensions, the Vory Companion plugin, and the Vory push relay.</p>
+  </header>
+
+  <div class="prose-summary glass">
+    <p>Vory is a remote control for a Hermes agent gateway that <strong>you</strong> run. The short version: your conversations, your agents and your settings live on your phone and on your gateway. Vory has no accounts, no analytics, and no servers that can read your messages. The one service we operate, the push relay, carries encrypted notifications it cannot open.</p>
+  </div>
+
+  <h2 id="what">What Vory is</h2>
+  <p>Vory connects your iPhone to a Hermes gateway you host (on your own computer, home network, Tailscale network or Cloudflare tunnel). Everything you do in the app, chatting with your agents, approving their actions, changing their settings, is a request from your phone to your gateway. We are not in that path.</p>
+
+  <h2 id="phone">Data on your phone</h2>
+  <p>Vory stores the following on your device only:</p>
+  <ul>
+    <li><strong>Gateway connection details.</strong> The gateway's address and the token or sign‑in credentials you enter, kept in the iOS Keychain.</li>
+    <li><strong>Conversation cache.</strong> Recent transcripts, so chats open instantly and work offline. Stored in the app's cache directory; iOS may clear it, and deleting the app removes it.</li>
+    <li><strong>Bot looks and preferences.</strong> The shapes, eyes and colours you give your bots, and your settings. Stored in the app's local storage.</li>
+    <li><strong>Widget state.</strong> The small snapshot the Live Activity, widgets and Watch complications draw from (which bot is working and what phase it is in), kept in the app's Keychain group so the extensions can read it.</li>
+    <li><strong>Push credentials.</strong> If you turn on notifications, an install identifier, a secret and an encryption key that Vory generates on your phone (see <a href="#notifications">Notifications</a>).</li>
+  </ul>
+  <p>None of this is sent to us.</p>
+
+  <h2 id="gateway">Data on your gateway</h2>
+  <p>Your gateway holds your conversations, your agents' configuration, and, when notifications are on, a small device file Vory writes so the gateway can reach your phone. Your gateway is yours: its storage, backups and the models it calls are governed by how you set it up and by the policies of any AI providers you have configured there. Vory does not change that.</p>
+
+  <h2 id="notifications">Notifications and the push relay</h2>
+  <p>Apple delivers notifications to iPhones only through its Apple Push Notification service, which requires a developer's server. We run a small one, the <strong>Vory push relay</strong>, so your gateway can notify your phone without you needing an Apple developer account.</p>
+  <p>How it works, and what the relay can and cannot see:</p>
+  <ul>
+    <li>When you enable notifications, Vory creates an <strong>install identifier</strong>, a <strong>secret</strong> and an <strong>encryption key</strong> on your phone and writes them to your gateway. The relay receives the install identifier, the secret and your device's push token. <strong>It never receives the encryption key.</strong></li>
+    <li>When your gateway has something to tell you (a reply, a request for approval, a Live Activity update), the Vory Companion plugin on your gateway encrypts it with that key and posts the ciphertext to the relay. The relay forwards it to Apple; your phone decrypts it.</li>
+    <li>The relay therefore sees: install identifiers, device push tokens, and encrypted payloads it cannot read. It keeps the registration (identifier, token, secret) for as long as your registration is active and deletes it when you turn notifications off or the token becomes invalid. It does not keep the payloads. It does not log message contents.</li>
+    <li>The relay is hosted on Cloudflare Workers. Cloudflare's own infrastructure logs (such as request IP addresses) are governed by <a href="https://www.cloudflare.com/privacypolicy/" rel="noopener">Cloudflare's privacy policy</a>.</li>
+    <li>Apple's delivery of notifications is governed by <a href="https://www.apple.com/legal/privacy/" rel="noopener">Apple's privacy policy</a>.</li>
+  </ul>
+  <p>You can turn notifications off at any time in Settings › Companion; Vory then deletes the registration from the relay.</p>
+
+  <h2 id="on-device">Features that work on the device</h2>
+  <ul>
+    <li><strong>Vory Summaries</strong> (beta) uses Apple Intelligence on your iPhone to title and summarise chats in the list. The text is processed on the device by Apple's on‑device model; it is not sent to us or to Apple's servers by Vory.</li>
+    <li><strong>Dictation and voice memos</strong> use Apple's speech recognition. Vory asks for on‑device recognition where the device supports it; otherwise Apple's speech service may process the audio under Apple's privacy policy.</li>
+    <li><strong>Photos, camera and files</strong> are only accessed when you choose to attach something, and the attachment goes to your gateway, nowhere else.</li>
+    <li><strong>Motion</strong> (the bots tilting with your phone) uses the motion sensors on the device only. It is off by default.</li>
+    <li><strong>Local network</strong> access is used only to reach a gateway on your own network.</li>
+  </ul>
+
+  <h2 id="not">What we do not do</h2>
+  <ul>
+    <li>No accounts. No sign‑up. No email list from the app.</li>
+    <li>No analytics, no advertising identifiers, no tracking, no third‑party SDKs.</li>
+    <li>No copies of your conversations, tokens or settings on any server we control.</li>
+    <li>No selling or sharing of data. There is nothing to sell.</li>
+  </ul>
+
+  <h2 id="testflight">TestFlight</h2>
+  <p>During the beta, Vory is distributed through Apple's TestFlight. If you install it that way, Apple may collect crash logs and usage statistics and share them with us in anonymised form, and you can send feedback with screenshots through TestFlight. That is governed by <a href="https://www.apple.com/legal/internet-services/itunes/testflight/" rel="noopener">Apple's TestFlight terms</a> and Apple's privacy policy. Anything you put in a feedback message comes to us; don't include secrets.</p>
+
+  <h2 id="children">Children</h2>
+  <p>Vory is not directed at children under 13 and does not knowingly collect information from them.</p>
+
+  <h2 id="changes">Changes</h2>
+  <p>If this policy changes, the date at the top changes and the new version is published at this address. Material changes that affect the relay will also be noted in the app's release notes.</p>
+
+  <h2 id="contact">Contact</h2>
+  <p>Questions about this policy or your data: <a href="mailto:matt@vory.dev">matt@vory.dev</a>.</p>
+
+  <p class="prose-note">Vory is not affiliated with Nous Research or the Hermes project.</p>
+</main>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <canvas id="footer-bot" class="bot" aria-hidden="true"></canvas>
+    <p><strong>Vory</strong> · Public beta</p>
+    <p class="muted">The iPhone remote for your Hermes agent gateway. No cookies, no analytics.</p>
+    <p class="muted">© 2026 Vory · <a href="/">Home</a></p>
+  </div>
+</footer>
+
+<script type="module">
+  import { Bot, VORY } from "/assets/vory-bot.js";
+  new Bot(document.getElementById("footer-bot"), VORY, { size: 40, profile: "vory-footer" });
+</script>
+</body>
+</html>
