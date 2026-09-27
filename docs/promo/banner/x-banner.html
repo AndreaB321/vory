@@ -15,14 +15,15 @@
   .tagwrap { display: inline-block; }
   .tag { margin: 18px 0 0; font-size: 22px; color: #3A3A3C; font-weight: 500; }
   .tag b { color: #0A0A0C; font-weight: 650; }
-  .url { margin: 6px 0 0; font-size: 22px; font-weight: 600; color: #6E6E73; text-align: right; display: flex; justify-content: flex-end; align-items: flex-end; gap: 0; }
+  .url { margin: 6px 0 0; font-size: 22px; font-weight: 600; color: #6E6E73; display: flex; justify-content: flex-start; align-items: flex-end; gap: 30px; }
+  .url-text { padding-bottom: 2px; }
   .pill { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; font-size: 18px !important; border-radius: 999px; background: rgba(255,255,255,0.7); border: 1px solid rgba(255,255,255,0.9); box-shadow: 0 6px 18px rgba(20,30,60,0.10); font-size: 20px; font-weight: 650; }
   .pill i { width: 10px; height: 10px; border-radius: 50%; background: #30D158; display: inline-block; }
   .stage { position: absolute; left: 130px; top: 96px; width: 400px; height: 460px; display: grid; justify-items: center; align-content: start; }
   .stage canvas, .cast canvas { position: relative; z-index: 1; }
   .shelf { position: relative; align-self: start; display: inline-flex; padding: 5px 28px; line-height: 1.05; border-radius: 999px; background: rgba(255,255,255,0.72); border: 1px solid rgba(255,255,255,0.9); box-shadow: 0 10px 30px rgba(20,30,60,0.10); font-size: 26px; font-weight: 700; }
   .cast { position: absolute; display: grid; justify-items: center; }
-  .cast--inline { position: relative; display: inline-grid; justify-items: center; vertical-align: bottom; margin-right: 18px; }
+  .cast--inline { position: relative; display: inline-grid; justify-items: center; vertical-align: bottom; }
   .cast .shelf { padding: 3px 14px; font-size: 15px; }
 </style></head>
 <body>
@@ -31,7 +32,7 @@
   <div class="copy">
     <p class="eyebrow">The iPhone remote for your Hermes agents</p>
     <h1>Your agents,<br>in your pocket.</h1>
-    <div class="tagwrap"><p class="tag"><span class="pill"><i></i>Now in beta testing &nbsp;·&nbsp; TestFlight</span></p><p class="url"><span class="cast cast--inline"><canvas id="c2"></canvas><span class="shelf">Nova</span></span>vory.dev</p></div>
+    <div class="tagwrap"><p class="tag"><span class="pill"><i></i>Now in beta testing &nbsp;·&nbsp; TestFlight</span></p><p class="url"><span class="cast cast--inline"><canvas id="c2"></canvas><span class="shelf">Nova</span></span><span class="url-text">vory.dev</span><span class="cast cast--inline"><canvas id="c4"></canvas><span class="shelf">Remy</span></span></p></div>
   </div>
   <div class="stage"><canvas id="vory"></canvas><div class="shelf">Vory</div></div>
   <div class="cast" style="left: 500px; top: 318px;"><canvas id="c1"></canvas><div class="shelf">Pip</div></div>
@@ -49,7 +50,7 @@
   };
   await document.fonts.load('800 40px "SF Rounded"').catch(() => {});
   const m = stillMotion();
-  const bots = [["vory", VORY, 360], ["c1", { shape: "circle", eyes: "classic", hex: "#FF453A", finish: "glass" }, 96], ["c2", { shape: "drop", eyes: "wide", hex: "#F4F4F5", finish: "glass" }, 64], ["c3", { shape: "triangle", eyes: "bold", hex: "#F5A524", finish: "flat" }, 88]];
+  const bots = [["vory", VORY, 360], ["c1", { shape: "circle", eyes: "classic", hex: "#FF453A", finish: "glass" }, 96], ["c2", { shape: "drop", eyes: "wide", hex: "#F4F4F5", finish: "glass" }, 64], ["c4", { shape: "hexagon", eyes: "round", hex: "#BF5AF2", finish: "glass" }, 64], ["c3", { shape: "triangle", eyes: "bold", hex: "#F5A524", finish: "flat" }, 88]];
   for (const [id, spec, size] of bots) { const c = document.getElementById(id); paintStill(c, spec, size, m, true); seat(c, spec.shape, size); }
   window.ready = true;
 </script>
