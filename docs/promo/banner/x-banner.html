@@ -12,9 +12,10 @@
   .copy { position: absolute; left: 690px; top: 150px; width: 440px; }
   .eyebrow { font-size: 19px; font-weight: 650; color: #0A84FF; letter-spacing: 0.02em; margin: 0 0 10px; }
   h1 { font-family: "SF Rounded", system-ui, sans-serif; font-size: 56px; line-height: 1.02; font-weight: 800; letter-spacing: -0.025em; margin: 0; }
+  .tagwrap { display: inline-block; }
   .tag { margin: 18px 0 0; font-size: 22px; color: #3A3A3C; font-weight: 500; }
   .tag b { color: #0A0A0C; font-weight: 650; }
-  .url { position: absolute; left: 690px; bottom: 44px; font-size: 22px; font-weight: 600; color: #6E6E73; }
+  .url { margin: 60px 0 0; font-size: 22px; font-weight: 600; color: #6E6E73; text-align: right; }
   .pill { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; font-size: 18px !important; border-radius: 999px; background: rgba(255,255,255,0.7); border: 1px solid rgba(255,255,255,0.9); box-shadow: 0 6px 18px rgba(20,30,60,0.10); font-size: 20px; font-weight: 650; }
   .pill i { width: 10px; height: 10px; border-radius: 50%; background: #30D158; display: inline-block; }
   .stage { position: absolute; left: 270px; top: 52px; width: 400px; height: 460px; display: grid; justify-items: center; align-content: start; }
@@ -29,12 +30,11 @@
   <div class="copy">
     <p class="eyebrow">The iPhone remote for your Hermes agents</p>
     <h1>Your agents,<br>in your pocket.</h1>
-    <p class="tag"><span class="pill"><i></i>Now in beta testing &nbsp;·&nbsp; TestFlight</span></p>
+    <div class="tagwrap"><p class="tag"><span class="pill"><i></i>Now in beta testing &nbsp;·&nbsp; TestFlight</span></p><p class="url">vory.dev</p></div>
   </div>
-  <div class="url">vory.dev</div>
   <div class="stage"><canvas id="vory"></canvas><div class="shelf">Vory</div></div>
   <div class="cast" style="left: 590px; top: 322px;"><canvas id="c1"></canvas><div class="shelf">Pip</div></div>
-  <div class="cast" style="left: 120px; top: 126px;"><canvas id="c2"></canvas><div class="shelf">Nova</div></div>
+  <div class="cast" style="left: 200px; top: 126px;"><canvas id="c2"></canvas><div class="shelf">Nova</div></div>
   <div class="cast" style="left: 585px; top: 122px;"><canvas id="c3"></canvas><div class="shelf">Otto</div></div>
 </div>
 <script type="module">
