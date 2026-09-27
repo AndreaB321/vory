@@ -14,6 +14,11 @@ struct NewChatSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var chosen: [ProfileInfo] = []
+    /// While bots are chosen, an invisible mark sits at the start of the To: field. The
+    /// software keyboard's backspace on an "empty" field deletes the mark, which is how
+    /// Backspace removes the last chip (Messages style); `onKeyPress` only sees hardware keys.
+    private let mark = "\u{200B}"
+    private var typed: String { query.replacingOccurrences(of: mark, with: "") }
     @State private var text = ""
     @State private var busy = false
     @State private var error: String?
@@ -21,7 +26,7 @@ struct NewChatSheet: View {
     enum Field { case to, message }
 
     private var candidates: [ProfileInfo] {
-        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        let q = typed.trimmingCharacters(in: .whitespaces).lowercased()
         return runtime.profiles.filter { p in
             !chosen.contains(where: { $0.name == p.name }) &&
             (q.isEmpty || p.label.lowercased().contains(q) || p.name.lowercased().contains(q))
@@ -55,6 +60,8 @@ struct NewChatSheet: View {
                         }
                         .padding(.leading, 4).padding(.trailing, 10).padding(.vertical, 4)
                         .background(Color.accentColor.opacity(0.15), in: .capsule)
+                        // The whole chip, bot included: the face is not hit-testable on its own.
+                        .contentShape(.capsule)
                         .onTapGesture { remove(p) }
                         .accessibilityLabel("\(p.label), tap to remove")
                     }
@@ -63,7 +70,18 @@ struct NewChatSheet: View {
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .frame(minWidth: 90, minHeight: 28)
                         .onSubmit { if let first = candidates.first { add(first) } }
-                        .onKeyPress(.delete) { if query.isEmpty, let last = chosen.last { remove(last); return .handled }; return .ignored }
+                        .onKeyPress(.delete) { if typed.isEmpty, let last = chosen.last { remove(last); return .handled }; return .ignored }
+                        .onChange(of: query) { old, new in
+                            guard !chosen.isEmpty else { return }
+                            if !new.contains(mark) {
+                                // The mark went: Backspace on an empty field takes the last chip
+                                // (`remove` re-marks the field); otherwise the field lost its mark
+                                // some other way and gets it back.
+                                if old == mark, let last = chosen.last { remove(last) } else { query = mark + new }
+                            } else if !new.hasPrefix(mark) {
+                                query = mark + new.replacingOccurrences(of: mark, with: "")
+                            }
+                        }
                 }
                 Button { focus = .to } label: {
                     Image(systemName: "plus").font(.body.weight(.semibold))
@@ -95,7 +113,7 @@ struct NewChatSheet: View {
                         .buttonStyle(.plain)
                         Divider().padding(.leading, 72)
                     }
-                    if candidates.isEmpty, !chosen.isEmpty, query.isEmpty {
+                    if candidates.isEmpty, !chosen.isEmpty, typed.isEmpty {
                         Text(chosen.count > 1 ? "These bots will share one group chat." : "Add another bot to make it a group chat.")
                             .font(.footnote).foregroundStyle(.secondary).padding(.top, 24)
                     }
@@ -133,7 +151,7 @@ struct NewChatSheet: View {
 
     private func highlighted(_ label: String) -> AttributedString {
         var a = AttributedString(label)
-        let q = query.trimmingCharacters(in: .whitespaces)
+        let q = typed.trimmingCharacters(in: .whitespaces)
         if !q.isEmpty, let r = a.range(of: q, options: .caseInsensitive) { a[r].font = .body.weight(.semibold); a[r].foregroundColor = .accentColor }
         return a
     }
@@ -141,12 +159,13 @@ struct NewChatSheet: View {
     private func add(_ p: ProfileInfo) {
         guard chosen.count < 6 else { error = "A group chat can have up to six bots."; return }
         withAnimation(.snappy) { chosen.append(p) }
-        query = ""
+        query = mark
         focus = .message
     }
 
     private func remove(_ p: ProfileInfo) {
         withAnimation(.snappy) { chosen.removeAll { $0.name == p.name } }
+        query = chosen.isEmpty ? typed : mark + typed
     }
 
     private func start() async {

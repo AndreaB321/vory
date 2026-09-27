@@ -211,6 +211,26 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
 
 ## Change log
 
+### 2026-09-27 (after 1.1 build 3, from the build-3 review; not yet shipped)
+- **Creator Studio tiles did not respond to a tap on the face.** `BotFaceView` marks its layers
+  `allowsHitTesting(false)`, which leaves a hole in any SwiftUI `Button` it sits in exactly where
+  people tap (the label text still worked). Rule: a button or tap target that contains a bot face
+  needs `.contentShape(.rect)` (or `.capsule`) on its label so the whole tile is the target. Applied
+  to the studio grid (`grid` in BotAvatars.swift; preview also `allowsHitTesting(false)` so its
+  spin-tap does not compete), the chat header pill (bot + capsule are one button; the tap also
+  plays the small turn via `BotAmbient.shared.tap`) and the New Message chips.
+- **Header pill let taps through / did nothing on the bot.** Same cause; the header `HStack` is
+  now one surface (`contentShape(.rect)` + empty `onTapGesture`) so a tap on the bar never reaches
+  the thread under it (a tool card used to expand).
+- **First message under the header at the top of a thread.** `TranscriptView` ignores the top safe
+  area (the thread runs under the status bar) while the header overlay sits inside it; the top
+  content margin is now `headerHeight + safeTop` (ConversationView).
+- **New Message: a chosen bot could not be removed.** The chip is a full-capsule tap target, and
+  Backspace on the empty To: field removes the last chip on the software keyboard: an invisible
+  zero-width mark (`mark`) sits at the start of `query` while bots are chosen, and its deletion is
+  the Backspace signal (`onKeyPress(.delete)` only sees hardware keys). `typed` is the query
+  without the mark; use it for matching.
+
 ### 2026-09-27 (1.1 build 3: Live Activity updates on its own, mid-turn snapshot order)
 - **Live Activity did not update unless the chat was open — companion 1.0.27.** The gateway sends a
   session's events (`message.delta`, `tool.start`, `session.usage`, `message.complete`, approval

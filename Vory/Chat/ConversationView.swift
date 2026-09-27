@@ -12,6 +12,7 @@ struct ConversationView: View {
     @State private var composerText = ""
     @State private var dockHeight: CGFloat = 60
     @State private var headerHeight: CGFloat = 96
+    private var safeTop: CGFloat { UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow?.safeAreaInsets.top }.first ?? 0 }
     /// The keyboard's height above the home-indicator area. Tracked by hand for the dock as the
     /// transcript does for itself: SwiftUI's own avoidance hands the inset to any scroll view in
     /// the dock (the command list) instead of lifting the dock, which left the composer under
@@ -24,7 +25,10 @@ struct ConversationView: View {
     var body: some View {
         Group {
             if let chat {
-                TranscriptView(chat: chat, onEditMessage: { composerText = $0 }, bottomInset: dockHeight, topInset: headerHeight)
+                // The thread runs under the status bar (it ignores the top safe area) while the
+                // header sits inside it, so the thread's top margin is the header plus that inset;
+                // without it the first message starts under the pill.
+                TranscriptView(chat: chat, onEditMessage: { composerText = $0 }, bottomInset: dockHeight, topInset: headerHeight + safeTop)
                     .overlay {
                         if let e = chat.resumeError, chat.items.isEmpty {
                             ContentUnavailableView("Could not open chat", systemImage: "exclamationmark.triangle", description: Text(e))
@@ -204,7 +208,11 @@ struct ChatHeader: View {
             }
             .buttonStyle(.plain).accessibilityLabel("Back").accessibilityIdentifier("chat.back")
             Spacer(minLength: 0)
-            Button(action: onProfile) {
+            Button {
+                // The bot on the pill turns for the tap as it does elsewhere, and the plate opens.
+                BotAmbient.shared.tap(profile: chat.profileName)
+                onProfile()
+            } label: {
                 // Seated on the pill by its base; while it asks (the "!"), it lifts clear so the
                 // dot does not cover the name.
                 VStack(spacing: chat.botState == .awaitingApproval ? 2 : -(9 + 52 * BotFace.seatDrop(BotAvatarStore.choice(for: chat.profileName).spec(hex: "").shape))) {
@@ -215,6 +223,9 @@ struct ChatHeader: View {
                               mood: BotFaceView.Mood(state: chat.botState))
                         .opacity(popped ? 1 : 0)
                         .zIndex(1)
+                        // The face's own tap gesture would swallow the tap before the button saw
+                        // it; the whole plate, bot included, is one target.
+                        .allowsHitTesting(false)
                     VStack(spacing: 1) {
                         HStack(spacing: 3) {
                             // Hug the text like Messages does; long titles are shortened in code rather
@@ -233,6 +244,7 @@ struct ChatHeader: View {
                     .fixedSize()
                     .glassEffect(.regular.interactive(), in: .capsule)
                 }
+                .contentShape(.rect)
             }
             .buttonStyle(.plain)
             .onAppear { withAnimation(.easeOut(duration: 0.25).delay(0.05)) { popped = true } }
@@ -259,6 +271,10 @@ struct ChatHeader: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 4)
+        // The bar is one surface, like the Messages header: a tap anywhere on it stays on it and
+        // never reaches the thread scrolling underneath (a tool card would otherwise expand).
+        .contentShape(.rect)
+        .onTapGesture {}
     }
 }
 

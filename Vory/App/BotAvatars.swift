@@ -179,12 +179,18 @@ struct CreatorStudio: View {
             ForEach(ids, id: \.self) { id in
                 Button { pick(id) } label: {
                     VStack(spacing: 6) {
+                        // The face carries its own tap (the small turn); here the tap is the pick,
+                        // so the face is not a hit target and the button gets it.
                         preview(id)
+                            .allowsHitTesting(false)
                             .padding(8)
                             .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.tertiarySystemFill).opacity(selected == id ? 1 : 0)))
                             .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(selected == id ? Color.accentColor : .clear, lineWidth: 2))
                         Text(name(id)).font(.caption2).foregroundStyle(selected == id ? .primary : .secondary)
                     }
+                    // The face is not hit-testable (above), which would leave a hole in the button
+                    // exactly where people tap; the whole tile is the target.
+                    .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
             }
