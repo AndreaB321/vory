@@ -19,9 +19,9 @@
   .pill i { width: 10px; height: 10px; border-radius: 50%; background: #30D158; display: inline-block; }
   .stage { position: absolute; right: 150px; top: 26px; width: 400px; height: 460px; display: grid; justify-items: center; align-content: start; }
   .stage canvas { position: relative; z-index: 1; }
-  .shelf { position: relative; margin-top: -66px; display: inline-flex; padding: 12px 36px; border-radius: 999px; background: rgba(255,255,255,0.72); border: 1px solid rgba(255,255,255,0.9); box-shadow: 0 10px 30px rgba(20,30,60,0.10); font-size: 26px; font-weight: 700; }
+  .shelf { position: relative; display: inline-flex; padding: 12px 36px; border-radius: 999px; background: rgba(255,255,255,0.72); border: 1px solid rgba(255,255,255,0.9); box-shadow: 0 10px 30px rgba(20,30,60,0.10); font-size: 26px; font-weight: 700; }
   .cast { position: absolute; display: grid; justify-items: center; }
-  .cast .shelf { margin-top: -22px; padding: 6px 16px; font-size: 15px; }
+  .cast .shelf { padding: 6px 16px; font-size: 15px; }
 </style></head>
 <body>
 <div class="banner" id="banner">
@@ -38,13 +38,18 @@
   <div class="cast" style="left: 975px; top: 330px;"><canvas id="c3"></canvas><div class="shelf">Otto</div></div>
 </div>
 <script type="module">
-  import { paintStill, VORY, stillMotion } from "../site/public/assets/vory-bot.js";
+  import { paintStill, VORY, stillMotion, bodyPieces } from "../site/public/assets/vory-bot.js";
+  // The app's seating: the bot's drawn base tucks just into the top of its pill (about a quarter of
+  // the pill's height, which is what 9 pt on the app's 34 pt header pill comes to).
+  const seat = (canvas, shape, size) => {
+    let bottom = 0; for (const piece of bodyPieces(shape, { x: 0, y: 0, w: size, h: size }, 0, false)) for (const q of piece) if (q.y > bottom) bottom = q.y;
+    const shelf = canvas.nextElementSibling; const h = shelf.getBoundingClientRect().height;
+    shelf.style.marginTop = `${-((size - bottom) + h * 0.26)}px`;
+  };
   await document.fonts.load('800 40px "SF Rounded"').catch(() => {});
   const m = stillMotion();
-  paintStill(document.getElementById("vory"), VORY, 360, m, true);
-  paintStill(document.getElementById("c1"), { shape: "circle", eyes: "classic", hex: "#FF453A", finish: "glass" }, 96, m, true);
-  paintStill(document.getElementById("c2"), { shape: "drop", eyes: "wide", hex: "#F4F4F5", finish: "glass" }, 88, m, true);
-  paintStill(document.getElementById("c3"), { shape: "triangle", eyes: "bold", hex: "#F5A524", finish: "flat" }, 88, m, true);
+  const bots = [["vory", VORY, 360], ["c1", { shape: "circle", eyes: "classic", hex: "#FF453A", finish: "glass" }, 96], ["c2", { shape: "drop", eyes: "wide", hex: "#F4F4F5", finish: "glass" }, 88], ["c3", { shape: "triangle", eyes: "bold", hex: "#F5A524", finish: "flat" }, 88]];
+  for (const [id, spec, size] of bots) { const c = document.getElementById(id); paintStill(c, spec, size, m, true); seat(c, spec.shape, size); }
   window.ready = true;
 </script>
 </body></html>
