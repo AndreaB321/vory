@@ -32,10 +32,12 @@
   <div class="copy">
     <p class="eyebrow">The iPhone remote for your Hermes agents</p>
     <h1>Your agents,<br>in your pocket.</h1>
-    <div class="tagwrap"><p class="tag"><span class="pill"><i></i>Now in beta testing &nbsp;·&nbsp; TestFlight</span></p><p class="url"><span class="cast cast--inline"><canvas id="c2"></canvas><span class="shelf">Nova</span></span><span class="url-text">vory.dev</span><span class="cast cast--inline"><canvas id="c4"></canvas><span class="shelf">Remy</span></span></p></div>
+    <div class="tagwrap"><p class="tag"><span class="pill"><i></i>Now in beta testing &nbsp;·&nbsp; TestFlight</span></p><p class="url"><span class="cast cast--inline" style="transform: translateY(10px);"><canvas id="c2"></canvas><span class="shelf">Nova</span></span><span class="url-text">vory.dev</span><span class="cast cast--inline"><canvas id="c4"></canvas><span class="shelf">Remy</span></span></p></div>
   </div>
   <div class="stage"><canvas id="vory"></canvas><div class="shelf">Vory</div></div>
   <div class="cast" style="left: 500px; top: 318px;"><canvas id="c1"></canvas><div class="shelf">Pip</div></div>
+  <div class="cast" style="left: 40px; top: 128px;"><canvas id="c5"></canvas><div class="shelf">Ivy</div></div>
+  <div class="cast" style="left: 60px; top: 262px;"><canvas id="c6"></canvas><div class="shelf">Bo</div></div>
   <div class="cast" style="left: 486px; top: 128px;"><canvas id="c3"></canvas><div class="shelf">Otto</div></div>
 </div>
 <script type="module">
@@ -50,7 +52,7 @@
   };
   await document.fonts.load('800 40px "SF Rounded"').catch(() => {});
   const m = stillMotion();
-  const bots = [["vory", VORY, 360], ["c1", { shape: "circle", eyes: "classic", hex: "#FF453A", finish: "glass" }, 96], ["c2", { shape: "drop", eyes: "wide", hex: "#F4F4F5", finish: "glass" }, 64], ["c4", { shape: "hexagon", eyes: "round", hex: "#BF5AF2", finish: "glass" }, 64], ["c3", { shape: "triangle", eyes: "bold", hex: "#F5A524", finish: "flat" }, 88]];
+  const bots = [["vory", VORY, 360], ["c1", { shape: "circle", eyes: "classic", hex: "#FF453A", finish: "glass" }, 96], ["c2", { shape: "drop", eyes: "wide", hex: "#F4F4F5", finish: "glass" }, 64], ["c4", { shape: "hexagon", eyes: "round", hex: "#BF5AF2", finish: "glass" }, 64], ["c5", { shape: "square", eyes: "round", hex: "#30D158", finish: "glass" }, 72], ["c6", { shape: "pill", eyes: "wide", hex: "#FFD60A", finish: "flat" }, 76], ["c3", { shape: "triangle", eyes: "bold", hex: "#F5A524", finish: "flat" }, 88]];
   for (const [id, spec, size] of bots) { const c = document.getElementById(id); paintStill(c, spec, size, m, true); seat(c, spec.shape, size); }
   window.ready = true;
 </script>
