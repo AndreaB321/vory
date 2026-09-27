@@ -315,9 +315,22 @@ def process_request(connection, request):
 
 
 class Session:
+    """A live session, shared by every socket that resumed it — like the real gateway, where a
+    session's events and requests go to every attached client (a fan-out), and a mid-turn
+    resume returns the rows flushed so far plus what is still inflight."""
     def __init__(self, sid: str, stored: str, title: str, profile: str) -> None:
         self.sid, self.stored, self.title, self.profile = sid, stored, title, profile
         self.output_tokens = 0
+        self.members: set = set()          # Gateways attached to this session
+        self.history: list[dict] = []      # rows flushed so far (user/assistant/tool)
+        self.inflight: dict | None = None  # {user, assistant, streaming} while a turn runs
+        self.running = False
+        self.turn_started_at = 0.0
+        self.pending: dict[str, asyncio.Future] = {}   # open server→client requests
+        self.open_frames: dict[str, dict] = {}         # their frames, replayed on resume
+
+
+LIVE: dict[str, Session] = {}   # by runtime id
 
 
 class Gateway:
@@ -333,15 +346,37 @@ class Gateway:
         params = {"type": kind, "session_id": sid}
         if payload is not None:
             params["payload"] = payload
-        await self.send({"jsonrpc": "2.0", "method": "event", "params": params})
+        frame = {"jsonrpc": "2.0", "method": "event", "params": params}
+        live = LIVE.get(sid)
+        if live is not None and live.inflight is not None:
+            if kind == "message.delta":
+                live.inflight["assistant"] = live.inflight.get("assistant", "") + str((payload or {}).get("text", ""))
+            elif kind == "tool.complete":
+                live.history.append({"role": "tool", "name": (payload or {}).get("name", "tool"), "text": (payload or {}).get("summary", ""),
+                                     "timestamp": time.time(), "row_id": len(live.history) + 1})
+        targets = list(live.members) if live is not None and live.members else [self]
+        for m in targets:
+            try:
+                await m.send(frame)
+            except Exception:  # noqa: BLE001
+                if live is not None:
+                    live.members.discard(m)
 
     async def ask(self, method: str, sid: str, params: dict, timeout: float = 300) -> dict | None:
-        """Server -> client request; resolves when the app answers with the same id."""
+        """Server -> client request to EVERY attached client; the first answer settles it."""
         rid = f"srq-{uuid.uuid4().hex[:12]}"
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
+        live = LIVE.get(sid)
+        (live.pending if live is not None else self.pending)[rid] = fut
         self.pending[rid] = fut
-        await self.send({"jsonrpc": "2.0", "id": rid, "method": method,
-                         "params": {"session_id": sid, **params}})
+        frame = {"jsonrpc": "2.0", "id": rid, "method": method, "params": {"session_id": sid, **params}}
+        if live is not None:
+            live.open_frames[rid] = frame
+        for m in (list(live.members) if live is not None and live.members else [self]):
+            try:
+                await m.send(frame)
+            except Exception:  # noqa: BLE001
+                pass
         try:
             return await asyncio.wait_for(fut, timeout)
         except asyncio.TimeoutError:
@@ -364,6 +399,16 @@ class Gateway:
             await asyncio.sleep(delay)
 
     async def run_turn(self, s: Session, prompt: str) -> None:
+        s.running = True
+        s.turn_started_at = time.time()
+        s.inflight = {"user": prompt, "assistant": "", "streaming": True}
+        try:
+            await self._run_turn(s, prompt)
+        finally:
+            s.running = False
+            s.inflight = None
+
+    async def _run_turn(self, s: Session, prompt: str) -> None:
         await asyncio.sleep(0.4)
         await self.event("message.start", s.sid)
         await self.stream_words(s, REPLY_PART_1)
@@ -397,11 +442,12 @@ class Gateway:
             await self.event("message.delta", s.sid, {
                 "text": "\n\nUnderstood, I'll leave the files in place. "
                         "Say the word if you want a dry run instead."})
-            await self.event("message.complete", s.sid, {
-                "text": REPLY_PART_1 + REPLY_PART_2 +
-                        "\n\nUnderstood, I'll leave the files in place. "
-                        "Say the word if you want a dry run instead.",
-                "status": "complete", "usage": usage(s.output_tokens, 2)})
+            text = (REPLY_PART_1 + REPLY_PART_2 + "\n\nUnderstood, I'll leave the files in place. "
+                    "Say the word if you want a dry run instead.")
+            s.history += [{"role": "user", "text": prompt, "timestamp": time.time(), "row_id": len(s.history) + 1},
+                          {"role": "assistant", "text": text, "timestamp": time.time(), "row_id": len(s.history) + 2}]
+            s.inflight = None
+            await self.event("message.complete", s.sid, {"text": text, "status": "complete", "usage": usage(s.output_tokens, 2)})
             return
 
         tool2 = f"t-{uuid.uuid4().hex[:8]}"
@@ -419,6 +465,9 @@ class Gateway:
         full = REPLY_PART_1 + REPLY_PART_2 + "\n\n" + REPLY_PART_3
         await self.event("session.title", s.sid, {"session_id": s.stored, "title": "Disk cleanup on the log host"})
         s.title = "Disk cleanup on the log host"
+        s.history += [{"role": "user", "text": prompt, "timestamp": time.time(), "row_id": len(s.history) + 1},
+                      {"role": "assistant", "text": full, "timestamp": time.time(), "row_id": len(s.history) + 2}]
+        s.inflight = None
         await self.event("message.complete", s.sid, {
             "text": full, "status": "complete", "usage": usage(s.output_tokens, 2)})
 
@@ -426,15 +475,12 @@ class Gateway:
 
     async def handle(self, msg: dict) -> dict | None:
         # A response to one of OUR requests (approval / clarify / ...).
-        if "result" in msg and isinstance(msg.get("id"), str):
-            if fut := self.pending.get(msg["id"]):
-                if not fut.done():
-                    fut.set_result(msg["result"])
-            return None
-        if "error" in msg and isinstance(msg.get("id"), str):
-            if fut := self.pending.get(msg["id"]):
-                if not fut.done():
-                    fut.set_result(None)
+        if ("result" in msg or "error" in msg) and isinstance(msg.get("id"), str):
+            fut = self.pending.get(msg["id"]) or next((l.pending[msg["id"]] for l in LIVE.values() if msg["id"] in l.pending), None)
+            if fut and not fut.done():
+                fut.set_result(msg.get("result") if "result" in msg else None)
+            for l in LIVE.values():
+                l.open_frames.pop(msg["id"], None)
             return None
 
         rid, method, p = msg.get("id"), msg.get("method", ""), msg.get("params") or {}
@@ -451,7 +497,9 @@ class Gateway:
         if method == "profiles.list":
             return ok({"profiles": [{"name": "default", "is_default": True}, {"name": "work", "is_default": False}]})
         if method == "session.active_list":
-            return ok({"sessions": [{"id": s["id"], "title": s.get("title"), "source": s.get("source", "ios")} for s in STORED_SESSIONS[:1]]})
+            return ok({"sessions": [{"id": l.sid, "session_key": l.stored, "title": l.title, "source": "ios",
+                                     "status": "streaming" if l.running else "idle", "current": False}
+                                    for l in LIVE.values()]})
         if method == "groups.capabilities":
             return ok({"protocol_version": 1, "driver": True, "methods": ["groups.list", "groups.create", "groups.send", "groups.log"]})
         if method == "groups.list":
@@ -504,23 +552,30 @@ class Gateway:
                        "messages": [], "info": session_info(s.title, False, profile)})
         if method in ("session.resume", "session.activate"):
             stored = p.get("session_id", "")
-            sid = uuid.uuid4().hex[:8]
-            row = next((r for r in STORED_SESSIONS if r["id"] == stored), None)
-            title = row["title"] if row else "Chat"
-            s = Session(sid, stored, title, profile)
-            self.sessions[sid] = s
-            messages = []
-            if row:
-                messages = [
-                    {"role": "user", "text": "The log host is at 94% disk. Can you take a look?",
-                     "timestamp": row["started_at"], "row_id": 1},
-                    {"role": "assistant", "text": REPLY_PART_1 + REPLY_PART_2 + "\n\n" + REPLY_PART_3,
-                     "timestamp": row["last_active"], "row_id": 2},
-                ]
-            return ok({"session_id": sid, "stored_session_id": stored,
-                       "message_count": len(messages), "messages": messages,
-                       "info": session_info(title, False, profile), "running": False,
-                       "open_requests": []})
+            live = next((l for l in LIVE.values() if l.stored == stored or l.sid == stored), None)
+            if live is None:
+                sid = uuid.uuid4().hex[:8]
+                row = next((r for r in STORED_SESSIONS if r["id"] == stored), None)
+                live = Session(sid, stored, row["title"] if row else "Chat", profile)
+                if row:
+                    live.history = [
+                        {"role": "user", "text": "The log host is at 94% disk. Can you take a look?",
+                         "timestamp": row["started_at"], "row_id": 1},
+                        {"role": "assistant", "text": REPLY_PART_1 + REPLY_PART_2 + "\n\n" + REPLY_PART_3,
+                         "timestamp": row["last_active"], "row_id": 2},
+                    ]
+                LIVE[sid] = live
+            live.members.add(self)
+            self.sessions[live.sid] = live
+            messages = [] if p.get("omit_messages") else list(live.history)
+            result = {"session_id": live.sid, "stored_session_id": live.stored,
+                      "message_count": len(live.history), "messages": messages,
+                      "info": session_info(live.title, live.running, profile), "running": live.running,
+                      "open_requests": [{"id": f["id"], "method": f["method"], "params": f["params"]} for f in live.open_frames.values()],
+                      "resumed": stored, "turn_started_at": live.turn_started_at if live.running else None}
+            if live.inflight is not None:
+                result["inflight"] = dict(live.inflight)
+            return ok(result)
         if method == "session.usage":
             s = self.sessions.get(p.get("session_id", ""))
             return ok(usage(s.output_tokens if s else 0, 1))
@@ -600,6 +655,9 @@ async def ws_handler(ws):
                     await gw.send(reply)
     except Exception:
         pass
+    finally:
+        for live in LIVE.values():
+            live.members.discard(gw)
 
 
 async def main() -> None:

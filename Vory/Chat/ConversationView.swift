@@ -205,7 +205,9 @@ struct ChatHeader: View {
             .buttonStyle(.plain).accessibilityLabel("Back").accessibilityIdentifier("chat.back")
             Spacer(minLength: 0)
             Button(action: onProfile) {
-                VStack(spacing: -(9 + 52 * BotFace.seatDrop(BotAvatarStore.choice(for: chat.profileName).spec(hex: "").shape))) {
+                // Seated on the pill by its base; while it asks (the "!"), it lifts clear so the
+                // dot does not cover the name.
+                VStack(spacing: chat.botState == .awaitingApproval ? 2 : -(9 + 52 * BotFace.seatDrop(BotAvatarStore.choice(for: chat.profileName).spec(hex: "").shape))) {
                     // The bot sits on the pill, its base a few points over the top edge (measured from
                     // the shape, not the frame), like a contact photo in Messages; it springs in from
                     // small on the first appearance.
@@ -225,6 +227,7 @@ struct ChatHeader: View {
                             .foregroundStyle(.secondary)
                             .contentTransition(.numericText())
                             .animation(.snappy, value: chat.statusLine)
+                            .animation(.snappy, value: chat.botState == .awaitingApproval)
                     }
                     .padding(.horizontal, 14).padding(.top, 11).padding(.bottom, 6)
                     .fixedSize()

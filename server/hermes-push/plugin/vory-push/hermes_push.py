@@ -53,7 +53,7 @@ except ImportError as exc:  # pragma: no cover
 log = logging.getLogger("hermes-push")
 
 # Keep in step with plugin/vory-push/plugin.yaml; the app compares the two.
-VERSION = "1.0.26"
+VERSION = "1.0.27"
 USER_AGENT = f"Vory-Push/{VERSION} (Hermes companion)"
 try:
     # Fingerprint of the code actually running: the app compares it with the copy it ships, so a
@@ -286,6 +286,10 @@ class ConfigChanged(Exception):
     """The app rewrote hermes-push.conf: reconnect with the new settings, no restart needed."""
 
 
+class ReleaseIdle(Exception):
+    """Every tracked session has been idle long enough: reconnect to drop the mirror memberships."""
+
+
 class CodeChanged(Exception):
     """hermes_push.py on disk is no longer the code running: the host reloads or re-execs it."""
 
@@ -419,7 +423,13 @@ class Gateway:
             raise ConnectionError(f"{self.url}: {describe_error(exc)}") from None
         self.transport = f"{self.url} ({how})"
         asyncio.create_task(self._reader())
-        await self.call("client.capabilities", {"server_requests": False})
+        # Advertise that server→client requests may be sent to this socket. The companion never
+        # ANSWERS one (see _reader): the phone does, or the request waits in the gateway's
+        # open_requests for the phone's next resume. Without this, an approval raised while the
+        # phone is backgrounded and only the companion is attached would be withdrawn as
+        # unanswerable instead of waiting — and the companion would never see it.
+        await self.call("client.capabilities", {"server_requests": True})
+        self.requests: asyncio.Queue = asyncio.Queue()
 
     async def _reader(self) -> None:
         try:
@@ -439,7 +449,11 @@ class Gateway:
                         else:
                             fut.set_result(msg.get("result") or {})
                     elif isinstance(msg.get("id"), str) and msg.get("method"):
-                        await self.ws.send(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32601, "message": "hermes-push does not answer requests"}}))
+                        # A server→client request (approval, clarify, …). Never answered from here:
+                        # the gateway settles a request on the FIRST response, so an error reply
+                        # would withdraw the phone's card. It is news for the phone, so it goes to
+                        # the relay loop as a request event.
+                        await self.events.put({"type": "__request__", "id": msg["id"], "method": msg["method"], "params": msg.get("params") or {}})
         except Exception as exc:  # noqa: BLE001
             log.warning("ws reader ended: %s", exc)
         await self.events.put({"type": "__closed__"})
@@ -463,6 +477,9 @@ class Relay:
         self.labels: dict[str, str] = {}      # profile name → display name
         self.notified: set[str] = set()       # request ids already pushed
         self.poll = float(env("HERMES_PUSH_POLL_SECONDS", "3"))
+        #: Seconds of nothing running before the mirrored sessions are released (see ReleaseIdle).
+        self.release_after = float(env("HERMES_PUSH_RELEASE_IDLE_SECONDS", "600"))
+        self._last_running_at = time.time()
         self.last_test: dict = {}                # last_test_nonce / last_test_devices / last_test_at, for the heartbeat
         self.last_la: dict = {}                  # what the last Live Activity push was and what the relay said
 
@@ -678,9 +695,13 @@ class Relay:
             except Exception as exc:  # noqa: BLE001
                 log.debug("active_list failed for %s: %s", profile, exc)
                 continue
+            seen_live = {s.get("id") for s in live}
             for s in live:
                 sid = s.get("id")
-                if not sid or sid in self.attached:
+                if sid in self.attached:
+                    self.attached[sid]["status"] = s.get("status") or ""
+                    continue
+                if not sid:
                     continue
                 # NOT session.activate: activating makes this socket the session's attached client,
                 # and the gateway then sends approval requests here (which this companion cannot
@@ -695,8 +716,21 @@ class Relay:
                     self._refresh_session_profiles(profiles, force=True)
                 pname = self.session_profile.get(stored) or s.get("profile") or profile or "default"
                 self.attached[sid] = {"stored": stored, "title": s.get("title") or "Hermes", "profile": pname,
-                                      "bot": self.labels.get(pname, pname), "source": s.get("source") or ""}
+                                      "bot": self.labels.get(pname, pname), "source": s.get("source") or "",
+                                      "status": s.get("status") or ""}
                 log.info("tracking %s (%s, profile %s)", self.attached[sid]["title"], stored[:12], self.attached[sid]["profile"])
+                # The gateway sends a session's events (message.delta, tool.start, session.usage,
+                # message.complete, approval requests) ONLY to the clients attached to it. A
+                # `session.resume` on a LIVE session attaches this socket ALONGSIDE the phone (a
+                # fan-out), unlike `session.activate`, which rebinds the slot and used to steal the
+                # phone's approval cards. `omit_messages` skips the transcript read.
+                try:
+                    await asyncio.wait_for(self.gw.call("session.resume", {**params, "session_id": stored, "cols": 80, "omit_messages": True}), timeout=8)
+                    self.attached[sid]["mirrored"] = True
+                    self._note_la("mirror " + stored[:12], True)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("could not mirror %s: %s (updates will lag until the next poll)", stored[:12], describe_error(exc))
+                    self._note_la("mirror " + stored[:12], False, str(exc)[:80])
                 try:
                     pend = await asyncio.wait_for(self.gw.call("approval.pending", {**params, "session_id": sid}), timeout=3)
                 except Exception:  # noqa: BLE001
@@ -706,6 +740,10 @@ class Relay:
                     for pa in items:
                         if isinstance(pa, dict) and pa.get("request_id"):
                             self.handle_request(sid, "queue-" + str(pa.get("request_id")), "approval", pa)
+
+    def attached_all_idle(self) -> bool:
+        """True when no tracked session reports a running status (the live list's `status`)."""
+        return all((a.get("status") or "idle") in ("idle", "", "done", "finished") for a in self.attached.values())
 
     def meta(self, sid: str) -> dict:
         a = self.attached.get(sid, {})
@@ -720,7 +758,7 @@ class Relay:
         bot = a.get("bot") or a.get("profile", "Hermes")
         if method == "approval":
             body = params.get("description") or params.get("command") or "A command is waiting for your decision"
-            via_la = self.update_live_activities(a.get("stored", sid), {"phase": "waiting", "detail": str(body)[:80], "needsAttention": True},
+            via_la = self.update_live_activities(a.get("stored", sid), {**self.la_usage.get(sid, {}), "phase": "waiting", "detail": str(body)[:80], "needsAttention": True},
                                                  alert={"title": bot, "body": "Approval needed — tap to answer. It waits for you."}, runtime_id=sid)
             self.push_all("approval", f"{bot} · approval needed", f"{title}: {str(body)[:180]}", {**self.meta(sid), "request_id": params.get("request_id", rid)}, collapse=rid, skip=via_la)
         elif method == "clarify":
@@ -759,10 +797,28 @@ class Relay:
                         continue
                     if ev.get("type") == "__closed__":
                         raise ConnectionError("socket closed")
+                    if ev.get("type") == "__request__":
+                        p = ev.get("params") or {}
+                        self.handle_request(str(p.get("session_id") or ""), str(ev.get("id") or ""), str(ev.get("method") or ""), p)
+                        continue
                     self.on_event(ev)
+                    # A mirrored session stays live for as long as any client is attached — this
+                    # socket included. When nothing tracked has run for a while, drop the socket
+                    # (and with it every membership) so the gateway's idle reaper can do its job;
+                    # the reconnect re-mirrors whatever is live.
+                    if self.attached and time.time() - self._last_running_at > self.release_after and self.attached_all_idle():
+                        raise ReleaseIdle()
             except ConfigChanged:
                 log.info("hermes-push.conf changed; reloading")
                 await self._reload_config()
+                backoff = 1
+            except ReleaseIdle:
+                log.info("nothing has run for %ss; releasing the mirrored sessions", int(self.release_after))
+                try:
+                    if self.gw.ws:
+                        await self.gw.ws.close()
+                except Exception:  # noqa: BLE001
+                    pass
                 backoff = 1
             except CodeChanged:
                 log.info("hermes_push.py changed on disk; handing over to the new code")
@@ -904,6 +960,8 @@ class Relay:
     def on_event(self, ev: dict) -> None:
         kind, sid, p = ev.get("type", ""), ev.get("session_id", ""), ev.get("payload") or {}
         a = self.attached.get(sid)
+        if kind in self._PHASE_EVENTS or kind in ("session.usage", "message.complete"):
+            self._last_running_at = time.time()
         if kind in self._PHASE_EVENTS and a:
             self._la_phase_event(sid, a, self._PHASE_EVENTS[kind])
             return
@@ -928,6 +986,11 @@ class Relay:
             self.push_all("error", f"{a.get('bot') or a.get('profile', 'Hermes')} · error", f"{a['title']}: {str(p.get('message', ''))[:180]}", self.meta(sid), collapse=f"err-{sid}")
         elif kind == "request.cancel":
             self.notified.discard(p.get("id", ""))
+            # The ask was answered (from the phone, or elsewhere): the Live Activity stops asking.
+            if a and self.la_phase.get(sid):
+                phase = self.la_phase[sid][0]
+                self.update_live_activities(a["stored"], {**self.la_usage.get(sid, {}), "phase": phase, "needsAttention": False,
+                                                          "detail": {"thinking": "Thinking…", "streaming": "Writing…", "tool": "Running a tool…"}.get(phase, "Working…")}, runtime_id=sid)
         elif kind == "session.reclaimed":
             self.attached.pop(p.get("session_id", ""), None)
 

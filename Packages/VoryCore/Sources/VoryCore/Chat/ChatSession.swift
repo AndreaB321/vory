@@ -219,14 +219,34 @@ public final class ChatSession: @MainActor Identifiable, ChatIdentity {
         isRunning = r["running"]?.boolValue ?? info?.running ?? false
         if let inflight = r["inflight"], !inflight.isNull {
             let user = inflight["user"]?.stringValue ?? ""
-            if !user.isEmpty, !(items.last.map { if case .user(let t, _) = $0.kind { return t == user }; return false } ?? false) {
-                items.append(TranscriptItem(id: "inflight-user", kind: .user(text: user, attachments: keptAttachments[user] ?? [])))
+            let lastUserText: String? = items.last(where: { if case .user = $0.kind { return true }; return false })
+                .flatMap { if case .user(let t, _) = $0.kind { return t }; return nil }
+            // Where this turn begins in `messages`: mid-turn the gateway has already flushed the
+            // turn's tool and assistant rows while the prompt is still "inflight", so the prompt
+            // goes in front of the first row stamped after the turn started (else after the last
+            // reply), and the turn's rows sit under it instead of above it.
+            let turnStart = r["turn_started_at"]?.doubleValue ?? 0
+            let turnAt: Int = {
+                if turnStart > 0, let i = items.firstIndex(where: { $0.timestamp.timeIntervalSince1970 >= turnStart - 1 }) { return i }
+                if let la = items.lastIndex(where: { if case .assistant = $0.kind { return true }; return false }) { return la + 1 }
+                return items.count
+            }()
+            if !user.isEmpty, lastUserText != user {
+                var prompt = TranscriptItem(id: "inflight-user", kind: .user(text: user, attachments: keptAttachments[user] ?? []))
+                if turnStart > 0 { prompt.timestamp = Date(timeIntervalSince1970: turnStart) }
+                items.insert(prompt, at: turnAt)
             }
             let partial = inflight["assistant"]?.stringValue ?? ""
             let streaming = inflight["streaming"]?.boolValue ?? false
             if let err = inflight["error"]?.stringValue, !err.isEmpty {
                 items.append(TranscriptItem(id: "inflight-error", kind: .error(text: err)))
             } else if streaming || !partial.isEmpty {
+                // The partial may already be in `messages` as the last assistant row (a flushed
+                // prefix): the streaming bubble takes that row's place instead of repeating it.
+                if let idx = items.indices.last(where: { if case .assistant = items[$0].kind { return true }; return false }),
+                   idx > turnAt, case .assistant(let t, _, _) = items[idx].kind, !t.isEmpty, partial.hasPrefix(t) || t.hasPrefix(partial) {
+                    items.remove(at: idx)
+                }
                 assembler.start()
                 assembler.appendDelta(partial)
                 let id = "stream-\(UUID().uuidString)"

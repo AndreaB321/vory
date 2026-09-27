@@ -7,8 +7,9 @@ at a time, ship a TestFlight build, wait for their verdict.
 
 ## Where things stand
 
-- **Latest TestFlight build: 1.0.1 (43)** (42 before it), uploaded 2026-09-26 ~15:05 (31–41 earlier that day),
-  companion 1.0.26.
+- **Latest: 1.1 (3)** (2026-09-27, Live Activity + snapshot-order fixes), companion **1.0.27**.
+  1.1 (2) was in Beta App Review when 3 was built; see "Public beta" for the review train rule.
+- Earlier: 1.0.1 (43) uploaded 2026-09-26 ~15:05 (31–41 earlier that day), companion 1.0.26.
 - **Build 45 uploaded 2026-09-26 ~18:05** (user: "Once done go ahead and push it") — the build-44
   review list (group composer, scroll/side-pull smoothness, tails, typing indicators, group
   previews + summaries + merged list, rename chat) and the **motion second cut** with its two
@@ -209,6 +210,39 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
   `hermes.text` (≤1200) and `hermes.title`; payload trimmed under Apple's 4 KB.
 
 ## Change log
+
+### 2026-09-27 (1.1 build 3: Live Activity updates on its own, mid-turn snapshot order)
+- **Live Activity did not update unless the chat was open — companion 1.0.27.** The gateway sends a
+  session's events (`message.delta`, `tool.start`, `session.usage`, `message.complete`, approval
+  requests) ONLY to the clients attached to that session. 1.0.26 stopped calling `session.activate`
+  (it stole the phone's approval cards) and so received no events at all: the LA only moved when the
+  app's own socket was attached. 1.0.27 mirrors instead: after discovery it calls
+  `session.resume {session_id, omit_messages: true}` on each live session, which attaches its socket
+  ALONGSIDE the phone (a fan-out, additive membership), so every event reaches both. It advertises
+  `client.capabilities {server_requests: true}` but NEVER answers a request (the gateway settles a
+  request on the first reply, so an error reply would withdraw the phone's card); request frames go
+  to `handle_request` as `__request__` events, which pushes the LA `waiting` + `needsAttention` state
+  and the alert. Unanswered requests wait in the gateway's `open_requests` and replay on the phone's
+  next resume. `request.cancel` clears `needsAttention`. Mirror memberships keep a session alive, so
+  after `HERMES_PUSH_RELEASE_IDLE_SECONDS` (600) of nothing running the companion drops its socket
+  (`ReleaseIdle`) and reconnects, re-mirroring whatever is live. Diagnostics: `_note_la("mirror …")`.
+  Verified with the companion dry-run against the fan-out mock: thinking → streaming → tool → waiting
+  (attention) → done + alert, while the phone still got its card.
+- **Duplicate section after multitasking.** Mid-turn the gateway snapshot already holds the turn's
+  flushed tool/assistant rows in `messages` while the prompt is still `inflight.user`; the app
+  appended the prompt at the end, so the turn's rows sat above it and the partial reply below.
+  `ChatSession.apply(snapshot:)` now inserts the prompt at the first row stamped after
+  `turn_started_at` (fallback: after the last reply), stamps it with that time, and dedupes a flushed
+  prefix of the partial only among rows after that point. Tested by killing the app ~3 s and ~7 s
+  into a turn and relaunching: previous turn intact → prompt → tool card → partial/streaming, and
+  the pending approval card replayed.
+- **Mock gateway** models the fan-out: a shared `LIVE` registry with members, flushed `history`,
+  `inflight`, `running`, `turn_started_at`, open requests replayed in `open_requests`;
+  `session.active_list` lists live sessions with `session_key`/`status`; `session.resume` joins a
+  live session (respects `omit_messages`). Restart the mock after editing it.
+- The "!" ask pose lifts off the pill (`ConversationView` header spacing 2 while awaiting approval)
+  so its dot no longer covers the bot name.
+- **Ship:** 1.1 (3). The user must install companion 1.0.27 from Settings › Software Update.
 
 ### 2026-09-26 (build 45, from the build-44 review + the motion second cut)
 - Group chat: `RoomView` gets `.hidesTabBar()` so the composer is not under the tab bar.
