@@ -53,6 +53,28 @@ at a time, ship a TestFlight build, wait for their verdict.
   #18 in-chat iMessage-style reply UI (the notification reply window part is done); #20 notifications
   on/off toggle; #21 plain-language status screen; #22 general plugins list; #23 @mention bot picker.
 
+## Public beta (TestFlight public link), 2026-09-26
+
+- **Version 1.1, build 1** = the build-45 code re-tagged (MARKETING_VERSION 1.1 in the project;
+  `testflight.sh` now passes `MARKETING_VERSION` to xcodebuild) plus Settings › About links
+  (Send feedback → mailto:matt@vory.dev, Privacy policy, vory.dev) and a neutralised dev string
+  in the mock. Upload: `MARKETING_VERSION=1.1 BUILD_NUMBER=1 ./Tools/release/testflight.sh`.
+- App Store Connect (all set through the API, script pattern in the session scratchpad
+  `asc_beta_setup.py` / `asc_submit_11.py`): beta app description + feedback email
+  matt@vory.dev + privacy URL https://vory.dev/privacy/ + marketing URL; Beta App Review contact
+  (Matthew Wagner, +1 978-935-6822, no demo account, review notes explain "no demo server; the
+  tour, Connect and Settings work without a gateway"); external group **Public beta**
+  (`adad2fc6-6da7-4a21-a47e-e7660b759cd5`), public link **https://testflight.apple.com/join/tJ4PyTfc**,
+  cap 1000 (raise with a PATCH on `publicLinkLimit`). The first build of a version needs Beta
+  App Review (24–48 h); later 1.1 builds usually go straight to the group.
+- Export compliance stays `ITSAppUsesNonExemptEncryption = false`: the notification decryption is
+  CryptoKit AES-GCM (Apple's OS encryption), which is the exempt case.
+- Audit (2026-09-26): shipped code has no personal identifiers; the only developer-operated
+  service is the push relay (device tokens + ciphertext only). Watch it with
+  `Tools/release/relay-usage.sh` (Cloudflare GraphQL + KV; warns past 60k requests/day; free
+  tier 100k/day, paid $5/mo for 10M). Baseline 2026-09-26: ~280 requests/day, 1 device.
+- Privacy policy source: `docs/promo/privacy.md` (promo branch), live at vory.dev/privacy/.
+
 ## Promo (video + vory.dev site), 2026-09-26
 
 `docs/promo/`: `VORY-PRODUCT-BRIEF.md` (public-beta-safe product brief), `PROMPT-claude-session.md`
