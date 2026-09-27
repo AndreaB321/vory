@@ -74,6 +74,17 @@ at a time, ship a TestFlight build, wait for their verdict.
   `Tools/release/relay-usage.sh` (Cloudflare GraphQL + KV; warns past 60k requests/day; free
   tier 100k/day, paid $5/mo for 10M). Baseline 2026-09-26: ~280 requests/day, 1 device.
 - Privacy policy source: `docs/promo/privacy.md` (promo branch), live at vory.dev/privacy/.
+- **App Store listing kept in step with TestFlight**: `Tools/release/asc-listing.py attach <ver>
+  <build>` attaches a processed build to the App Store version (created if missing; state stays
+  "Prepare for Submission" — nothing is submitted) and `… screenshots` replaces the 6.9" iPhone
+  set from `Tools/release/screenshots/*.png` (sorted; any iPhone size, scaled to 1320×2868).
+  `testflight.sh` runs both after every upload (`SKIP_LISTING=1` to skip). The current set (8:
+  chats, chat + tool call, finished reply, bots, Creator Studio, and dark chat/chats/bots) was
+  captured on the sim with the mock gateway, status bar overridden to 9:41. Recapture by hand when
+  the UI changes; the approval-card frame is left out until the header "!" no longer covers the
+  bot's name on the pill (nit for the next build). TestFlight itself never shows screenshots.
+- 1.1 (2) replaced 1.1 (1) in review (build 1 expired to withdraw its submission; 1.1 (2) is
+  `WAITING_FOR_REVIEW`); it is also attached to the App Store version 1.1.
 
 ## Promo (video + vory.dev site), 2026-09-26
 

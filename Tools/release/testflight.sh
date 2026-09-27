@@ -106,6 +106,15 @@ echo "==> Uploading to TestFlight"
 xcrun altool --upload-app --type ios --file "$IPA" \
     --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
 
+# Keep the App Store listing in step: attach this build to the version (created if needed) and
+# refresh its screenshots from Tools/release/screenshots. Skipped with SKIP_LISTING=1.
+if [ -z "${SKIP_LISTING:-}" ]; then
+    echo "==> Updating the App Store listing (build + screenshots)"
+    python3 Tools/release/asc-listing.py attach "$MARKETING_VERSION" "$BUILD_NUMBER" \
+        && python3 Tools/release/asc-listing.py screenshots \
+        || echo "(listing update failed; run Tools/release/asc-listing.py by hand)"
+fi
+
 cat <<EOS
 
 Uploaded build $BUILD_NUMBER of version $MARKETING_VERSION.
