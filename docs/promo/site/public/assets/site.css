@@ -100,6 +100,7 @@ strong { font-weight: 650; }
 .btn-primary:hover { box-shadow: 0 8px 24px rgba(10, 132, 255, 0.45); }
 .btn-glass { background: var(--glass); color: var(--text); border-color: var(--glass-rim); -webkit-backdrop-filter: blur(16px) saturate(1.5); backdrop-filter: blur(16px) saturate(1.5); box-shadow: var(--glass-shadow); }
 .btn-small { min-height: 38px; padding: 0 14px; font-size: 15px; }
+.btn-soon { cursor: default; }
 
 /* ---- nav */
 .nav {
@@ -145,7 +146,7 @@ main { display: block; }
   :root:not([data-theme="light"]) .glow { opacity: 0.7; }
 }
 .vory-figure { position: relative; z-index: 1; margin: 0; display: grid; justify-items: center; gap: 14px; }
-.bot-seat { position: relative; display: grid; justify-items: center; }
+.bot-seat { position: relative; display: grid; justify-items: center; align-content: start; justify-self: center; }
 .bot-seat .bot { position: relative; z-index: 1; }
 .bot-seat--hero .bot { width: 220px; height: 220px; }
 .shelf {
@@ -365,7 +366,7 @@ figcaption { font-size: 14px; color: var(--muted); margin-top: 10px; }
   .phone { width: 300px; }
   .phone--back { display: block; position: absolute; width: 250px; right: 8px; top: 110px; transform: rotate(4deg); z-index: -1; opacity: 0.95; }
   .phones--single { justify-items: center; padding-left: 0; }
-  .beta-card { grid-template-columns: auto 1fr; text-align: left; padding: 40px; gap: 40px; }
+  .beta-card { grid-template-columns: auto 1fr; text-align: left; padding: 40px; gap: 40px; align-items: center; }
   .beta-card .cta-row { justify-content: flex-start; }
   .footer-inner { grid-template-columns: auto 1fr auto; align-items: center; justify-items: start; text-align: left; gap: 16px; }
   .footer-inner p:nth-child(3) { grid-column: 2; }

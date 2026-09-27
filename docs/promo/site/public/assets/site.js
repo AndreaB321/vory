@@ -45,14 +45,13 @@ seat(beta, $(".bot-seat--beta .shelf"));
 new Bot($("#footer-bot"), VORY, { size: 40, profile: "vory-footer" });
 
 // ---- Live Activity + notification: still poses painted like the widget
-const ada = { shape: "circle", eyes: "classic", hex: "#30D158", finish: "glass" };
-paintStill($("#la-bot"), ada, 44, widgetPose("tool", true), false);
-paintStill($("#notif-bot"), ada, 38, stillMotion(), true);
+paintStill($("#la-bot"), VORY, 44, widgetPose("tool", true), false);
+paintStill($("#notif-bot"), VORY, 38, stillMotion(), true);
 
 // ---- studio
 const studioSpec = { ...VORY, hex: "#3B7BFF" };
 const studioSize = () => (innerWidth >= 900 ? 220 : 168);
-const studio = new Bot($("#studio-bot"), studioSpec, { size: studioSize(), state: "idle", profile: "Ada" });
+const studio = new Bot($("#studio-bot"), studioSpec, { size: studioSize(), state: "idle", profile: "vory-studio" });
 seat(studio, $(".shelf--studio"));
 addEventListener("resize", () => { const s = studioSize(); if (s !== studio.size) { studio.setSize(s); seat(studio, $(".shelf--studio")); } }, { passive: true });
 $("#studio-bot").addEventListener("pointerdown", () => studio.tap());

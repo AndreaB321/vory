@@ -655,8 +655,8 @@ export class Bot {
   }
   get state() { return this.thinking ? "thinking" : this._state; }
   set state(s) { if (s === this._state) return; this._state = s; this._changed(); }
-  setSpec(spec) { this.spec = { ...this.spec, ...spec }; this._lastDraw = -1; }
-  setSize(size) { this.size = size; this._resize(); this._lastDraw = -1; }
+  setSpec(spec) { this.spec = { ...this.spec, ...spec }; this._dirty = true; }
+  setSize(size) { this.size = size; this._resize(); this._dirty = true; }
   finishTurn() { this._finishedAt = performance.now() / 1000; }
   tap() { this._tappedAt = performance.now() / 1000; }
   setGaze(g) { this._gazeFrom = this._gazeShown; this.gaze = g; this._gazeAt = performance.now() / 1000; }
@@ -713,6 +713,7 @@ export class Bot {
 
   _frame(now, force = false) {
     if (!this._visible && !force) return;
+    if (this._dirty) { force = true; this._dirty = false; }
     const state = this.state;
     const finished = this._finishedAt != null && now - this._finishedAt < 1.8;
     const tapped = this._tappedAt != null && now - this._tappedAt < 0.6;
@@ -759,5 +760,5 @@ export function paintStill(canvas, spec, size, m = stillMotion(), light = "auto"
 if (typeof window !== "undefined") {
   let lastY = window.scrollY;
   window.addEventListener("scroll", () => { const y = window.scrollY; ambient.scrolled(y - lastY); lastY = y; }, { passive: true });
-  darkQuery.addEventListener?.("change", () => { for (const b of bots) b._lastDraw = -1; });
+  darkQuery.addEventListener?.("change", () => { for (const b of bots) b._dirty = true; });
 }

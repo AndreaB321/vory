@@ -22,10 +22,11 @@ tools/
 DESIGN.md                    sitemap, copy, design system, targets
 ```
 
-## One thing to fill in before go‑live
+## When the TestFlight link exists
 
-The TestFlight public link is a placeholder. Replace `https://testflight.apple.com/join/REPLACE-ME`
-(two occurrences in `public/index.html`, both on `<a data-testflight>`) with the real invite URL.
+The two CTAs are "TestFlight coming soon" (`<span class="btn btn-primary btn-soon">` in
+`public/index.html`, hero and `#beta`). Swap each for `<a class="btn btn-primary" href="<invite URL>"
+rel="noopener">Join the TestFlight beta</a>` and adjust the sentence above the second one.
 
 ## S3 + CloudFront
 
