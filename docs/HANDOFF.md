@@ -8,7 +8,7 @@ at a time, ship a TestFlight build, wait for their verdict.
 ## Where things stand
 
 - **Latest: 1.1 (3)** (2026-09-27, Live Activity + snapshot-order fixes), companion **1.0.27**.
-  1.1 (2) was in Beta App Review when 3 was built; see "Public beta" for the review train rule.
+  Uploaded 2026-09-27 ~02:40, build 2 expired to withdraw its review, 3 submitted (WAITING_FOR_REVIEW).
 - Earlier: 1.0.1 (43) uploaded 2026-09-26 ~15:05 (31–41 earlier that day), companion 1.0.26.
 - **Build 45 uploaded 2026-09-26 ~18:05** (user: "Once done go ahead and push it") — the build-44
   review list (group composer, scroll/side-pull smoothness, tails, typing indicators, group
