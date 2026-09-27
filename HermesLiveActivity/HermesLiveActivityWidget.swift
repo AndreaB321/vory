@@ -12,11 +12,21 @@ struct HermesLiveActivityBundle: WidgetBundle {
     }
 }
 
+extension HermesTurnAttributes {
+    /// A tap anywhere on the activity opens this chat, on its bot.
+    var chatURL: URL? {
+        var c = URLComponents(); c.scheme = "vory"; c.host = "chat"; c.path = "/" + storedSessionID
+        if !profile.isEmpty { c.queryItems = [URLQueryItem(name: "profile", value: profile)] }
+        return c.url
+    }
+}
+
 /// Lock Screen banner + Dynamic Island for a running agent turn.
 struct HermesTurnLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: HermesTurnAttributes.self) { context in
             LockScreenTurnView(attributes: context.attributes, state: context.state)
+                .widgetURL(context.attributes.chatURL)
                 // Translucent over the wallpaper rather than a flat black slab; the system
                 // still guarantees legibility with its own material underneath.
                 .activityBackgroundTint(Color.black.opacity(0.35))
@@ -63,6 +73,7 @@ struct HermesTurnLiveActivity: Widget {
                     }
                     .padding(.horizontal, 6)
                     .padding(.top, 4)
+                    .widgetURL(context.attributes.chatURL)
                 }
             } compactLeading: {
                 HStack(spacing: 4) {
@@ -70,6 +81,7 @@ struct HermesTurnLiveActivity: Widget {
                     PhaseGlyph(phase: context.state.phase, attention: context.state.needsAttention, botHex: context.attributes.tintHex)
                         .font(.caption2.weight(.semibold))
                 }
+                .widgetURL(context.attributes.chatURL)
             } compactTrailing: {
                 if context.state.needsAttention {
                     Text("Approve").font(.caption2.weight(.semibold)).foregroundStyle(.yellow)
@@ -80,6 +92,7 @@ struct HermesTurnLiveActivity: Widget {
                 }
             } minimal: {
                 PhaseGlyph(phase: context.state.phase, attention: context.state.needsAttention, botHex: context.attributes.tintHex)
+                    .widgetURL(context.attributes.chatURL)
             }
             .keylineTint(context.state.needsAttention ? .yellow : PhaseStyle.tint(context.state.phase, bot: context.attributes.tintHex))
         }

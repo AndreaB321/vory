@@ -56,6 +56,7 @@ struct BotsView: View {
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in BotAmbient.shared.scrolled(dy: new - old) }
             .navigationTitle("Bots")
             .tabRoot(.bots)
+            .background(InteractivePopEnabler())
             .overlay {
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("-vory-shape-grid") { ShapeSeatGrid() }

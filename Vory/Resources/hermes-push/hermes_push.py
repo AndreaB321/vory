@@ -53,7 +53,7 @@ except ImportError as exc:  # pragma: no cover
 log = logging.getLogger("hermes-push")
 
 # Keep in step with plugin/vory-push/plugin.yaml; the app compares the two.
-VERSION = "1.0.27"
+VERSION = "1.0.28"
 USER_AGENT = f"Vory-Push/{VERSION} (Hermes companion)"
 try:
     # Fingerprint of the code actually running: the app compares it with the copy it ships, so a
@@ -496,10 +496,16 @@ class Relay:
         for d in load_devices(self.gw.url):
             if d.get("platform") != "ios":
                 continue
-            tok = d.get("live_activity_token")
-            sid = d.get("live_activity_session_id") or "-"
-            age = int(time.time() - float(d.get("live_activity_started_at") or 0)) if tok else 0
-            seen.append(f"{(d.get('device_name') or d.get('device_id') or '?')[:14]}: token={'yes' if tok else 'no'} session={sid[:12]} age={age}s")
+            entries = d.get("live_activities")
+            if not isinstance(entries, list):
+                entries = [{"session_id": d.get("live_activity_session_id"), "started_at": d.get("live_activity_started_at")}] if d.get("live_activity_token") else []
+            name = (d.get('device_name') or d.get('device_id') or '?')[:14]
+            if not entries:
+                seen.append(f"{name}: no activity")
+            for e in entries:
+                sid = (e.get("session_id") if isinstance(e, dict) else None) or "-"
+                age = int(time.time() - float((e.get("started_at") if isinstance(e, dict) else 0) or 0))
+                seen.append(f"{name}: session={sid[:12]} age={age}s")
         self._note_la(f"skipped ({what}) for session {stored[:12]}", False, "; ".join(seen) or "no iOS device files")
 
     def _maybe_send_test(self) -> None:
@@ -573,14 +579,25 @@ class Relay:
         ids = {i for i in (stored, runtime_id) if i}
         out = []
         for d in load_devices(self.gw.url):
-            if not d.get("live_activity_token") or d.get("platform") != "ios":
+            if d.get("platform") != "ios":
                 continue
-            # Only the activity for this session; a device carries the token of its latest one.
-            if d.get("live_activity_session_id") and d["live_activity_session_id"] not in ids:
-                continue
-            if time.time() - float(d.get("live_activity_started_at") or 0) > 3 * 3600:
-                continue
-            out.append(d)
+            # App 1.1 (5)+ files every open activity under `live_activities` (one per running
+            # chat); older apps file only the latest one in the single fields. Each match becomes
+            # its own target with that activity's token, so two chats running at once each get
+            # their own updates and end.
+            entries = d.get("live_activities")
+            if not isinstance(entries, list):
+                entries = [{"session_id": d.get("live_activity_session_id"), "token": d.get("live_activity_token"),
+                            "started_at": d.get("live_activity_started_at")}] if d.get("live_activity_token") else []
+            for e in entries:
+                if not isinstance(e, dict) or not e.get("token"):
+                    continue
+                if e.get("session_id") and e["session_id"] not in ids:
+                    continue
+                if time.time() - float(e.get("started_at") or 0) > 3 * 3600:
+                    continue
+                out.append({**d, "live_activity_token": e["token"], "live_activity_started_at": e.get("started_at"),
+                            "live_activity_session_id": e.get("session_id")})
         return out
 
     def end_live_activities(self, stored: str, phase: str, bot: str = "Hermes", runtime_id: str = "", usage: dict | None = None) -> set:

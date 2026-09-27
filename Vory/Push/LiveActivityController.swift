@@ -156,7 +156,9 @@ final class LiveActivityController: TurnActivityReporting {
         let state = HermesTurnAttributes.ContentState(phase: phase, detail: text, outputTokens: chat.usage?.output ?? 0,
                                                        contextPercent: chat.usage?.contextPercent, needsAttention: attention, startedAt: startedAt,
                                                        contextUsed: chat.usage?.contextUsed, contextMax: chat.usage?.contextMax)
-        if attention, !alertedAttention, UIApplication.shared.applicationState != .active {
+        // Away from the app the alert (the Island expanding, the buzz) comes from the
+        // companion's push when one is installed; only without it does the app raise its own.
+        if attention, !alertedAttention, UIApplication.shared.applicationState != .active, !LocalNotifier.companionDelivers {
             alertedAttention = true
             let botName = handle.activity.attributes.botName ?? chat.profileName
             handle.alert(state, title: botName, body: "Approval needed — tap to answer. It waits for you.")

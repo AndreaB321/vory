@@ -111,6 +111,7 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .tabRoot(.settings)
+            .background(InteractivePopEnabler())
             .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search settings")
         }
     }
@@ -506,6 +507,7 @@ struct AboutView: View {
     var body: some View {
         List {
             SettingsHeaderSection(title: "About", symbol: "info.circle", color: .blue, description: "Version, the Vory cloud, and what is installed.")
+                .listSectionSpacing(8)
             Section {
                 VStack(spacing: 6) {
                     ZStack(alignment: .top) {
@@ -515,14 +517,18 @@ struct AboutView: View {
                         }
                         BotFaceView(spec: Self.voryBot, size: 132, active: true, gaze: CGPoint(x: 0, y: raining ? 1 : 0))
                             .offset(y: lifted ? -30 : 0)
+                            // The face has its own tap and holes in its hit shape; the taps
+                            // must all land on the box around it, or five never add up.
+                            .allowsHitTesting(false)
                         if relieved {
                             SpeechBubble(text: "Ahhhh…that's better.")
-                                .offset(y: -46)
+                                .offset(y: -44)
                                 .transition(.scale(scale: 0.2, anchor: .bottom).combined(with: .opacity))
                         }
                     }
                     .frame(height: 140, alignment: .top)
-                    .padding(.top, 50)
+                    // Room for the lift; the speech bubble may overlap the card above for a moment.
+                    .padding(.top, 16)
                     .contentShape(Rectangle())
                     .onTapGesture { tapped() }
                     Text("Vory").font(.title.weight(.bold))
@@ -533,6 +539,9 @@ struct AboutView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             }
+            // Close under the header card: the page then fits the cloud, the version and the
+            // Installed list on one screen.
+            .listSectionSpacing(8)
             Section {
                 LabeledContent("Companion plugin", value: model.companionInstalledVersion.map { "v\($0)" } ?? "not installed")
                 LabeledContent("Ships with this build", value: "v\(PushSetupModel.bundledPluginVersion)")

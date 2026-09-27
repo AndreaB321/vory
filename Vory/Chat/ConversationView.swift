@@ -280,41 +280,70 @@ struct ChatHeader: View {
 
 /// Re-enables the navigation controller's interactive pop gesture while its bar is hidden, and
 /// lets it start anywhere on the screen (not only at the left edge) for one-handed use: a pan
-/// recognizer on the navigation view drives the same targets as the edge gesture.
+/// recognizer on the navigation view drives the same targets as the edge gesture. Put one under
+/// each tab's root page (and under a page that hides the bar); a stack gets exactly one pan,
+/// owned by a delegate that lives as long as the stack does. (Earlier each pushed chat added its
+/// own pan and left it behind with a dead delegate, so after a few chats a stack carried several
+/// pans that began on ANY drag: threads that slid both ways, and no time reveal.)
 struct InteractivePopEnabler: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> Controller { Controller() }
     func updateUIViewController(_ c: Controller, context: Context) { c.enable() }
 
-    final class Controller: UIViewController, UIGestureRecognizerDelegate {
-        private var fullScreenPan: UIPanGestureRecognizer?
-
+    final class Controller: UIViewController {
         override func didMove(toParent parent: UIViewController?) { super.didMove(toParent: parent); enable() }
         override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); enable() }
-
         func enable() {
-            guard let nav = navigationController ?? parent?.navigationController, let edge = nav.interactivePopGestureRecognizer else { return }
-            edge.isEnabled = true
-            edge.delegate = self
-            guard fullScreenPan == nil, let targets = edge.value(forKey: "targets") as? NSArray, targets.count > 0 else { return }
-            let pan = UIPanGestureRecognizer()
-            pan.setValue(targets, forKey: "targets")
-            pan.delegate = self
-            pan.maximumNumberOfTouches = 1
-            nav.view.addGestureRecognizer(pan)
-            fullScreenPan = pan
+            guard let nav = navigationController ?? parent?.navigationController else { return }
+            FullScreenPop.install(on: nav)
         }
-
-        func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
-            guard let nav = navigationController ?? parent?.navigationController, nav.viewControllers.count > 1 else { return false }
-            guard let pan = g as? UIPanGestureRecognizer, g === fullScreenPan else { return true }
-            // Only a clear rightward, mostly horizontal drag; vertical scrolling and the leftward
-            // time-reveal drag in the thread are left alone.
-            let v = pan.velocity(in: pan.view)
-            return v.x > 250 && abs(v.x) > abs(v.y) * 1.8
-        }
-
-        func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { false }
     }
+}
+
+/// The one full-screen back pan of a navigation stack and the delegate for both it and the
+/// system's edge gesture; kept alive on the navigation controller itself.
+final class FullScreenPop: NSObject, UIGestureRecognizerDelegate {
+    private static var key = 0
+    private weak var nav: UINavigationController?
+    private weak var pan: UIPanGestureRecognizer?
+
+    static func install(on nav: UINavigationController) {
+        guard let edge = nav.interactivePopGestureRecognizer else { return }
+        edge.isEnabled = true
+        if let existing = objc_getAssociatedObject(nav, &key) as? FullScreenPop {
+            edge.delegate = existing
+            if existing.pan == nil || existing.pan?.view == nil { existing.addPan(edge: edge) }
+            return
+        }
+        let d = FullScreenPop()
+        d.nav = nav
+        objc_setAssociatedObject(nav, &key, d, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        edge.delegate = d
+        d.addPan(edge: edge)
+    }
+
+    private func addPan(edge: UIGestureRecognizer) {
+        guard let nav, let targets = edge.value(forKey: "targets") as? NSArray, targets.count > 0 else { return }
+        // Never two on one view (a stack re-created around the same controller, say).
+        nav.view.gestureRecognizers?.filter { $0.name == "vory.fullScreenPop" }.forEach { nav.view.removeGestureRecognizer($0) }
+        let pan = UIPanGestureRecognizer()
+        pan.name = "vory.fullScreenPop"
+        pan.setValue(targets, forKey: "targets")
+        pan.delegate = self
+        pan.maximumNumberOfTouches = 1
+        nav.view.addGestureRecognizer(pan)
+        self.pan = pan
+    }
+
+    func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
+        guard let nav, nav.viewControllers.count > 1 else { return false }
+        guard let pan = g as? UIPanGestureRecognizer, g === self.pan else { return true }
+        // Only a clear rightward, mostly horizontal drag; vertical scrolling and the leftward
+        // time-reveal drag in the thread are left alone.
+        let v = pan.velocity(in: pan.view)
+        return v.x > 250 && abs(v.x) > abs(v.y) * 1.8
+    }
+
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { false }
 }
 
 /// Unsent composer text, per session, so leaving a chat and coming back does not lose it.

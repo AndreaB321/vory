@@ -7,8 +7,11 @@ at a time, ship a TestFlight build, wait for their verdict.
 
 ## Where things stand
 
-- **Latest: 1.1 (4)** (2026-09-27, build-3 review fixes: studio taps, header pill, top inset, To:
-  chips, list keeps new chats, scroll perf, time reveal), companion **1.0.27**. Uploaded ~14:00 and
+- **Latest: 1.1 (5)** (2026-09-27, the public-launch build: time reveal as a UIKit pan, one back
+  pan per stack, filters/sorts, sticky pins, tab re-tap to top, About cloud, LA tap link +
+  per-session tokens), companion **1.0.28**.
+- 1.1 (4) (2026-09-27, build-3 review fixes: studio taps, header pill, top inset, To: chips, list
+  keeps new chats, scroll perf, time reveal), companion 1.0.27. Uploaded ~14:00 and
   NOT submitted: build 3 keeps its place in Beta App Review; internal testers get 4 at once
   (internal groups take every build automatically). Build 3 was approved later that day; 4 was
   added to the Public beta group and submitted, and went BETA_APPROVED within seconds. **Later 1.1
@@ -217,6 +220,31 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
   `hermes.text` (≤1200) and `hermes.title`; payload trimmed under Apple's 4 KB.
 
 ## Change log
+
+### 2026-09-27 (1.1 build 5, the public-launch build, from the build-4 review)
+- **Time reveal is a UIKit pan** (`TimeRevealPan` in TranscriptView.swift) on the thread's
+  UIScrollView: begins only on a leftward, mostly horizontal drag while the thread is at rest
+  (not decelerating, no offset change in the last 0.3 s), cancels the scroll view's own pan when
+  it begins, slides the column left up to 80 pt, never right. Times sit past the right edge again.
+- **Swipe back from anywhere, on every pane.** `FullScreenPop` (ConversationView.swift) owns ONE
+  pan per UINavigationController (associated object, name `vory.fullScreenPop`) and is the
+  delegate for it and the edge gesture; `InteractivePopEnabler` under each tab root (Chats, Bots,
+  Files, Settings) and the chat installs it. Root cause of "some threads slide both ways and show
+  no time": every pushed chat used to add its own pan and leave it behind with a dead delegate,
+  so a stack accumulated pans that began on ANY drag.
+- **Chats filters/sorts**: one comparator; pinned first in every order, then the key, ties by
+  recency. Pinned rows the gateway's page leaves out are kept from the last load (`droppedIDs`
+  excludes ones deleted here). A tap on the selected Chats tab scrolls the list to the top
+  (`AppModel.tabReselected`, bumped in `VoryTabBar.select`).
+- **About**: the cloud is `allowsHitTesting(false)` inside its tap box (same hole as the studio
+  tiles), top padding 34 + `listSectionSpacing(8)`; rain and the caption verified on the sim.
+- **Live Activity**: every surface carries `widgetURL` `vory://chat/<id>?profile=<bot>` (AppModel.open
+  reads the profile); `PushRegistrar.liveActivities` files every open activity under
+  `live_activities` in the device file (the single fields keep the latest for companions < 1.0.28);
+  companion **1.0.28** `live_activity_devices` yields one target per matching entry, so two running
+  chats each get their own updates and end; the app no longer raises its own approval alert when
+  the companion delivers (one buzz).
+- Not done (a later build): push-to-start Live Activities for turns started elsewhere.
 
 ### 2026-09-27 (1.1 build 4, from the build-3 review)
 - **Time reveal.** The bubbles no longer move: `TimeRevealColumn` hands `reveal` (0…1) to its

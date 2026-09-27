@@ -13,6 +13,10 @@ struct ChatRoute: Hashable {
 struct ChatListView: View {
     @Environment(AppModel.self) private var model
     @State private var sessions: [StoredSession] = []
+    /// Bumped by a tap on the selected Chats tab: the list scrolls to its first row.
+    @State private var scrollToTop = 0
+    /// Chats the user deleted here, so a pinned row is not kept alive from memory afterwards.
+    @State private var droppedIDs: Set<String> = []
     @State private var searchText = ""
     @State private var searchResults: [StoredSession] = []
     @State private var loading = false
@@ -62,10 +66,13 @@ struct ChatListView: View {
             }
             .navigationTitle("Chats")
             .navigationBarTitleDisplayMode(.inline)
+            .background(InteractivePopEnabler())
             // Driven by the stack's own path rather than by the pushed screen: the bar starts
             // coming back the instant a pop begins instead of after the transition settles.
             .onChange(of: path.isEmpty, initial: true) { _, empty in model.chatsPathOpen = !empty; model.tabAtRoot[.chats] = empty }
             .onChange(of: model.popToRoot[.chats]) { _, _ in path = NavigationPath() }
+            // A tap on the Chats tab while it is selected also brings the list back to the top.
+            .onChange(of: model.tabReselected[.chats]) { _, _ in scrollToTop += 1 }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { profileMenu }
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -177,11 +184,23 @@ struct ChatListView: View {
         if needsYouOnly { out = out.filter { runtime.needsAttention.contains($0.id) } }
         if liveOnly { out = out.filter { runtime.chatForStored($0.id)?.isRunning ?? false } }
         if !showArchived { out = out.filter { $0.archived != true } }
-        switch sortKey {
-        case "title": out.sort { $0.displayTitle.localizedCaseInsensitiveCompare($1.displayTitle) == .orderedAscending }
-        case "bot": out.sort { ($0.profile ?? "", $1.lastActive ?? 0) < ($1.profile ?? "", $0.lastActive ?? 0) }
-        case "model": out.sort { ($0.model ?? "", $1.lastActive ?? 0) < ($1.model ?? "", $0.lastActive ?? 0) }
-        default: break   // recent: pinned first, then newest, as loaded
+        // Every order keeps pinned chats first; within each half the chosen key decides, and
+        // equal keys fall back to most recent (the sort is not stable on its own).
+        func recent(_ a: StoredSession, _ b: StoredSession) -> Bool { (a.lastActive ?? a.startedAt ?? 0) > (b.lastActive ?? b.startedAt ?? 0) }
+        func text(_ a: String, _ b: String, _ x: StoredSession, _ y: StoredSession) -> Bool {
+            let c = a.localizedCaseInsensitiveCompare(b)
+            return c == .orderedSame ? recent(x, y) : c == .orderedAscending
+        }
+        func shortModel(_ s: StoredSession) -> String { (s.model ?? "").split(separator: "/").last.map(String.init) ?? (s.model ?? "") }
+        out.sort { a, b in
+            let pa = a.pinned ?? false, pb = b.pinned ?? false
+            if pa != pb { return pa }
+            switch sortKey {
+            case "title": return text(a.displayTitle, b.displayTitle, a, b)
+            case "bot": return text(a.profile ?? "", b.profile ?? "", a, b)
+            case "model": return text(shortModel(a), shortModel(b), a, b)
+            default: return recent(a, b)
+            }
         }
         return out
     }
@@ -197,6 +216,7 @@ struct ChatListView: View {
 
     @ViewBuilder private func list(_ runtime: GatewayRuntime) -> some View {
         let rows = filtered(searchText.isEmpty ? sessions : searchResults, runtime: runtime)
+        ScrollViewReader { proxy in
         List {
             if let errorText { Text(errorText).foregroundStyle(.red).font(.footnote) }
             // With the "Group chats" filter on, rooms sit among the chats by recency, as chats.
@@ -232,6 +252,11 @@ struct ChatListView: View {
             }
         }
         .animation(.snappy, value: runtime.restartRequired == nil)
+        .onChange(of: scrollToTop) { _, _ in
+            let first = Self.merge(rows, groupsOnly ? rooms : []).first?.id ?? rows.first?.id
+            if let first { withAnimation(.snappy) { proxy.scrollTo(first, anchor: .top) } }
+        }
+        }
     }
 
     private func load() async {
@@ -261,6 +286,12 @@ struct ChatListView: View {
             // started moments ago (or one still running) could vanish from the list on the way
             // back from it. They stay listed from the live session until the gateway has them.
             let listed = Set(all.map(\.id))
+            // A pin is an explicit keep: a pinned row the gateway's page happened to leave out
+            // (a lineage that moved to a new tip, a listing window) stays from the last load
+            // until the gateway lists it again unpinned, or the user deletes it here.
+            for old in sessions where old.pinned == true && old.archived != true && !listed.contains(old.id) && !droppedIDs.contains(old.id) {
+                all.append(old)
+            }
             let now = Date().timeIntervalSince1970
             for chat in runtime.chats where !listed.contains(chat.storedID) && !chat.storedID.isEmpty
                 && (chat.isRunning || !chat.items.isEmpty)
@@ -418,6 +449,7 @@ struct ChatListView: View {
     }
 
     private func delete(_ s: StoredSession) async {
+        droppedIDs.insert(s.id)
         guard let runtime else { return }
         if let chat = runtime.chatForStored(s.id) { runtime.closeChat(chat) }
         let _: JSONValue? = try? await runtime.api.send("DELETE", "/api/sessions/\(s.id)", profile: runtime.selectedProfile, body: EmptyBody())

@@ -55,7 +55,7 @@ struct TranscriptView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                TimeRevealColumn { reveal in
+                TimeRevealColumn {
                 VStack(alignment: .leading, spacing: 10) {
                     if chat.items.isEmpty, chat.resumeError == nil {
                         VStack(spacing: 8) {
@@ -77,18 +77,13 @@ struct TranscriptView: View {
                                       onSelectText: { selectText = $0 })
                             .id(row.item.id)
                             .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
-                            // A pull to the left slides the time in from the right edge over the
-                            // row; the bubbles stay where they are. Nothing is built until a pull.
+                            // The time waits just past the right edge; the column slides left to show it.
                             .overlay(alignment: .trailing) {
-                                if reveal > 0 {
-                                    Text(row.item.timestamp, style: .time).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
-                                        .padding(.horizontal, 7).padding(.vertical, 3)
-                                        .background(.thinMaterial, in: .capsule)
-                                        .fixedSize()
-                                        .offset(x: (1 - reveal) * 70)
-                                        .opacity(reveal)
-                                        .accessibilityHidden(true)
-                                }
+                                Text(row.item.timestamp, style: .time).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                                    // Its leading edge sits 20 pt past the row (beyond the screen's
+                                    // 16 pt margin), so nothing of it shows until the column slides.
+                                    .fixedSize().alignmentGuide(.trailing) { d in d[.leading] - 20 }
+                                    .accessibilityHidden(true)
                             }
                     }
                     // Working with no bubble to fill (between parts, during a tool): the typing
@@ -177,22 +172,95 @@ struct TranscriptView: View {
     }
 }
 
-/// Drag the thread left to peek at each message's time, as in Messages. One transform on the
-/// whole column and hands the rows `reveal` (0…1); the rows do not move, each slides its time in
-/// from the right. Only a pull to the LEFT counts; a pull to the right does nothing.
+/// Drag the thread left to peek at each message's time, as in Messages: one transform on the
+/// whole column (the bubbles slide left about 80 pt) with the times laid out just past the right
+/// edge, so a drag re-renders nothing but this wrapper. The drag is a UIKit pan on the enclosing
+/// scroll view, so it behaves the same in every thread: it begins only on a leftward, mostly
+/// horizontal drag while the thread is at rest (not scrolling or decelerating), the column never
+/// moves right, and once it runs the scroll view's own pan lets go of the touch.
 struct TimeRevealColumn<Content: View>: View {
-    @ViewBuilder var content: (CGFloat) -> Content
+    @ViewBuilder var content: Content
     @State private var reveal: CGFloat = 0
     var body: some View {
-        content(reveal)
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 24)
-                    .onChanged { v in
-                        guard abs(v.translation.width) > abs(v.translation.height), v.translation.width < 0 else { return }
-                        reveal = min(1, -v.translation.width / 100)
-                    }
-                    .onEnded { _ in withAnimation(.snappy) { reveal = 0 } }
-            )
+        content
+            .offset(x: -reveal * 80)
+            .background(TimeRevealPan(reveal: $reveal))
+    }
+}
+
+private struct TimeRevealPan: UIViewRepresentable {
+    @Binding var reveal: CGFloat
+
+    func makeUIView(context: Context) -> Probe {
+        let v = Probe()
+        v.isUserInteractionEnabled = false
+        v.coordinator = context.coordinator
+        return v
+    }
+    func updateUIView(_ v: Probe, context: Context) { context.coordinator.reveal = $reveal }
+    func makeCoordinator() -> Coordinator { Coordinator(reveal: $reveal) }
+
+    final class Probe: UIView {
+        weak var coordinator: Coordinator?
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if window != nil { coordinator?.attach(from: self) }
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var reveal: Binding<CGFloat>
+        private weak var scrollView: UIScrollView?
+        private weak var pan: UIPanGestureRecognizer?
+        private var offsetObservation: NSKeyValueObservation?
+        private var lastScrollAt = Date.distantPast
+        private var lastOffset: CGFloat = 0
+        init(reveal: Binding<CGFloat>) { self.reveal = reveal }
+
+        func attach(from v: UIView) {
+            var s = v.superview
+            while let x = s, !(x is UIScrollView) { s = x.superview }
+            guard let sv = s as? UIScrollView, sv !== scrollView else { return }
+            if let pan, let old = scrollView { old.removeGestureRecognizer(pan) }
+            scrollView = sv
+            let p = UIPanGestureRecognizer(target: self, action: #selector(handle(_:)))
+            p.maximumNumberOfTouches = 1
+            p.delegate = self
+            p.name = "vory.timeReveal"
+            sv.addGestureRecognizer(p)
+            pan = p
+            lastOffset = sv.contentOffset.y
+            offsetObservation = sv.observe(\.contentOffset, options: [.new]) { [weak self] sv, _ in
+                guard let self else { return }
+                if abs(sv.contentOffset.y - self.lastOffset) > 0.5 { self.lastOffset = sv.contentOffset.y; self.lastScrollAt = Date() }
+            }
+        }
+
+        func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
+            guard g === pan, let sv = scrollView, let p = g as? UIPanGestureRecognizer else { return true }
+            // Only while the thread is still: not decelerating, and not moved in the last moment.
+            guard !sv.isDecelerating, Date().timeIntervalSince(lastScrollAt) > 0.3 else { return false }
+            let t = p.translation(in: sv), v = p.velocity(in: sv)
+            return t.x < 0 && v.x < 0 && abs(t.x) > abs(t.y) * 1.5
+        }
+        func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            other === scrollView?.panGestureRecognizer
+        }
+
+        @objc private func handle(_ p: UIPanGestureRecognizer) {
+            guard let sv = scrollView else { return }
+            switch p.state {
+            case .began:
+                // The scroll view's pan lets go of this touch, so the column moves alone.
+                sv.panGestureRecognizer.isEnabled = false
+                sv.panGestureRecognizer.isEnabled = true
+                reveal.wrappedValue = min(1, max(0, -p.translation(in: sv).x / 100))
+            case .changed:
+                reveal.wrappedValue = min(1, max(0, -p.translation(in: sv).x / 100))
+            default:
+                withAnimation(.snappy) { reveal.wrappedValue = 0 }
+            }
+        }
     }
 }
 

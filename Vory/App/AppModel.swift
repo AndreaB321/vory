@@ -91,6 +91,8 @@ final class AppModel {
     /// tab while deeper in it bumps `popToRoot`, which re-creates that tab at its root.
     var tabAtRoot: [AppTab: Bool] = [:]
     var popToRoot: [AppTab: Int] = [:]
+    /// Bumped on every tap of the already-selected tab (root or not): lists scroll to the top.
+    var tabReselected: [AppTab: Int] = [:]
     var tabBarHidden: Bool { (selectedTab == .chats && chatsPathOpen) || (tabBarHiders[selectedTab] ?? 0) > 0 }
 
     init() {
@@ -126,12 +128,14 @@ final class AppModel {
         WatchSync.shared.push(store: store)
     }
 
-    /// `vory://chat/<stored id>` from a widget or complication; `vory://chats` just lands on the list.
+    /// `vory://chat/<stored id>[?profile=<bot>]` from a widget, the Live Activity or a
+    /// complication; `vory://chats` just lands on the list.
     func open(_ url: URL) {
         guard url.scheme == "vory" else { return }
         selectedTab = .chats
         if url.host == "chat", let id = url.pathComponents.dropFirst().first {
-            pendingRoute = PendingRoute(connectionID: runtime?.connection.id, storedSessionID: id, profile: runtime?.selectedProfile)
+            let profile = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "profile" }?.value
+            pendingRoute = PendingRoute(connectionID: runtime?.connection.id, storedSessionID: id, profile: (profile?.isEmpty == false ? profile : nil) ?? runtime?.selectedProfile)
         }
         // From the Live Activity's Approve / Deny: open the chat on its card and apply the choice.
         if url.host == "approval", let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,

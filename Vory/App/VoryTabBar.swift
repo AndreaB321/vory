@@ -172,6 +172,7 @@ struct VoryTabBar: View {
     private func select(_ tab: AppModel.AppTab) {
         if tab == model.selectedTab {
             if model.tabAtRoot[tab] == false { model.popToRoot[tab, default: 0] += 1 }
+            model.tabReselected[tab, default: 0] += 1
             return
         }
         withAnimation(.snappy(duration: 0.28)) { model.selectedTab = tab }

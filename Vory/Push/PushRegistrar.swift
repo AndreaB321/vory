@@ -12,6 +12,10 @@ final class PushRegistrar: PushRegistrationSyncing {
     static let installIDKey = "pushInstallID"
 
     var deviceToken: String?
+    /// One Live Activity per running chat: every open activity's token by stored session id, so
+    /// two chats running at once (two bots, a group chat) each get their own pushes and end.
+    var liveActivities: [String: (token: String, startedAt: Double)] = [:]
+    /// The latest activity, in the single fields older companions (< 1.0.28) read.
     var liveActivityToken: String?
     var liveActivityStartedAt: Double?
     var liveActivitySessionID: String?
@@ -33,17 +37,20 @@ final class PushRegistrar: PushRegistrationSyncing {
             let started = n.userInfo?["startedAt"] as? Double
             let sid = n.userInfo?["storedID"] as? String
             Task { @MainActor in
+                guard let self, let sid, !sid.isEmpty else { return }
                 let active = (token?.isEmpty == false)
-                // Clearing is per chat: a finished chat's activity going away must not drop the
-                // token of the one still running.
-                if !active, let sid, let current = self?.liveActivitySessionID, current != sid { return }
-                LiveActivityController.note(active ? "publishing token to the gateway" : "token cleared on the gateway")
-                self?.liveActivityToken = active ? token : nil
-                self?.liveActivityStartedAt = active ? started : nil
-                self?.liveActivitySessionID = active ? sid : nil
-                self?.liveActivityTokenAt = active ? Date() : nil
+                if active, let token { self.liveActivities[sid] = (token, started ?? Date().timeIntervalSince1970) }
+                else { self.liveActivities[sid] = nil }
+                // The single fields carry the most recently started activity that is still open.
+                let latest = self.liveActivities.max { $0.value.startedAt < $1.value.startedAt }
+                self.liveActivityToken = latest?.value.token
+                self.liveActivityStartedAt = latest?.value.startedAt
+                self.liveActivitySessionID = latest?.key
+                self.liveActivityTokenAt = latest == nil ? nil : (self.liveActivityTokenAt ?? Date())
+                if active { self.liveActivityTokenAt = Date() }
+                LiveActivityController.note(active ? "publishing token to the gateway (\(self.liveActivities.count) open)" : "token cleared on the gateway (\(self.liveActivities.count) open)")
                 NotificationCenter.default.post(name: .hermesPushRegistrationNeedsSync, object: nil)
-                await self?.registerWithRelay()
+                await self.registerWithRelay()
             }
         }
     }
@@ -117,6 +124,7 @@ final class PushRegistrar: PushRegistrationSyncing {
             "live_activity_token": liveActivityToken.map { .string($0) } ?? .null,
             "live_activity_started_at": liveActivityStartedAt.map { .number($0) } ?? .null,
             "live_activity_session_id": liveActivitySessionID.map { .string($0) } ?? .null,
+            "live_activities": .array(liveActivities.map { .object(["session_id": .string($0.key), "token": .string($0.value.token), "started_at": .number($0.value.startedAt)]) }),
             "gateway": .string(runtime.connection.gateway.description),
             "connection_name": .string(runtime.connection.name),
             "profiles": .array(runtime.profiles.map { .string($0.name) }),
