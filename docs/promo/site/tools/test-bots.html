@@ -1,0 +1,22 @@
+<!doctype html><meta charset="utf-8"><title>bot test</title>
+<style>body{font:13px -apple-system,system-ui;background:#F2F2F7;margin:20px}.g{display:flex;flex-wrap:wrap;gap:14px}.c{display:flex;flex-direction:column;align-items:center;width:100px}.c span{color:#666;margin-top:4px}
+@media (prefers-color-scheme:dark){body{background:#000;color:#ddd}}</style>
+<h3>shapes × classic (glass) and eyes × circle (flat), idle</h3><div class="g" id="a"></div>
+<h3>states (cloud glass + circle black glass + triangle amber)</h3><div class="g" id="b"></div>
+<h3>working, seeded</h3><div class="g" id="c"></div>
+<script type="module">
+import {Bot, SHAPES, EYES, VORY} from "../public/assets/vory-bot.js";
+const add=(root,label,spec,opts)=>{const d=document.createElement("div");d.className="c";const cv=document.createElement("canvas");d.append(cv);const s=document.createElement("span");s.textContent=label;d.append(s);root.append(d);return new Bot(cv,spec,{size:78,...opts});};
+const a=document.getElementById("a");
+for(const sh of SHAPES) add(a,sh,{shape:sh,eyes:"classic",hex:"#3B7BFF",finish:"glass"},{profile:sh});
+for(const e of EYES) add(a,e,{shape:"circle",eyes:e,hex:"#E07A5F",finish:"flat"},{profile:e});
+add(a,"white pill glass",{shape:"pill",eyes:"wide",hex:"#F4F4F5",finish:"glass"},{profile:"w"});
+add(a,"white cloud flat",{shape:"cloud",eyes:"sleepy",hex:"#FFFFFF",finish:"flat"},{profile:"w2"});
+const b=document.getElementById("b");
+const states=["idle","guide","thinking","usingTool","awaitingApproval","error","reconnecting","streaming","working"];
+for(const st of states){add(b,st,VORY,{state:st,profile:st});add(b,st,{shape:"circle",eyes:"classic",hex:"#111111",finish:"glass"},{state:st,profile:st+"c"});add(b,st,{shape:"triangle",eyes:"bold",hex:"#F5A524",finish:"flat"},{state:st,profile:st+"t"});}
+const c=document.getElementById("c");
+window.bots=[];
+for(let i=0;i<8;i++) window.bots.push(add(c,"w"+i,{shape:SHAPES[i],eyes:EYES[i],hex:["#7C5CFF","#0A84FF","#30D158","#FF9F0A","#FF375F","#64D2FF","#BF5AF2","#111111"][i],finish:i%2?"glass":"flat"},{state:"working",profile:"bot"+i}));
+window.finishAll=()=>window.bots.forEach(b=>b.finishTurn());
+</script>

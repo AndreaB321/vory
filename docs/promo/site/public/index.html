@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Vory — Your agents, in your pocket</title>
+<meta name="description" content="Vory is the iPhone remote for your Hermes agent gateway. Your self-hosted AI agents, as characters you can talk to. Approve from your pocket. Public beta on TestFlight.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<link rel="canonical" href="https://vory.dev/">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/img/favicon-32.png">
+<link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Vory">
+<meta property="og:title" content="Vory — Your agents, in your pocket">
+<meta property="og:description" content="The iPhone remote for your Hermes agent gateway. Self-hosted agents as characters you can talk to. Approve from your pocket. Public beta.">
+<meta property="og:url" content="https://vory.dev/">
+<meta property="og:image" content="https://vory.dev/assets/img/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Vory — Your agents, in your pocket">
+<meta name="twitter:description" content="The iPhone remote for your Hermes agent gateway. Public beta on TestFlight.">
+<meta name="twitter:image" content="https://vory.dev/assets/img/og.png">
+<link rel="preload" href="/assets/vory-bot.js" as="script" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Vory","operatingSystem":"iOS 27","applicationCategory":"DeveloperApplication","description":"The iPhone remote for your Hermes agent gateway.","url":"https://vory.dev/","offers":{"@type":"Offer","price":"0","priceCurrency":"USD","description":"Public beta on TestFlight"}}
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" id="top">
+  <a class="brand" href="#top" aria-label="Vory, home">
+    <img src="/assets/img/favicon-32.png" srcset="/assets/img/apple-touch-icon.png 2x" width="28" height="28" alt="">
+    <span>Vory</span>
+  </a>
+  <nav class="nav-links" aria-label="Sections">
+    <a href="#how">How it works</a>
+    <a href="#bots">The bots</a>
+    <a href="#approve">Approvals</a>
+    <a href="#faq">FAQ</a>
+  </nav>
+  <a class="btn btn-glass btn-small" href="#beta">Join the beta</a>
+</header>
+
+<main id="main">
+
+<!-- ============================================================ Hero -->
+<section class="hero" aria-labelledby="hero-title">
+  <div class="hero-stage">
+    <div class="glow" aria-hidden="true"></div>
+    <figure class="vory-figure">
+      <div class="bot-seat bot-seat--hero">
+        <canvas id="hero-bot" class="bot" aria-hidden="true"></canvas>
+        <div class="shelf shelf--hero"><span class="shelf-name">Vory</span></div>
+      </div>
+      <figcaption class="bubble bubble--tail-top" id="hero-bubble" aria-live="polite">
+        <span class="typed" data-lines='["Hi, I&#39;m Vory.","I&#39;m your Hermes gateway, on your phone.","Every bot you run lives here.","Swipe. Ask. Approve. Done."]'>Hi, I'm Vory.</span>
+      </figcaption>
+    </figure>
+  </div>
+  <div class="hero-copy">
+    <p class="eyebrow">Public beta · iPhone · iOS 27</p>
+    <h1 id="hero-title">Your agents,<br>in your pocket.</h1>
+    <p class="lede">Vory is the iPhone remote for your Hermes agent gateway. Your self‑hosted AI agents, as characters you can talk to.</p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="https://testflight.apple.com/join/REPLACE-ME" data-testflight rel="noopener">Join the TestFlight beta</a>
+      <a class="btn btn-glass" href="#how">See how it works</a>
+    </div>
+    <p class="fineprint">Talks to a gateway you run. No account, no middleman cloud.</p>
+  </div>
+</section>
+
+<!-- ============================================================ What it is -->
+<section class="section" id="what" aria-labelledby="what-title">
+  <div class="section-head">
+    <p class="eyebrow">What it is</p>
+    <h2 id="what-title">A remote, not a cloud.</h2>
+    <p class="lede">Hermes is a self‑hosted AI agent gateway. It runs profiles: independent agents, each with its own model, tools, memory and personality, on a machine you own. Vory connects to that gateway and turns every profile into a <strong>bot</strong>: a small living character with a body, eyes and a colour, drawn in Liquid Glass.</p>
+  </div>
+  <div class="cards three">
+    <article class="card glass reveal">
+      <canvas class="bot bot-card" data-bot='{"shape":"circle","eyes":"classic","hex":"#111111","finish":"glass"}' data-size="64" data-profile="yours-machine" aria-hidden="true"></canvas>
+      <h3>Your machine</h3>
+      <p>Your agents run where you put them. Vory talks to your gateway directly, over your LAN, Tailscale or a Cloudflare Tunnel. No port‑forwarding, no middleman.</p>
+    </article>
+    <article class="card glass reveal">
+      <canvas class="bot bot-card" data-bot='{"shape":"triangle","eyes":"bold","hex":"#F5A524","finish":"flat"}' data-size="64" data-state="awaitingApproval" data-profile="yours-call" aria-hidden="true"></canvas>
+      <h3>Your call</h3>
+      <p>When a bot wants to run a shell command or change a file, it waits for your yes. From the chat, from a notification, from the Lock Screen.</p>
+    </article>
+    <article class="card glass reveal">
+      <canvas class="bot bot-card" data-bot='{"shape":"blob","eyes":"curious","hex":"#E07A5F","finish":"flat"}' data-size="64" data-profile="yours-cast" aria-hidden="true"></canvas>
+      <h3>Your cast</h3>
+      <p>Every agent is a character, so a house of bots is a cast, not a list of sessions. You always know who is talking and what they are doing.</p>
+    </article>
+  </div>
+</section>
+
+<!-- ============================================================ How it works -->
+<section class="section" id="how" aria-labelledby="how-title">
+  <div class="section-head">
+    <p class="eyebrow">How it works</p>
+    <h2 id="how-title">The loop.</h2>
+    <p class="lede">Connect once. Then every turn goes the same way: you ask, a bot thinks, uses its tools, asks you before anything risky, and replies. Its face tells you what it is doing.</p>
+  </div>
+  <ol class="steps">
+    <li class="step glass reveal">
+      <canvas class="bot" data-bot='{"shape":"cloud","eyes":"classic","hex":"#3B7BFF","finish":"glass"}' data-size="56" data-state="guide" data-profile="step-connect" aria-hidden="true"></canvas>
+      <div><span class="step-n">1</span><h3>Connect</h3>
+      <p>Point Vory at your gateway: local network, Tailscale, Cloudflare Tunnel, or any URL. Sign in with its token. A guided tour introduces the bots.</p></div>
+    </li>
+    <li class="step glass reveal">
+      <canvas class="bot" data-bot='{"shape":"hexagon","eyes":"round","hex":"#BF5AF2","finish":"glass"}' data-size="56" data-profile="step-meet" aria-hidden="true"></canvas>
+      <div><span class="step-n">2</span><h3>Meet your bots</h3>
+      <p>Every profile on the gateway appears as a bot. Design it in the Creator Studio: 8 body shapes, 8 eye styles, any colour, flat or Liquid Glass.</p></div>
+    </li>
+    <li class="step glass reveal">
+      <canvas class="bot" data-bot='{"shape":"drop","eyes":"tiny","hex":"#2BB5A0","finish":"flat"}' data-size="56" data-state="streaming" data-profile="step-talk" aria-hidden="true"></canvas>
+      <div><span class="step-n">3</span><h3>Talk</h3>
+      <p>Messages‑style chats. Bubbles with tails, typing indicators, streamed replies with live token counts, reasoning you can unfold, tool cards, attachments, “/” commands, steering mid‑reply, dictation.</p></div>
+    </li>
+    <li class="step glass reveal">
+      <canvas class="bot" data-bot='{"shape":"square","eyes":"classic","hex":"#0A84FF","finish":"glass"}' data-size="56" data-state="awaitingApproval" data-profile="step-approve" aria-hidden="true"></canvas>
+      <div><span class="step-n">4</span><h3>Approve</h3>
+      <p>When a bot needs a yes, an approval card appears in the chat, in a notification, and in the Live Activity on the Lock Screen and Dynamic Island. Approve and Deny are right there.</p></div>
+    </li>
+    <li class="step glass reveal">
+      <canvas class="bot" data-bot='{"shape":"pill","eyes":"wide","hex":"#F4F4F5","finish":"glass"}' data-size="56" data-state="usingTool" data-profile="step-told" aria-hidden="true"></canvas>
+      <div><span class="step-n">5</span><h3>Get told</h3>
+      <p>The Vory Companion, a small plugin installed on the gateway from the app, sends replies as notifications from the bot, keeps the Live Activity on its phase, and delivers approval requests instantly. Reply from the notification.</p></div>
+    </li>
+    <li class="step glass reveal">
+      <div class="bot-stack" aria-hidden="true">
+        <canvas class="bot" data-bot='{"shape":"circle","eyes":"classic","hex":"#7C5CFF","finish":"glass"}' data-size="44" data-profile="step-group-a"></canvas>
+        <canvas class="bot" data-bot='{"shape":"blob","eyes":"curious","hex":"#FF9F0A","finish":"flat"}' data-size="44" data-profile="step-group-b"></canvas>
+        <canvas class="bot" data-bot='{"shape":"triangle","eyes":"classic","hex":"#30D158","finish":"flat"}' data-size="44" data-profile="step-group-c"></canvas>
+      </div>
+      <div><span class="step-n">6</span><h3>Group chats</h3>
+      <p>Put two to six bots in one room and let them talk to you and to each other. Each reply carries its bot’s face.</p></div>
+    </li>
+    <li class="step glass reveal">
+      <canvas class="bot" data-bot='{"shape":"blob","eyes":"classic","hex":"#64D2FF","finish":"glass"}' data-size="56" data-state="thinking" data-profile="step-run" aria-hidden="true"></canvas>
+      <div><span class="step-n">7</span><h3>Run the gateway</h3>
+      <p>Settings for every profile: model, config, API keys, tools, skills, MCP servers, approvals policy, scheduled tasks, sessions, channels, system health, logs, restarts and updates.</p></div>
+    </li>
+    <li class="step glass reveal">
+      <canvas class="bot" data-bot='{"shape":"cloud","eyes":"sleepy","hex":"#FFFFFF","finish":"flat"}' data-size="56" data-profile="step-sum" aria-hidden="true"></canvas>
+      <div><span class="step-n">8</span><h3>Summaries <span class="tag">beta</span></h3>
+      <p>Apple Intelligence, on‑device, gives every chat a title and a two‑line summary in the list. Nothing leaves the phone.</p></div>
+    </li>
+  </ol>
+</section>
+
+<!-- ============================================================ The bots -->
+<section class="section section--wide" id="bots" aria-labelledby="bots-title">
+  <div class="section-head">
+    <p class="eyebrow">The bots</p>
+    <h2 id="bots-title">Meet the bots.</h2>
+    <p class="lede">A bot is shape + eyes + colour + finish. Everything is drawn from code; nothing is a sprite. Try one. This is the same drawing the app does, running in your browser.</p>
+  </div>
+
+  <div class="studio glass reveal">
+    <div class="studio-stage">
+      <div class="bot-seat bot-seat--studio">
+        <canvas id="studio-bot" class="bot" aria-hidden="true"></canvas>
+        <div class="shelf shelf--studio"><span class="shelf-name" id="studio-name">Ada</span><span class="shelf-status" id="studio-status">idle</span></div>
+      </div>
+      <p class="sr-only" id="studio-desc">A preview of the bot you are designing.</p>
+    </div>
+
+    <div class="studio-controls">
+      <fieldset class="picker">
+        <legend>Body</legend>
+        <div class="picker-row" id="pick-shape" role="group"></div>
+      </fieldset>
+      <fieldset class="picker">
+        <legend>Eyes</legend>
+        <div class="picker-row" id="pick-eyes" role="group"></div>
+      </fieldset>
+      <fieldset class="picker">
+        <legend>Colour</legend>
+        <div class="picker-row swatches" id="pick-colour" role="group">
+          <label class="swatch swatch--custom" title="Custom colour"><input type="color" id="pick-custom" value="#3B7BFF" aria-label="Custom colour"><span aria-hidden="true">+</span></label>
+        </div>
+      </fieldset>
+      <fieldset class="picker">
+        <legend>Finish</legend>
+        <div class="segmented" role="group" id="pick-finish">
+          <button type="button" data-finish="flat" aria-pressed="false">Flat</button>
+          <button type="button" data-finish="glass" aria-pressed="true">Liquid Glass</button>
+        </div>
+      </fieldset>
+    </div>
+
+    <div class="studio-states">
+      <p class="picker-label">What it’s doing</p>
+      <div class="chips" id="pick-state" role="group" aria-label="Bot state">
+        <button type="button" data-state="idle" aria-pressed="true">Idle</button>
+        <button type="button" data-state="working" aria-pressed="false">Working</button>
+        <button type="button" data-state="thinking" aria-pressed="false">Thinking</button>
+        <button type="button" data-state="usingTool" aria-pressed="false">Using a tool</button>
+        <button type="button" data-state="awaitingApproval" aria-pressed="false">Needs you</button>
+        <button type="button" data-state="streaming" aria-pressed="false">Writing</button>
+        <button type="button" data-state="reconnecting" aria-pressed="false">Reconnecting</button>
+        <button type="button" data-state="error" aria-pressed="false">Error</button>
+        <button type="button" data-action="finish">Finished ↻</button>
+      </div>
+      <p class="picker-hint" id="state-hint">Idle bots barely move: a blink every few seconds, a glance to one side, a rare slow blink. Their eyes follow your scroll.</p>
+    </div>
+  </div>
+
+  <div class="rules">
+    <div class="rule glass reveal">
+      <h3>Idle life</h3>
+      <p>Blinks every ~4 s, every third a double blink. A glance every ~7 s. A rare slow blink. Eyes follow where you scroll. Every bot has its own timing, so a page of them never blinks in unison.</p>
+    </div>
+    <div class="rule glass reveal">
+      <h3>Working</h3>
+      <p>Every 3 s, one small routine: the signature <strong>coin‑turn</strong>, a glance‑turn, a head tilt, a nod, a lean, a scan, a squint‑and‑settle, a light travelling the glass rim.</p>
+    </div>
+    <div class="rule glass reveal">
+      <h3>States you can read at a glance</h3>
+      <p>Thinking becomes a heavier pebble. Using a tool grows a small stem. Waiting for your approval becomes a bold <strong>“!”</strong> and holds. An error drops its eyes and the light dies. Reconnecting sweeps its eyes like a metronome. Finished: one full turn.</p>
+    </div>
+    <blockquote class="quote reveal">
+      <p>“If it looks like the bots are dancing, cut it. If it looks like one just had a thought, keep it.”</p>
+      <cite>The one rule of Vory motion. Nothing scales, bounces, hops or pops.</cite>
+    </blockquote>
+  </div>
+</section>
+
+<!-- ============================================================ Approvals -->
+<section class="section" id="approve" aria-labelledby="approve-title">
+  <div class="section-head">
+    <p class="eyebrow">Approve from your pocket</p>
+    <h2 id="approve-title">The agent waits for you.<br>Not the other way round.</h2>
+    <p class="lede">A shell command, a file change, anything that needs a yes: the card lands in the chat, in a notification, and in the Live Activity on your Lock Screen. Once, for the session, always, or deny.</p>
+  </div>
+  <div class="split">
+    <figure class="approval reveal">
+      <img src="/assets/img/approval-card.webp" width="1150" height="650" alt="An approval card in a Vory chat: “Approval needed. Delete 34 rotated log files older than 90 days (4.2 GB) under /var/log”, the command it wants to run, and four buttons: Once, Session, Always, Deny." loading="lazy" decoding="async">
+      <figcaption>The approval card in the chat, exactly as the app shows it.</figcaption>
+    </figure>
+    <figure class="lockscreen reveal" aria-label="The Live Activity on the Lock Screen">
+      <div class="wallpaper">
+        <p class="clock" aria-hidden="true"><span class="clock-date">Saturday 26 September</span><span class="clock-time">9:41</span></p>
+        <div class="la" role="img" aria-label="Live Activity: the bot Ada, needs approval, “Delete 34 rotated log files older than 90 days (4.2 GB) under /var/log”, with Approve and Deny buttons.">
+          <div class="la-mark"><canvas id="la-bot" width="44" height="44" aria-hidden="true"></canvas><span class="la-badge" aria-hidden="true"><svg viewBox="0 0 24 24" width="11" height="11"><path d="M12 3 2 20h20L12 3Zm0 6 1 6h-2l1-6Zm0 7.5a1.2 1.2 0 1 1 0 2.4 1.2 1.2 0 0 1 0-2.4Z" fill="#000" fill-opacity=".85"/></svg></span></div>
+          <div class="la-text">
+            <span class="la-name">Ada</span>
+            <span class="la-head"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M12 3 2 20h20L12 3Zm0 6 1 6h-2l1-6Zm0 7.5a1.2 1.2 0 1 1 0 2.4 1.2 1.2 0 0 1 0-2.4Z" fill="#FFD60A"/></svg>Needs Approval</span>
+            <span class="la-detail">Delete 34 rotated log files older than 90 days (4.2 GB) under /var/log</span>
+          </div>
+          <div class="la-buttons" aria-hidden="true"><span class="la-approve">Approve</span><span class="la-deny">Deny</span></div>
+        </div>
+        <div class="notif" role="img" aria-label="A notification from the bot Ada: “Done — 4.2 GB freed. Want me to set up log rotation?”">
+          <canvas id="notif-bot" width="38" height="38" aria-hidden="true"></canvas>
+          <div class="notif-text"><span class="notif-title">Ada <small>now</small></span><span class="notif-body">Done — 4.2 GB freed. Want me to set up log rotation?</span></div>
+        </div>
+      </div>
+      <figcaption>The Live Activity and the reply notification, rebuilt in HTML from the app’s own layouts. Reply from the notification and the answer comes back the same way.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ============================================================ Chats -->
+<section class="section" id="chat" aria-labelledby="chat-title">
+  <div class="split split--phones">
+    <div class="split-copy">
+      <p class="eyebrow">Talk</p>
+      <h2 id="chat-title">Chats that feel like Messages.</h2>
+      <ul class="ticks">
+        <li>Bubbles with tails, typing indicators: grey while the bot writes, dark with a badge while it runs a tool.</li>
+        <li>Replies stream in with a live token count. Reasoning unfolds when you want it. Tool calls become cards.</li>
+        <li>Attach photos and files as cards. Type “/” for commands. Steer a bot mid‑reply. Dictate.</li>
+        <li>The chat list shows every bot; with Summaries on, each chat gets a title and two lines, made on the phone.</li>
+        <li>Group chats put two to six bots in one room, each reply carrying its bot’s face.</li>
+      </ul>
+    </div>
+    <div class="phones">
+      <figure class="phone reveal">
+        <img src="/assets/img/chat-typing-603.webp" srcset="/assets/img/chat-typing-603.webp 603w, /assets/img/chat-typing-1206.webp 1206w" sizes="(min-width: 900px) 300px, 70vw" width="1206" height="2622" alt="A Vory chat: a green drop bot in the header marked “work · Writing…”, a terminal tool card, a reply with a bash code block, a typing bubble beside the bot, and an approval card at the bottom." loading="lazy" decoding="async">
+      </figure>
+      <figure class="phone phone--back reveal">
+        <img src="/assets/img/group-chat-603.webp" srcset="/assets/img/group-chat-603.webp 603w, /assets/img/group-chat-1206.webp 1206w" sizes="(min-width: 900px) 260px, 60vw" width="1206" height="2622" alt="A Vory group chat with two bots: a blue “Plan the release checklist” bubble, “hermes is typing…”, and a reply beside a small white bot." loading="lazy" decoding="async">
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ Gateway -->
+<section class="section" id="gateway" aria-labelledby="gateway-title">
+  <div class="split split--reverse">
+    <div class="split-copy">
+      <p class="eyebrow">Run the gateway</p>
+      <h2 id="gateway-title">The whole gateway, from the phone.</h2>
+      <p>Everything a profile is made of, editable where you are. The Vory Companion installs from the app and updates in place, like a software update.</p>
+      <ul class="chipset" aria-label="Settings you can manage">
+        <li>Model</li><li>Config</li><li>API keys</li><li>Tools</li><li>Skills</li><li>MCP servers</li><li>Approvals policy</li><li>Scheduled tasks</li><li>Sessions</li><li>Channels</li><li>System health</li><li>Logs</li><li>Restart</li><li>Software Update</li>
+      </ul>
+    </div>
+    <div class="phones phones--single">
+      <figure class="phone reveal">
+        <img src="/assets/img/bots-shapes-603.webp" srcset="/assets/img/bots-shapes-603.webp 603w, /assets/img/bots-shapes-1206.webp 1206w" sizes="(min-width: 900px) 300px, 70vw" width="1206" height="2622" alt="The Bots tab in Vory: eight blue bots on glass pills, one per body shape: circle, blob, square, pill, triangle, hexagon, cloud and drop." loading="lazy" decoding="async">
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ Privacy -->
+<section class="section" id="yours" aria-labelledby="yours-title">
+  <div class="section-head">
+    <p class="eyebrow">Yours, all the way down</p>
+    <h2 id="yours-title">Nothing between you and your machine.</h2>
+  </div>
+  <div class="cards three">
+    <article class="card glass reveal"><h3>Runs where you put it</h3><p>Your agents run on your machine. Vory is the remote. No middleman cloud, no account to create.</p></article>
+    <article class="card glass reveal"><h3>Reaches it your way</h3><p>Local network, Tailscale or a Cloudflare Tunnel. No port‑forwarding. Your credentials stay in the Keychain.</p></article>
+    <article class="card glass reveal"><h3>Keeps what it learns</h3><p>Summaries are made on the phone with Apple Intelligence. This site sets no cookies and runs no analytics.</p></article>
+  </div>
+</section>
+
+<!-- ============================================================ Beta -->
+<section class="section beta" id="beta" aria-labelledby="beta-title">
+  <div class="beta-card glass reveal">
+    <div class="bot-seat bot-seat--beta">
+      <canvas id="beta-bot" class="bot" aria-hidden="true"></canvas>
+      <div class="shelf"><span class="shelf-name">Vory</span></div>
+    </div>
+    <div>
+      <p class="eyebrow">Public beta</p>
+      <h2 id="beta-title">Get the beta.</h2>
+      <p>Vory is on TestFlight while it grows up. You’ll need an iPhone on iOS 27, TestFlight, and a Hermes gateway you run.</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://testflight.apple.com/join/REPLACE-ME" data-testflight rel="noopener">Join the TestFlight beta</a>
+      </div>
+      <p class="fineprint">Not on the App Store yet. iPhone only for now.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ FAQ -->
+<section class="section" id="faq" aria-labelledby="faq-title">
+  <div class="section-head">
+    <p class="eyebrow">FAQ</p>
+    <h2 id="faq-title">Questions.</h2>
+  </div>
+  <div class="faq">
+    <details class="glass"><summary>What is Hermes?</summary><p>A self‑hosted AI agent gateway. It runs profiles, independent agents with their own model, tools, memory and personality, on a machine you own, and exposes them over a dashboard and a WebSocket API. Vory is a client for that API.</p></details>
+    <details class="glass"><summary>Does Vory need an account or a cloud?</summary><p>No. Vory signs in to your gateway with its token and talks to it directly. There is no Vory account.</p></details>
+    <details class="glass"><summary>What is the Vory Companion?</summary><p>A small plugin you install on the gateway from the app. It sends replies as notifications from the bot, keeps the Live Activity updated with the bot’s phase, and delivers approval requests instantly. The app updates it in place.</p></details>
+    <details class="glass"><summary>How do I reach my gateway from outside my home?</summary><p>Over Tailscale, or behind a Cloudflare Tunnel, or any URL that reaches the dashboard. Vory has a connection type for each with the right hints. No port‑forwarding needed.</p></details>
+    <details class="glass"><summary>Is it on the App Store? Android? Mac?</summary><p>Not yet: it is a TestFlight public beta. iPhone on iOS 27 only for now.</p></details>
+    <details class="glass"><summary>Why do the bots move so little?</summary><p>On purpose. A glance, a squint, a lean, a light on the rim. The 360° coin‑turn is the one flourish, saved for when a reply finishes. Reduce Motion turns the bodies still; the eyes may still blink.</p></details>
+  </div>
+</section>
+
+</main>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <canvas id="footer-bot" class="bot" aria-hidden="true"></canvas>
+    <p><strong>Vory</strong> · Public beta · <a href="https://vory.dev/">vory.dev</a></p>
+    <p class="muted">The iPhone remote for your Hermes agent gateway. No cookies, no analytics.</p>
+    <p class="muted">© 2026 Vory</p>
+  </div>
+</footer>
+
+<script type="module" src="/assets/site.js"></script>
+</body>
+</html>
