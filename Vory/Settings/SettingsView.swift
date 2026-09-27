@@ -543,6 +543,13 @@ struct AboutView: View {
                 Text("What Vory puts on your gateway and inside this app. Updates arrive under Software Update.")
             }
             Section {
+                Link(destination: URL(string: "mailto:matt@vory.dev?subject=Vory%20feedback")!) { Label("Send feedback", systemImage: "envelope") }
+                Link(destination: URL(string: "https://vory.dev/privacy/")!) { Label("Privacy policy", systemImage: "hand.raised") }
+                Link(destination: URL(string: "https://vory.dev")!) { Label("vory.dev", systemImage: "safari") }
+            } header: { Text("Vory") } footer: {
+                Text("A public beta. In TestFlight, take a screenshot to send feedback with it attached.")
+            }
+            Section {
                 Link("Hermes Agent documentation", destination: URL(string: "https://hermes-agent.nousresearch.com/docs")!)
             }
         }

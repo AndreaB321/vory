@@ -73,6 +73,7 @@ xcodebuild archive \
     -allowProvisioningUpdates \
     "${AUTH[@]}" \
     CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+    MARKETING_VERSION="$MARKETING_VERSION" \
     VORY_PUSH_RELAY_URL="${VORY_PUSH_RELAY_URL:-}" \
     | grep -E 'error:|warning: .*(signing|provision)|ARCHIVE' || true
 

@@ -269,7 +269,7 @@ def rest(path: str, query: dict) -> tuple[int, object] | None:
     if base == "/api/logs":
         lines = []
         for i in range(9):
-            lines.append(f"2026-09-22 20:39:{i:02d},{i * 97 % 1000:03d} INFO httpx2: HTTP Request: POST http://127.0.0.1:8795/unifi/mcp \"HTTP/1.1 200 OK\"")
+            lines.append(f"2026-09-22 20:39:{i:02d},{i * 97 % 1000:03d} INFO httpx2: HTTP Request: POST http://127.0.0.1:8795/tools/mcp \"HTTP/1.1 200 OK\"")
         lines += ["2026-09-22 20:39:10,004 WARNING tools.registry: check_fn _check_xai_video_requirements returned False;",
                   "    dependent tools will be unavailable this turn",
                   "2026-09-22 20:39:11,120 INFO tui_gateway.server: session resumed (ios)"]
