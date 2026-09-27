@@ -189,15 +189,15 @@ main { display: block; }
 
 /* ---- steps */
 .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; counter-reset: step; }
-.step { display: grid; grid-template-columns: 64px 1fr; gap: 14px; padding: 18px 18px 18px 14px; align-items: start; }
+.step { display: grid; grid-template-columns: 72px 1fr; gap: 12px; padding: 18px 18px 18px 14px; align-items: start; }
 .step > .bot { width: 56px; height: 56px; margin: 0 auto; }
 .step-n { display: inline-block; font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: 0.06em; margin-bottom: 4px; }
 .step p { color: var(--muted); margin-top: 6px; font-size: 16px; }
-.bot-stack { position: relative; width: 64px; height: 56px; }
-.bot-stack .bot { position: absolute; width: 44px; height: 44px; }
-.bot-stack .bot:nth-child(1) { left: 0; top: 6px; z-index: 3; }
-.bot-stack .bot:nth-child(2) { left: 14px; top: 0; z-index: 2; }
-.bot-stack .bot:nth-child(3) { left: 24px; top: 10px; z-index: 1; }
+.bot-stack { position: relative; width: 72px; height: 56px; }
+.bot-stack .bot { position: absolute; width: 36px; height: 36px; }
+.bot-stack .bot:nth-child(1) { left: 0; top: 12px; z-index: 3; }
+.bot-stack .bot:nth-child(2) { left: 18px; top: 2px; z-index: 2; }
+.bot-stack .bot:nth-child(3) { left: 36px; top: 14px; z-index: 1; }
 
 /* ---- studio */
 .section--wide { max-width: 1120px; }
@@ -205,10 +205,10 @@ main { display: block; }
 .studio-stage { display: grid; place-items: center; padding: 8px 0 4px; }
 .bot-seat--studio .bot { width: 168px; height: 168px; }
 .shelf--studio { padding: 10px 24px; }
-.studio-controls { display: grid; gap: 16px; }
-.picker { border: 0; padding: 0; margin: 0; min-width: 0; }
-.picker legend, .picker-label { font-size: 13px; font-weight: 650; color: var(--muted); letter-spacing: 0.02em; margin-bottom: 8px; padding: 0; }
-.picker-row { display: flex; gap: 8px; overflow-x: auto; padding: 2px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.studio-controls { display: grid; gap: 16px; align-content: start; }
+.picker { min-width: 0; }
+.picker-label { font-size: 13px; font-weight: 650; color: var(--muted); letter-spacing: 0.02em; margin: 0 0 8px; padding: 0; }
+.picker-row { display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; padding: 4px; margin: -4px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 .picker-row::-webkit-scrollbar { display: none; }
 .pick {
   flex: 0 0 auto; width: 52px; height: 52px; border-radius: 14px; border: 1.5px solid var(--hair);
@@ -217,7 +217,7 @@ main { display: block; }
 }
 .pick canvas { width: 40px; height: 40px; }
 .pick[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
-.swatches { flex-wrap: wrap; overflow: visible; }
+.swatches { flex-wrap: wrap; overflow: visible; margin: 0; padding: 2px; }
 .swatch {
   flex: 0 0 auto; width: 34px; height: 34px; border-radius: 50%; border: 1.5px solid rgba(0, 0, 0, 0.12);
   padding: 0; cursor: pointer; position: relative; background: var(--sw, #888);
@@ -352,13 +352,13 @@ figcaption { font-size: 14px; color: var(--muted); margin-top: 10px; }
   .bubble { font-size: 19px; max-width: 360px; }
   .hero-copy { text-align: left; order: 1; }
   .hero-copy .cta-row { justify-content: flex-start; }
-  .studio { grid-template-columns: 340px 1fr; grid-template-areas: "stage controls" "states states"; padding: 28px; gap: 28px; }
+  .studio { grid-template-columns: 340px 1fr; grid-template-areas: "stage controls" "states states"; padding: 28px; gap: 28px; align-items: start; }
   .studio-stage { grid-area: stage; align-self: center; }
   .bot-seat--studio .bot { width: 220px; height: 220px; }
   .shelf--studio { padding: 12px 30px; }
   .studio-controls { grid-area: controls; }
   .studio-states { grid-area: states; border-top: 1px solid var(--hair); padding-top: 22px; }
-  .picker-row { flex-wrap: wrap; overflow: visible; }
+  .picker-row { flex-wrap: wrap; overflow: visible; margin: 0; padding: 2px; }
   .split { grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; }
   .split--reverse .split-copy { order: 2; }
   .split--reverse .phones { order: 1; }
