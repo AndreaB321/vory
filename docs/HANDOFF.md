@@ -9,7 +9,8 @@ at a time, ship a TestFlight build, wait for their verdict.
 
 - **Latest: 1.1 (5)** (2026-09-27, the public-launch build: time reveal as a UIKit pan, one back
   pan per stack, filters/sorts, sticky pins, tab re-tap to top, About cloud, LA tap link +
-  per-session tokens), companion **1.0.28**.
+  per-session tokens), companion **1.0.28**. Uploaded 2026-09-27 ~19:50, BETA_APPROVED at
+  20:00 (build id 1359ef93-5e79-42a9-b331-2dd2427397d5): live for the public link.
 - 1.1 (4) (2026-09-27, build-3 review fixes: studio taps, header pill, top inset, To: chips, list
   keeps new chats, scroll perf, time reveal), companion 1.0.27. Uploaded ~14:00 and
   NOT submitted: build 3 keeps its place in Beta App Review; internal testers get 4 at once
