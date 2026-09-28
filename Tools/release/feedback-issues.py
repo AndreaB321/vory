@@ -95,6 +95,8 @@ for kind, label in (('betaFeedbackScreenshotSubmissions', 'feedback'), ('betaFee
         if DRY: continue
         args = ['issue', 'create', '--repo', REPO, '--title', title, '--body', body, '--milestone', 'Backlog']
         for l in labels: args += ['--label', l]
-        gh(*args)
+        url = gh(*args)
+        # Onto the board too; its "Item added" workflow files it under Inbox.
+        if url: gh('project', 'item-add', '1', '--owner', 'matt0975', '--url', url)
         time.sleep(0.5)
 print(f'{new} new report(s)' + (' (dry run)' if DRY else ' filed'))
