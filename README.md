@@ -17,7 +17,7 @@ the `/api/ws` JSON-RPC socket. Nothing is hardcoded: on first launch you enter t
 
 ## Requirements
 
-- Xcode with the **iOS 27 SDK** (deployment target iOS 27.0).
+- Xcode with the **iOS 27 SDK** (deployment target iOS 26.0: runs on iOS 26 and 27).
 - A Hermes Agent install with the dashboard running (`hermes serve` or `hermes dashboard`), reachable from the phone.
 - For push notifications from the background: an Apple Developer team (APNs key) and the `server/hermes-push` companion.
 
