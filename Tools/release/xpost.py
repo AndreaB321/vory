@@ -5,8 +5,8 @@
 
 Reads the What-to-Test notes (the "Fixed in this build" / "Changed in this build" groups), draws a
 1600x900 card with the Vory cloud, "TestFlight build N" and the bullets, and prints a post for X:
-a short one that fits 280 characters and a longer one. Needs Pillow. The icon is a 1024 px render
-of Shared/AppIcon.icon (ictool --rendition Default); pass --icon to use another.
+a short one that fits 280 characters and a longer one. Needs Pillow and numpy. The icon is a 2048 px render
+of Shared/AppIcon.icon (ictool --rendition Default / Dark); pass --icon to use another.
 """
 import argparse, os, re, sys, textwrap
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -63,46 +63,74 @@ PALETTES = {
     "light": ((246, 247, 251), (200, 222, 255), (232, 214, 250), (18, 20, 30), (40, 42, 56), (112, 116, 134), (31, 110, 210), 70),
 }
 
-def render(build, version, groups, icon_path, out_path, theme="light"):
-    """A 4:5 portrait card (1200x1500): what X shows uncropped on a phone, one column, big type."""
-    W, H = 1200, 1500
+def background(W, H, bg, g1, g2, seed=7):
+    """Two soft colour blobs on the base, computed in float and dithered: a blurred 8-bit
+    gradient shows visible bands on a phone; ±1 level of noise hides the steps."""
+    import numpy as np
+    y, x = np.mgrid[0:H, 0:W].astype(np.float32)
+    base = np.array(bg, np.float32)[None, None, :]
+    img = np.broadcast_to(base, (H, W, 3)).copy()
+    for (cx, cy, r), col in (((0.10, 0.08, 0.62), g1), ((0.95, 0.95, 0.70), g2)):
+        d2 = ((x / W - cx) ** 2 + ((y / H - cy) * H / W) ** 2) / (r * r)
+        w = np.exp(-d2 * 1.8)[:, :, None]
+        img = img * (1 - w) + np.array(col, np.float32)[None, None, :] * w
+    rng = np.random.default_rng(seed)
+    img += rng.normal(0, 0.9, img.shape).astype(np.float32)
+    return Image.fromarray(np.clip(img + 0.5, 0, 255).astype(np.uint8), "RGB")
+
+def dithered(rgba):
+    """A touch of noise on the icon's colour: the glass gradient in the 8-bit render bands
+    when the tile is shown large."""
+    import numpy as np
+    a = np.asarray(rgba).astype(np.float32)
+    rng = np.random.default_rng(11)
+    a[:, :, :3] += rng.normal(0, 0.8, a[:, :, :3].shape).astype(np.float32)
+    return Image.fromarray(np.clip(a + 0.5, 0, 255).astype(np.uint8), "RGBA")
+
+def render(build, version, groups, icon_path, out_path, theme="light", scale=1.5):
+    """A 4:5 portrait card (1200x1500 layout units, drawn at `scale`): what X shows uncropped
+    on a phone, one column, big type."""
+    S = scale
+    W, H = int(1200 * S), int(1500 * S)
     bg, g1, g2, headline, body, muted, accent, shadow_a = PALETTES[theme]
-    img = Image.new("RGB", (W, H), bg)
-    glow = Image.new("RGB", (W, H), bg); g = ImageDraw.Draw(glow)
-    g.ellipse((-300, -300, 700, 700), fill=g1); g.ellipse((700, 900, 1600, 1900), fill=g2)
-    img = Image.blend(img, glow.filter(ImageFilter.GaussianBlur(240)), 0.9)
+    img = background(W, H, bg, g1, g2)
     # the icon tile, centred, floating on a soft shadow
-    size, ix, iy = 330, (W - 330) // 2, 96
+    size, ix, iy = int(330 * S), (W - int(330 * S)) // 2, int(96 * S)
     if icon_path and os.path.exists(icon_path):
-        ic = Image.open(icon_path).convert("RGBA").resize((size, size), Image.LANCZOS)
-        sh = Image.new("RGBA", (size + 120, size + 120), (0, 0, 0, 0))
-        ImageDraw.Draw(sh).rounded_rectangle((60, 78, size + 60, size + 78), radius=int(size * 0.22), fill=(0, 0, 0, shadow_a))
-        sh = sh.filter(ImageFilter.GaussianBlur(28))
-        img.paste(sh, (ix - 60, iy - 60), sh)
+        ic = dithered(Image.open(icon_path).convert("RGBA").resize((size, size), Image.LANCZOS))
+        pad = int(60 * S)
+        sh = Image.new("RGBA", (size + 2 * pad, size + 2 * pad), (0, 0, 0, 0))
+        ImageDraw.Draw(sh).rounded_rectangle((pad, pad + int(18 * S), size + pad, size + pad + int(18 * S)), radius=int(size * 0.22), fill=(0, 0, 0, shadow_a))
+        sh = sh.filter(ImageFilter.GaussianBlur(28 * S))
+        img.paste(sh, (ix - pad, iy - pad), sh)
         img.paste(ic, (ix, iy), ic)
     d = ImageDraw.Draw(img)
+    F = lambda size, bold=False: font(int(size * S), bold)
     def centred(text, f, y, fill):
-        d.text(((W - d.textlength(text, font=f)) / 2, y), text, font=f, fill=fill)
-    centred("Vory", font(64, True), 458, headline)
-    centred(f"TestFlight build {build}", font(38), 540, accent)
-    centred(f"Public beta {version}", font(28), 592, muted)
-    d.line((110, 660, W - 110, 660), fill=tuple(int(c * 0.9 + 128 * 0.1) for c in bg) if theme == "light" else (40, 42, 56), width=2)
+        d.text(((W - d.textlength(text, font=f)) / 2, y * S), text, font=f, fill=fill)
+    centred("Vory", F(64, True), 458, headline)
+    centred(f"TestFlight build {build}", F(38), 540, accent)
+    centred(f"Public beta {version}", F(28), 592, muted)
+    rule = tuple(int(c * 0.88) for c in bg) if theme == "light" else (40, 42, 56)
+    d.line((110 * S, 660 * S, W - 110 * S, 660 * S), fill=rule, width=max(1, int(1.5 * S)))
     # one column of bullets
-    x, y, colw = 110, 700, W - 220
-    hf, bf = font(28, True), font(34)
+    x, y, colw = 110, 700, 1200 - 220
+    hf, bf = F(28, True), F(34)
     for title, items in groups.items():
         if not items or y > 1300: continue
-        d.text((x, y), title.upper(), font=hf, fill=accent); y += 50
+        d.text((x * S, y * S), title.upper(), font=hf, fill=accent); y += 50
         for b in items:
-            lines = wrap(d, short(b), bf, colw - 40)
+            lines = wrap(d, short(b), bf, (colw - 40) * S)
             if y + 46 * len(lines) > 1360: break
             for i, line in enumerate(lines):
-                if i == 0: d.ellipse((x + 4, y + 16, x + 15, y + 27), fill=accent)
-                d.text((x + 38, y), line, font=bf, fill=body); y += 46
+                if i == 0: d.ellipse(((x + 4) * S, (y + 16) * S, (x + 15) * S, (y + 27) * S), fill=accent)
+                d.text(((x + 38) * S, y * S), line, font=bf, fill=body); y += 46
             y += 10
         y += 30
-    centred(SITE, font(34, True), 1408, accent)
+    centred(SITE, F(34, True), 1408, accent)
     img.save(out_path, optimize=True)
+    # The one to post: X re-encodes to JPEG anyway, and the dither makes the PNG several MB.
+    img.save(os.path.splitext(out_path)[0] + ".jpg", quality=92, subsampling=0, optimize=True)
 
 def posts(build, groups):
     fixed = [short(b, 95) for b in groups.get("Fixed in this build", [])]
@@ -133,7 +161,7 @@ if __name__ == "__main__":
     if not groups: sys.exit("no 'Fixed in this build' / 'Changed in this build' bullets found")
     os.makedirs(a.out, exist_ok=True)
     out = os.path.join(a.out, f"vory-build-{a.build}.png")
-    icon = a.icon or os.path.join(os.path.dirname(os.path.abspath(__file__)), "vory-icon-1024-light.png" if a.theme == "light" else "vory-icon-1024.png")
+    icon = a.icon or os.path.join(os.path.dirname(os.path.abspath(__file__)), "vory-icon-2048-light.png" if a.theme == "light" else "vory-icon-2048.png")
     render(a.build, a.version, groups, icon, out, a.theme)
     s, l = posts(a.build, groups)
-    print(out); print("\n--- short (%d chars) ---\n%s\n\n--- long ---\n%s" % (len(s), s, l))
+    print(out, "(+ .jpg for posting)"); print("\n--- short (%d chars) ---\n%s\n\n--- long ---\n%s" % (len(s), s, l))
