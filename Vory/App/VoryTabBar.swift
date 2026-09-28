@@ -24,11 +24,18 @@ struct VoryTabBar: View {
     private let inset: CGFloat = 4
     private let sideMargin: CGFloat = 21
     private let circleGap: CGFloat = 12
-    /// How far the capsule hangs into the home-indicator area.
-    private let overhang: CGFloat = 13
+    /// The window's bottom safe-area inset: 34 pt on phones with a home indicator, 0 on a
+    /// home-button phone (iPhone SE), which iOS 26 still runs on.
+    private static var safeBottom: CGFloat {
+        UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow?.safeAreaInsets.bottom }.first ?? 34
+    }
+    /// How far the capsule hangs into the home-indicator area: the full 13 pt when there is one.
+    /// Without one the capsule would hang off the screen, so it hangs by what is there (nothing on
+    /// an SE) and keeps the rest as a gap above the screen edge instead.
+    static var overhang: CGFloat { min(13, safeBottom) }
     /// What the bar reserves above the home-indicator area (the system bar group's 49 pt); the
     /// capsule is drawn overflowing below it.
-    static let reservedHeight: CGFloat = 56 - 13
+    static var reservedHeight: CGFloat { 56 - overhang + max(0, 13 - safeBottom) }
 
     var body: some View {
         GlassEffectContainer(spacing: circleGap) {
