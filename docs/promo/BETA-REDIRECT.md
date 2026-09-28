@@ -12,7 +12,7 @@ static page is the fallback that works on any host and before the edge rule exis
 
 ---
 
-## Part 1 — site session (static files)
+## Part 1 — the static site
 
 Add `beta/index.html` to the site output (so `/beta` and `/beta/` both resolve on S3/CloudFront
 with the default root object `index.html`):
@@ -41,7 +41,7 @@ testers". Fine to ship the site with the button; hold the announcement post unti
 
 ---
 
-## Part 2 — AWS / Cloudflare agent (edge redirect)
+## Part 2 — the edge redirect (AWS or Cloudflare)
 
 Pick the one that matches where `vory.dev` is actually served from.
 

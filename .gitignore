@@ -9,6 +9,6 @@ Tools/release/.env
 .dev.vars
 server/push-relay/node_modules/
 
-# Claude Code session files stay local
+# local tooling and notes
 .claude/
 docs/agent-memory/

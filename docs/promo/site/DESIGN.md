@@ -94,7 +94,7 @@ Shelves under the bots (the app's header pill) are the same recipe as a capsule;
 
 ## Assets
 
-- Icon renditions from `ictool` (already in `docs/promo/grok-package/assets`), resized with `sips`.
+- Icon renditions from `ictool` (Icon Composer's CLI) on `Shared/AppIcon.icon`, resized with `sips`.
 - Screenshots converted to WebP at 603 and 1206 px wide (`cwebp -q 82`), delivered with `srcset`.
 - Approval card cropped from the chat screenshot (`ffmpeg crop=1150:650:28:1862`).
 - OG image rendered by `tools/og.swift` (AppKit, SF Pro) and downscaled to 1200×630.

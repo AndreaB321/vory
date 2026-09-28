@@ -1,4 +1,4 @@
-# vory.dev — static site, deployment notes for the AWS agent
+# vory.dev — static site and deployment notes
 
 Everything under `public/` is the site. Upload that folder as-is; nothing needs building to serve
 it. It is plain HTML, CSS and JavaScript (one ES module for the page, one for the bots).
