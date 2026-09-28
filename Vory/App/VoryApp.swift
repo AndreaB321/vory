@@ -38,6 +38,7 @@ struct VoryApp: App {
                         // Live Activities whose turn ended while the app was away must not linger.
                         let chats = model.runtime?.chats ?? []
                         LiveActivityController.endOrphans(runningStoredIDs: Set(chats.filter(\.isRunning).map(\.storedID)), knownStoredIDs: Set(chats.map(\.storedID)))
+                        Task { await model.push.refreshRelayIfStale() }
                     case .background:
                         BotMotionSource.shared.apply(active: false)
                         LocalNotifier.isForeground = false

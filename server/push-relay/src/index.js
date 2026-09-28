@@ -58,13 +58,21 @@ async function register(request, env) {
   if (!["ios", "macos", "watchos"].includes(platform)) return reply(400, { error: "bad platform" });
   if (!/^[A-Za-z0-9.-]{3,120}$/.test(bundle_id || "")) return reply(400, { error: "bad bundle_id" });
   const existing = await env.DEVICES.get("dev:" + install_id);
-  if (existing && !timingSafeEqual(JSON.parse(existing).secret, secret)) return reply(403, { error: "install_id is taken" });
+  const prev = existing ? JSON.parse(existing) : null;
+  if (prev && !timingSafeEqual(prev.secret, secret)) return reply(403, { error: "install_id is taken" });
   const dev = {
     secret, device_token, platform, bundle_id,
     environment: environment === "development" ? "development" : "production",
-    live_activity_token: b.live_activity_token || null,
+    // The companion sends the Live Activity token with each push; this is only a fallback for
+    // old companions, kept from before when the app stops sending it.
+    live_activity_token: b.live_activity_token || (prev && prev.live_activity_token) || null,
     updated_at: Date.now(),
   };
+  // KV writes are the scarce thing (1,000 a day on the free tier; reads are 100,000): a register
+  // that changes nothing, from a phone that registered within the day, is answered without one.
+  const same = prev && ["device_token", "platform", "bundle_id", "environment", "live_activity_token"].every((k) => prev[k] === dev[k]);
+  const fresh = prev && typeof prev.updated_at === "number" && Date.now() - prev.updated_at < 24 * 3600 * 1000;
+  if (same && fresh) return reply(200, { ok: true, unchanged: true });
   await env.DEVICES.put("dev:" + install_id, JSON.stringify(dev));
   return reply(200, { ok: true });
 }

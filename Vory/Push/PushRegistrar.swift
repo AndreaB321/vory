@@ -49,8 +49,10 @@ final class PushRegistrar: PushRegistrationSyncing {
                 self.liveActivityTokenAt = latest == nil ? nil : (self.liveActivityTokenAt ?? Date())
                 if active { self.liveActivityTokenAt = Date() }
                 LiveActivityController.note(active ? "publishing token to the gateway (\(self.liveActivities.count) open)" : "token cleared on the gateway (\(self.liveActivities.count) open)")
+                // The gateway's device file carries the tokens; the relay gets each one with the
+                // push itself, so it is not re-registered here (that was a KV write per turn,
+                // per phone, against a 1,000-a-day free tier).
                 NotificationCenter.default.post(name: .hermesPushRegistrationNeedsSync, object: nil)
-                await self.registerWithRelay()
             }
         }
     }
@@ -98,9 +100,15 @@ final class PushRegistrar: PushRegistrationSyncing {
     func registerWithRelay() async {
         guard PushRelay.isConfigured, let token = deviceToken else { return }
         do {
-            try await PushRelay.register(deviceToken: token, platform: "ios", bundleID: Bundle.main.bundleIdentifier ?? "", environment: apnsEnvironment, liveActivityToken: liveActivityToken)
+            try await PushRelay.register(deviceToken: token, platform: "ios", bundleID: Bundle.main.bundleIdentifier ?? "", environment: apnsEnvironment, liveActivityToken: nil)
             relayRegisteredAt = Date(); relayError = nil
         } catch { relayError = error.localizedDescription }
+    }
+
+    /// Once a day is enough for the relay to know this phone is still around.
+    func refreshRelayIfStale() async {
+        if let at = relayRegisteredAt, Date().timeIntervalSince(at) < 24 * 3600 { return }
+        await registerWithRelay()
     }
     var relayRegisteredAt: Date?
     var relayError: String?
