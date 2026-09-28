@@ -54,34 +54,41 @@ def wrap(d, text, f, width):
     if cur: lines.append(cur)
     return lines
 
-def render(build, version, groups, icon_path, out_path):
+PALETTES = {
+    # background, glow 1, glow 2, headline, body, muted, accent, shadow alpha, tile outline
+    "dark":  ((9, 10, 16), (20, 60, 120), (50, 22, 90), (245, 245, 250), (228, 229, 238), (150, 152, 168), (120, 160, 255), 160),
+    "light": ((246, 247, 251), (200, 222, 255), (232, 214, 250), (18, 20, 30), (40, 42, 56), (112, 116, 134), (31, 110, 210), 70),
+}
+
+def render(build, version, groups, icon_path, out_path, theme="light"):
     W, H = 1600, 900
-    img = Image.new("RGB", (W, H), (9, 10, 16))
-    glow = Image.new("RGB", (W, H), (9, 10, 16)); g = ImageDraw.Draw(glow)
-    g.ellipse((-200, -250, 760, 760), fill=(20, 60, 120)); g.ellipse((1150, 450, 1950, 1250), fill=(50, 22, 90))
+    bg, g1, g2, headline, body, muted, accent, shadow_a = PALETTES[theme]
+    img = Image.new("RGB", (W, H), bg)
+    glow = Image.new("RGB", (W, H), bg); g = ImageDraw.Draw(glow)
+    g.ellipse((-200, -250, 760, 760), fill=g1); g.ellipse((1150, 450, 1950, 1250), fill=g2)
     img = Image.blend(img, glow.filter(ImageFilter.GaussianBlur(230)), 0.9)
     d = ImageDraw.Draw(img)
     # the cloud, floating with a soft shadow
     if icon_path and os.path.exists(icon_path):
         ic = Image.open(icon_path).convert("RGBA").resize((400, 400), Image.LANCZOS)
-        sh = Image.new("RGBA", (520, 520), (0, 0, 0, 0)); ImageDraw.Draw(sh).rounded_rectangle((60, 80, 460, 480), radius=90, fill=(0, 0, 0, 160))
+        sh = Image.new("RGBA", (520, 520), (0, 0, 0, 0)); ImageDraw.Draw(sh).rounded_rectangle((60, 80, 460, 480), radius=90, fill=(0, 0, 0, shadow_a))
         img.paste(sh.filter(ImageFilter.GaussianBlur(30)), (80, 130), sh.filter(ImageFilter.GaussianBlur(30)))
         img.paste(ic, (140, 170), ic)
     d = ImageDraw.Draw(img)
-    d.text((140, 610), "Vory", font=font(44, True), fill=(245, 245, 250))
-    d.text((140, 664), f"TestFlight build {build}", font=font(30), fill=(120, 160, 255))
-    d.text((140, 706), f"Public beta {version}", font=font(24), fill=(150, 152, 168))
-    d.text((140, 800), LINK, font=font(24), fill=(120, 160, 255))
+    d.text((140, 610), "Vory", font=font(44, True), fill=headline)
+    d.text((140, 664), f"TestFlight build {build}", font=font(30), fill=accent)
+    d.text((140, 706), f"Public beta {version}", font=font(24), fill=muted)
+    d.text((140, 800), LINK, font=font(24), fill=accent)
     # the bullets
     x, y, colw = 660, 120, 860
     hf, bf = font(26, True), font(28)
     for title, items in groups.items():
         if not items: continue
-        d.text((x, y), title.upper(), font=hf, fill=(120, 160, 255)); y += 44
+        d.text((x, y), title.upper(), font=hf, fill=accent); y += 44
         for b in items[:6]:
             for i, line in enumerate(wrap(d, short(b), bf, colw - 30)):
-                if i == 0: d.ellipse((x + 2, y + 13, x + 11, y + 22), fill=(120, 160, 255))
-                d.text((x + 28, y), line, font=bf, fill=(228, 229, 238)); y += 38
+                if i == 0: d.ellipse((x + 2, y + 13, x + 11, y + 22), fill=accent)
+                d.text((x + 28, y), line, font=bf, fill=body); y += 38
             y += 8
         y += 22
         if y > 760: break
@@ -110,11 +117,13 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("build"); ap.add_argument("notes"); ap.add_argument("--icon", default=None)
     ap.add_argument("--out", default="."); ap.add_argument("--version", default="1.1")
+    ap.add_argument("--theme", choices=("light", "dark"), default="light", help="light (the default, with the light icon) or dark")
     a = ap.parse_args()
     groups = {k: v for k, v in sections(open(a.notes).read()).items() if k in ("Fixed in this build", "Changed in this build")}
     if not groups: sys.exit("no 'Fixed in this build' / 'Changed in this build' bullets found")
     os.makedirs(a.out, exist_ok=True)
     out = os.path.join(a.out, f"vory-build-{a.build}.png")
-    render(a.build, a.version, groups, a.icon, out)
+    icon = a.icon or os.path.join(os.path.dirname(os.path.abspath(__file__)), "vory-icon-1024-light.png" if a.theme == "light" else "vory-icon-1024.png")
+    render(a.build, a.version, groups, icon, out, a.theme)
     s, l = posts(a.build, groups)
     print(out); print("\n--- short (%d chars) ---\n%s\n\n--- long ---\n%s" % (len(s), s, l))
