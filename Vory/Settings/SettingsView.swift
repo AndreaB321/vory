@@ -313,12 +313,19 @@ struct NotificationsView: View {
 
 struct SecurityView: View {
     @Environment(AppModel.self) private var model
+    @AppStorage(ApprovalConfirm.key) private var confirmApprovals = true
     var body: some View {
         List {
-            SettingsHeaderSection(title: "Security", symbol: "faceid", color: .green, description: "Face ID lock and how this phone keeps its credentials.")
+            SettingsHeaderSection(title: "Security", symbol: "faceid", color: .green, description: "Face ID lock, a second step for approvals, and how this phone keeps its credentials.")
             Section {
                 Toggle("Require \(model.lock.biometryName)", isOn: Binding(get: { model.lock.isEnabled }, set: { model.lock.isEnabled = $0 }))
             } footer: { Text("Locks the app after it has been in the background. Gateway credentials are stored in the iOS Keychain (device-only).") }
+            Section {
+                Toggle("Confirm approvals", isOn: $confirmApprovals)
+                    .onChange(of: confirmApprovals) { _, _ in LocalNotifier.registerCategories() }
+            } header: { Text("Approvals") } footer: {
+                Text("Approve or Deny on the Live Activity or a notification opens the chat and asks once more before it counts, so a stray tap on the Lock Screen cannot run a command. The card's own buttons in the chat apply at once.")
+            }
         }
     }
 }

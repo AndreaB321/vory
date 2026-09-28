@@ -8,7 +8,12 @@ struct PendingCardView: View {
 
     var body: some View {
         Group {
-            if let a = card.approval { ApprovalCardView(approval: a, count: chat.cards.count) { choice in Task { await chat.respond(card: card, result: ["choice": .string(choice)]) } } }
+            if let a = card.approval {
+                ApprovalCardView(approval: a, count: chat.cards.count,
+                                 botName: chat.runtime.profiles.first { $0.name == chat.profileName }?.label ?? chat.profileName) { choice in
+                    Task { await chat.respond(card: card, result: ["choice": .string(choice)]) }
+                }
+            }
             else if let c = card.clarify { ClarifyCardView(request: c) { result in Task { await chat.respond(card: card, result: result) } } }
             else if let v = card.valuePrompt { ValuePromptCardView(method: card.method, request: v) { value in Task { await chat.respond(card: card, result: ["value": .string(value)]) } } }
             else { Text("Unsupported request \(card.method)").font(.footnote) }
@@ -21,7 +26,10 @@ struct PendingCardView: View {
 struct ApprovalCardView: View {
     var approval: ApprovalRequest
     var count: Int
+    /// The bot's display name, for the scope line ("for defender").
+    var botName: String = ""
     var onChoice: (String) -> Void
+    @State private var confirmAlways = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -39,6 +47,9 @@ struct ApprovalCardView: View {
             }
             if let t = approval.toolName { Text("Tool: \(t)").font(.caption).foregroundStyle(.secondary) }
             if approval.smartDenied == true { Text("The smart-approval guardian flagged this command.").font(.caption).foregroundStyle(.orange) }
+            // What each answer covers, so "Always" is never a surprise: it is a rule on this
+            // bot's gateway profile, not the one command, and it lives on until revoked.
+            Text(scopeLine).font(.caption2).foregroundStyle(.secondary)
             // Four choices do not fit on one line at iPhone width, and a wrapped "Ses-sion" looks
             // broken, so fall back to a 2x2 grid when the row cannot fit.
             ViewThatFits(in: .horizontal) {
@@ -58,8 +69,24 @@ struct ApprovalCardView: View {
 
     @ViewBuilder private func choiceButtons(_ choices: [String]) -> some View {
         ForEach(choices, id: \.self) { choice in
-            ApprovalChoiceButton(choice: choice, title: label(choice)) { onChoice(choice) }
+            ApprovalChoiceButton(choice: choice, title: label(choice)) {
+                if choice == "always" { confirmAlways = true } else { onChoice(choice) }
+            }
         }
+        .alert("Always allow \(approval.alwaysScope)?", isPresented: $confirmAlways) {
+            Button("Always allow") { onChoice("always") }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This adds a rule to \(botName.isEmpty ? "this bot" : botName)'s gateway profile: every chat with \(botName.isEmpty ? "it" : botName) runs \(approval.alwaysScope) without asking, until you remove the rule in Settings › Approvals › Always allowed.")
+        }
+    }
+
+    private var scopeLine: String {
+        let who = botName.isEmpty ? "this bot" : botName
+        var parts = ["Once: this command only."]
+        if approval.offeredChoices.contains("session") { parts.append("Session: \(approval.alwaysScope) in this chat.") }
+        if approval.offeredChoices.contains("always") { parts.append("Always: \(approval.alwaysScope) for \(who), every chat, until revoked in Settings › Approvals.") }
+        return parts.joined(separator: " ")
     }
 
     private func label(_ c: String) -> String {

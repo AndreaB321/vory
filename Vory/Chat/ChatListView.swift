@@ -111,6 +111,9 @@ struct ChatListView: View {
             .onChange(of: model.pendingRoute) { _, r in
                 guard let r, r != lastRouted else { return }
                 lastRouted = r
+                // Already looking at that chat: nothing to push (a second copy of the same chat
+                // used to land on top, and a confirmation asked there could go to the covered one).
+                guard model.visibleChatID != r.storedSessionID else { return }
                 path.append(ChatRoute(storedID: r.storedSessionID, title: nil))
             }
             .alert("Delete group chat?", isPresented: Binding(get: { pendingRoomDelete != nil }, set: { if !$0 { pendingRoomDelete = nil } })) {
@@ -223,7 +226,7 @@ struct ChatListView: View {
             let visibleRooms = groupsOnly
                 ? rooms.filter { (showArchived || !archivedRooms.contains($0.roomId)) && (searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(searchText)) }
                 : []
-            let entries = Self.merge(rows, visibleRooms)
+            let entries = Self.merge(rows, visibleRooms, sort: sortKey)
             if entries.isEmpty && !loading {
                 ContentUnavailableView(searchText.isEmpty ? "No chats yet" : "No results", systemImage: "bubble.left.and.bubble.right",
                                        description: Text(searchText.isEmpty ? "Start a new chat with the compose button." : "Try another search."))
@@ -253,7 +256,7 @@ struct ChatListView: View {
         }
         .animation(.snappy, value: runtime.restartRequired == nil)
         .onChange(of: scrollToTop) { _, _ in
-            let first = Self.merge(rows, groupsOnly ? rooms : []).first?.id ?? rows.first?.id
+            let first = Self.merge(rows, groupsOnly ? rooms : [], sort: sortKey).first?.id ?? rows.first?.id
             if let first { withAnimation(.snappy) { proxy.scrollTo(first, anchor: .top) } }
         }
         }
@@ -332,10 +335,30 @@ struct ChatListView: View {
         var date: Double { switch self { case .session(let s): return s.lastActive ?? 0; case .room(let r): return r.updatedAt } }
     }
 
-    /// Pinned chats first, then everything by when it last moved.
-    private static func merge(_ sessions: [StoredSession], _ rooms: [Room]) -> [ListEntry] {
-        (sessions.map(ListEntry.session) + rooms.map(ListEntry.room))
-            .sorted { ($0.pinned ? 1 : 0, $0.date) > ($1.pinned ? 1 : 0, $1.date) }
+    /// The chats in the order `filtered` chose; group chats join them by recency under the
+    /// Recent order, by name under Title, and after them otherwise. (This used to re-sort
+    /// everything by date, which undid the Title / Bot / Model orders.)
+    private static func merge(_ sessions: [StoredSession], _ rooms: [Room], sort: String = "recent") -> [ListEntry] {
+        let chats = sessions.map(ListEntry.session)
+        guard !rooms.isEmpty else { return chats }
+        switch sort {
+        case "recent":
+            return (chats + rooms.map(ListEntry.room)).sorted { ($0.pinned ? 1 : 0, $0.date) > ($1.pinned ? 1 : 0, $1.date) }
+        case "title":
+            let byName = rooms.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }.map(ListEntry.room)
+            var out: [ListEntry] = [], r = byName.makeIterator(), next = r.next()
+            for c in chats {
+                if case .session(let s) = c {
+                    while let n = next, case .room(let room) = n, !(s.pinned ?? false),
+                          room.name.localizedCaseInsensitiveCompare(s.displayTitle) == .orderedAscending { out.append(n); next = r.next() }
+                }
+                out.append(c)
+            }
+            while let n = next { out.append(n); next = r.next() }
+            return out
+        default:
+            return chats + rooms.sorted { $0.updatedAt > $1.updatedAt }.map(ListEntry.room)
+        }
     }
 
     @ViewBuilder private func sessionRow(_ s: StoredSession, runtime: GatewayRuntime) -> some View {

@@ -53,7 +53,7 @@ except ImportError as exc:  # pragma: no cover
 log = logging.getLogger("hermes-push")
 
 # Keep in step with plugin/vory-push/plugin.yaml; the app compares the two.
-VERSION = "1.0.28"
+VERSION = "1.0.29"
 USER_AGENT = f"Vory-Push/{VERSION} (Hermes companion)"
 try:
     # Fingerprint of the code actually running: the app compares it with the copy it ships, so a
@@ -831,6 +831,10 @@ class Relay:
                 backoff = 1
             except ReleaseIdle:
                 log.info("nothing has run for %ss; releasing the mirrored sessions", int(self.release_after))
+                # The clock restarts here, or the first event after the reconnect (the resume's own
+                # session.info, a sessions.changed) would release again at once: a reconnect loop
+                # that flipped the heartbeat's `connected` and showed as "not running" in the app.
+                self._last_running_at = time.time()
                 try:
                     if self.gw.ws:
                         await self.gw.ws.close()

@@ -185,8 +185,13 @@ enum LocalNotifier {
     }
 
     static func registerCategories() {
-        let approve = UNNotificationAction(identifier: approveOnceAction, title: "Approve once", options: [.authenticationRequired])
-        let deny = UNNotificationAction(identifier: denyAction, title: "Deny", options: [.destructive, .authenticationRequired])
+        // With "Confirm approvals" on (Settings › Security) the actions open the app, which asks
+        // once more on the card; off, they answer from the notification without opening it.
+        var approveOptions: UNNotificationActionOptions = [.authenticationRequired]
+        var denyOptions: UNNotificationActionOptions = [.destructive, .authenticationRequired]
+        if ApprovalConfirm.isOn { approveOptions.insert(.foreground); denyOptions.insert(.foreground) }
+        let approve = UNNotificationAction(identifier: approveOnceAction, title: "Approve once", options: approveOptions)
+        let deny = UNNotificationAction(identifier: denyAction, title: "Deny", options: denyOptions)
         let approval = UNNotificationCategory(identifier: approvalCategory, actions: [approve, deny], intentIdentifiers: [], options: [])
         let clarify = UNNotificationCategory(identifier: clarifyCategory, actions: [], intentIdentifiers: [], options: [])
         let reply = UNTextInputNotificationAction(identifier: replyAction, title: "Reply", options: [], textInputButtonTitle: "Send", textInputPlaceholder: "Message")

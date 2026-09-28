@@ -28,6 +28,12 @@ final class AppModel {
     let push = PushRegistrar()
     private(set) var runtime: GatewayRuntime?
     var pendingRoute: PendingRoute?
+    /// The chat on screen right now (stored id), so a route to it (a Live Activity tap, a
+    /// notification) does not push a second copy of the same chat on top of it.
+    var visibleChatID: String?
+    /// An Approve/Deny that came from the Live Activity or a notification while "Confirm
+    /// approvals" is on: the chat shows it as a question and answers only on a yes.
+    var approvalConfirm: ApprovalConfirm?
     var activationError: String?
     var selectedTab: AppTab = .chats
     /// The gateway's companion plugin is older than the one this build ships: Settings › Notifications ›
@@ -211,7 +217,15 @@ final class AppModel {
                 let choice = action == LocalNotifier.approveOnceAction ? "once" : "deny"
                 let deadline = Date().addingTimeInterval(8)
                 while chat.cards.isEmpty, Date() < deadline { try? await Task.sleep(for: .milliseconds(250)) }
-                if let card = chat.cards.first(where: { $0.method == "approval" }) { await chat.respond(card: card, result: ["choice": .string(choice)]) }
+                guard let card = chat.cards.first(where: { $0.method == "approval" }) else { return }
+                if ApprovalConfirm.isOn {
+                    // Settings › Security › Confirm approvals: the chat is open on its card; the
+                    // conversation asks once more and only then answers.
+                    approvalConfirm = ApprovalConfirm(storedID: chat.storedID, cardID: card.id, choice: choice)
+                    LiveActivityController.note("\(choice) from the Lock Screen: waiting for the confirmation")
+                } else {
+                    await chat.respond(card: card, result: ["choice": .string(choice)])
+                }
             }
         }
     }
@@ -266,4 +280,15 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         let reply = (response as? UNTextInputNotificationResponse)?.userText
         await MainActor.run { Self.model?.route(from: info, action: action, replyText: reply) }
     }
+}
+
+/// A second step for approvals that arrive from outside the chat (Settings › Security).
+struct ApprovalConfirm: Equatable {
+    static let key = "approvals.confirmFromOutside"
+    /// On by default: a stray tap on the Lock Screen must not run a command.
+    static var isOn: Bool { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
+    var storedID: String
+    var cardID: String
+    /// "once" or "deny".
+    var choice: String
 }

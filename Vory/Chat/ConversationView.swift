@@ -19,6 +19,8 @@ struct ConversationView: View {
     /// the keyboard.
     @State private var keyboardInset: CGFloat = 0
     @State private var sentInitial = false
+    @State private var confirming: ApprovalConfirm?
+    private var confirmTitle: String { confirming?.choice == "deny" ? "Deny this action?" : "Approve this action?" }
     @Namespace private var glassNamespace
     @Environment(\.dismiss) private var dismiss
 
@@ -60,6 +62,26 @@ struct ConversationView: View {
                     .navigationTitle(chat.title)
                     .toolbar(.hidden, for: .navigationBar)
                     .sheet(isPresented: $showContext) { ContextBreakdownSheet(chat: chat) }
+                    // Approve/Deny from the Live Activity or a notification, with "Confirm
+                    // approvals" on: asked once more here, on the card it concerns.
+                    .alert(confirmTitle, isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil; model.approvalConfirm = nil } })) {
+                        Button(confirming?.choice == "deny" ? "Deny" : "Approve once", role: confirming?.choice == "deny" ? .destructive : nil) {
+                            if let c = confirming, let card = chat.cards.first(where: { $0.id == c.cardID }) {
+                                Task { await chat.respond(card: card, result: ["choice": .string(c.choice)]) }
+                            }
+                            confirming = nil; model.approvalConfirm = nil
+                        }
+                        Button("Cancel", role: .cancel) { confirming = nil; model.approvalConfirm = nil }
+                    } message: {
+                        if let c = confirming, let card = chat.cards.first(where: { $0.id == c.cardID }), let a = card.approval {
+                            Text([a.description, a.command].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n\n"))
+                        } else {
+                            Text("The request is no longer waiting.")
+                        }
+                    }
+                    .onChange(of: model.approvalConfirm, initial: true) { _, c in if let c, c.storedID == chat.storedID { confirming = c } }
+                    .onAppear { model.visibleChatID = chat.storedID }
+                    .onDisappear { if model.visibleChatID == chat.storedID { model.visibleChatID = nil } }
                     .sheet(isPresented: $showProfile) { ProfileInfoSheet(chat: chat, profileName: chat.profileName) }
                     .onChange(of: model.pendingRoute) { _, r in handle(route: r, chat: chat) }
                     .onAppear { handle(route: model.pendingRoute, chat: chat) }

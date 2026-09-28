@@ -245,6 +245,14 @@ public enum BotFace {
         let r = Double((v >> 16) & 0xFF) / 255, g = Double((v >> 8) & 0xFF) / 255, b = Double(v & 0xFF) / 255
         return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.82
     }
+    /// A near-black bot: on a dark page it needs a light hairline, as a white one needs a grey
+    /// one on white.
+    public static func isDark(_ hex: String) -> Bool {
+        var h = hex.trimmingCharacters(in: .whitespaces); if h.hasPrefix("#") { h.removeFirst() }
+        guard h.count == 6, let v = UInt32(h, radix: 16) else { return false }
+        let r = Double((v >> 16) & 0xFF) / 255, g = Double((v >> 8) & 0xFF) / 255, b = Double(v & 0xFF) / 255
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.16
+    }
 
     static func smooth(_ x: Double) -> Double { let u = min(1, max(0, x)); return u * u * (3 - 2 * u) }
     /// Slow start, quick middle, slow stop — a whole turn in one stroke.
@@ -1135,6 +1143,12 @@ public struct BotFaceView: View {
                     .mask { ZStack { plate.fill(.white); hairline.fill(.black).blendMode(.destinationOut) }.compositingGroup() }
                     .allowsHitTesting(false)
                 plate.fill(LinearGradient(colors: [Color(red: 0.72, green: 0.76, blue: 0.86).opacity(0.45 * (1 - m.dim)), .clear], startPoint: .top, endPoint: .center))
+                    .allowsHitTesting(false)
+            }
+            // A black bot on a dark page: a light hairline inside the edge, or it is a hole.
+            if BotFace.isDark(spec.hex), colorScheme == .dark {
+                plate.fill(Color.white.opacity(0.32))
+                    .mask { ZStack { plate.fill(.white); hairline.fill(.black).blendMode(.destinationOut) }.compositingGroup() }
                     .allowsHitTesting(false)
             }
             if m.sheen > 0.01 {

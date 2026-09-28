@@ -465,9 +465,37 @@ struct ApprovalsView: View {
             } header: { Text("approvals") } footer: {
                 Text("Smart lets a guardian model auto-approve routine commands and escalate risky ones. Manual asks you for every dangerous command. Off disables the gate. YOLO (skip approvals) is per session, default off, and lives in the chat's model menu.")
             }
+            Section {
+                if allowlist.isEmpty {
+                    Text("Nothing yet. Answering \u{201C}Always\u{201D} on an approval card adds a rule here.").font(.footnote).foregroundStyle(.secondary)
+                } else {
+                    ForEach(allowlist, id: \.self) { rule in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(rule).font(.system(.body, design: .monospaced)).lineLimit(2)
+                            Text(ruleKind(rule)).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .onDelete { offsets in
+                        var next = allowlist; next.remove(atOffsets: offsets)
+                        Task { await write(["command_allowlist": .array(next.map { .string($0) })], topLevel: true) }
+                    }
+                }
+            } header: { Text("Always allowed · \(botLabel)") } footer: {
+                Text("Each rule is a command pattern or a tool, not one exact command, and it belongs to this bot's gateway profile: every chat with \(botLabel) runs matching commands without asking. Swipe a rule to remove it; new chats pick that up at once.")
+            }
             if let error { Text(error).foregroundStyle(.red).font(.footnote) }
         }
         .task(id: rt?.selectedProfile) { await load() }
+    }
+
+    @State private var allowlist: [String] = []
+    private var botLabel: String { rt?.profiles.first { $0.name == rt?.selectedProfile }?.label ?? rt?.selectedProfile ?? "this bot" }
+
+    /// The rule in words: a command pattern, a tool, or a tool rule (see `ApprovalRequest.alwaysScope`).
+    private func ruleKind(_ rule: String) -> String {
+        if let colon = rule.firstIndex(of: ":") { return "Tool rule · \(rule[..<colon])" }
+        if rule == "execute_code" || !rule.contains(" ") && !rule.contains("*") && rule.allSatisfy({ $0.isLetter || $0 == "_" }) { return "Tool" }
+        return "Command pattern"
     }
 
     private func load() async {
@@ -477,14 +505,18 @@ struct ApprovalsView: View {
             let a = cfg["config"]?["approvals"] ?? cfg["approvals"]
             mode = a?["mode"]?.stringValue ?? "smart"
             timeout = a?["timeout"]?.doubleValue ?? 300
+            let raw = cfg["config"]?["command_allowlist"] ?? cfg["command_allowlist"]
+            allowlist = raw?.arrayValue?.compactMap(\.stringValue) ?? []
             loaded = true
         } catch { self.error = error.localizedDescription }
     }
 
-    private func write(_ fields: [String: JSONValue]) async {
+    /// `topLevel`: the fields sit at the root of the config (the allowlist) rather than under `approvals`.
+    private func write(_ fields: [String: JSONValue], topLevel: Bool = false) async {
         guard let rt else { return }
         do {
-            let _: JSONValue = try await rt.api.send("PUT", "/api/config", profile: rt.selectedProfile, json: ["config": .object(["approvals": .object(fields)])])
+            let body: JSONValue = topLevel ? .object(fields) : .object(["approvals": .object(fields)])
+            let _: JSONValue = try await rt.api.send("PUT", "/api/config", profile: rt.selectedProfile, json: ["config": body])
             await load()
         } catch { self.error = error.localizedDescription }
     }

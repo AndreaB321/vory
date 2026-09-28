@@ -246,10 +246,22 @@ public struct ApprovalRequest: Codable, Hashable, Sendable, Identifiable {
     public var choices: [String]?
     public var toolName: String?
     public var smartDenied: Bool?
+    /// The rule "Session" and "Always" allow: a command pattern (`rm -rf`, say), a tool (`execute_code`)
+    /// or a tool rule (`write_file:<hash>`), never the exact command. Nil on older gateways.
+    public var patternKey: String?
     public var id: String { requestId }
     public var offeredChoices: [String] { (choices?.isEmpty == false ? choices! : ["once", "session", "always", "deny"]) }
+    /// What "Always" would allow, in words: the rule, then how it is keyed.
+    public var alwaysScope: String {
+        let key = patternKey?.trimmingCharacters(in: .whitespaces) ?? ""
+        if key.isEmpty { return "this kind of command" }
+        if key.hasPrefix("tirith:") { return "this finding (session only)" }
+        if let colon = key.firstIndex(of: ":") { return "the \(key[..<colon]) tool for this kind of request" }
+        if key == toolName || key == "execute_code" { return "the \(key) tool" }
+        return "commands matching “\(key)”"
+    }
 
-    public init(requestId: String, sessionId: String, command: String? = nil, description: String? = nil, choices: [String]? = nil, toolName: String? = nil, smartDenied: Bool? = nil) {
+    public init(requestId: String, sessionId: String, command: String? = nil, description: String? = nil, choices: [String]? = nil, toolName: String? = nil, smartDenied: Bool? = nil, patternKey: String? = nil) {
         self.requestId = requestId
         self.sessionId = sessionId
         self.command = command
@@ -257,6 +269,7 @@ public struct ApprovalRequest: Codable, Hashable, Sendable, Identifiable {
         self.choices = choices
         self.toolName = toolName
         self.smartDenied = smartDenied
+        self.patternKey = patternKey
     }
 }
 
