@@ -16,6 +16,11 @@ struct TranscriptView: View {
     @State private var stickToBottom = true
     @State private var awayFromBottom = false
     @State private var userScrolling = false
+    /// Scrolling is by content edge, not by the "bottom" marker view: with the lazy stack a
+    /// marker that is not yet laid out gets an estimated position, and the jump-to-bottom button
+    /// overshot and bounced back up.
+    @State private var scrollPosition = ScrollPosition(edge: .bottom)
+    @State private var insetSettle: Task<Void, Never>?
     /// How much of the scroll view the keyboard covers (beyond the home-indicator safe area). The
     /// thread moves up with the keyboard and, when it was at the bottom, stays there.
     @State private var keyboardInset: CGFloat = 0
@@ -53,7 +58,7 @@ struct TranscriptView: View {
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
+        Group {
             ScrollView {
                 TimeRevealColumn {
                 // Lazy: a long session (hundreds of replies and tool rows) used to build every
@@ -114,6 +119,7 @@ struct TranscriptView: View {
                 .animation(.snappy(duration: 0.28), value: chat.items.count)
                 }
             }
+            .scrollPosition($scrollPosition)
             .contentMargins(.bottom, bottomInset + 8 + keyboardInset, for: .scrollContent)
             .contentMargins(.top, topInset + 8, for: .scrollContent)
             // The keyboard is handled by hand (below) so the last message rides up with it instead
@@ -128,7 +134,7 @@ struct TranscriptView: View {
                 // thread and the composer arrive together instead of the composer overlapping.
                 withAnimation(.interpolatingSpring(mass: 3, stiffness: 1000, damping: 500, initialVelocity: 0)) {
                     keyboardInset = inset
-                    if stickToBottom { proxy.scrollTo("bottom", anchor: .bottom) }
+                    if stickToBottom { scrollPosition.scrollTo(edge: .bottom) }
                 }
             }
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in
@@ -150,7 +156,7 @@ struct TranscriptView: View {
             .overlay(alignment: .bottomTrailing) {
                 JumpToBottomButton(visible: awayFromBottom) {
                     stickToBottom = true
-                    withAnimation(.snappy) { proxy.scrollTo("bottom", anchor: .bottom) }
+                    withAnimation(.snappy) { scrollPosition.scrollTo(edge: .bottom) }
                 }
                 .padding(.trailing, 16).padding(.bottom, bottomInset + 12 + keyboardInset)
             }
@@ -163,13 +169,26 @@ struct TranscriptView: View {
             // Streaming text follows unanimated (tokens arrive faster than an animated scroll
             // settles); a new message glides: the bubble slides in and the thread eases up with it.
             .onChange(of: chat.items.last) { _, _ in
-                if stickToBottom, !userScrolling { proxy.scrollTo("bottom", anchor: .bottom) }
+                if stickToBottom, !userScrolling { scrollPosition.scrollTo(edge: .bottom) }
             }
             .onChange(of: chat.items.count) { _, _ in
-                if stickToBottom, !userScrolling { withAnimation(.easeOut(duration: 0.28)) { proxy.scrollTo("bottom", anchor: .bottom) } }
+                if stickToBottom, !userScrolling { withAnimation(.easeOut(duration: 0.28)) { scrollPosition.scrollTo(edge: .bottom) } }
             }
             .onChange(of: chat.statusLine) { _, _ in
-                if stickToBottom, !userScrolling { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) } }
+                if stickToBottom, !userScrolling { withAnimation(.easeOut(duration: 0.2)) { scrollPosition.scrollTo(edge: .bottom) } }
+            }
+            // The dock changing height (an approval card arriving or leaving) moves the bottom
+            // margin; a locked thread follows, so no blank band opens under the last row. Once
+            // the height has settled, not per frame of the card's grow animation: a scroll per
+            // frame against a moving margin overshot into blank space.
+            .onChange(of: bottomInset) { _, _ in
+                guard stickToBottom else { return }
+                insetSettle?.cancel()
+                insetSettle = Task {
+                    try? await Task.sleep(for: .milliseconds(80))
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.easeOut(duration: 0.2)) { scrollPosition.scrollTo(edge: .bottom) }
+                }
             }
         }
     }

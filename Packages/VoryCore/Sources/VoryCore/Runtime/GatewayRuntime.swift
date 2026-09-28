@@ -239,7 +239,15 @@ public final class GatewayRuntime {
         }
     }
 
+    /// How many server→client requests (approval, clarify…) this socket has received since it
+    /// connected, and the last one: the diagnostics page shows them, so "I cannot see approvals"
+    /// can be told apart as "none arrive" versus "they arrive and are not drawn".
+    public private(set) var serverRequestsReceived = 0
+    public private(set) var lastServerRequest: String?
+
     private func answer(serverRequest req: ServerRequest) async -> JSONValue? {
+        serverRequestsReceived += 1
+        lastServerRequest = "\(req.method) · \(Date().formatted(date: .omitted, time: .shortened))"
         if let chat = registry.byRuntime(req.sessionID) ?? registry.byStored(req.sessionID) {
             return await chat.answer(serverRequest: req)
         }

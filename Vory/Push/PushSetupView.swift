@@ -281,6 +281,16 @@ struct PushSetupView: View {
                 LabeledContent("Push relay", value: push.relayRegisteredAt.map { "registered " + $0.formatted(date: .omitted, time: .shortened) } ?? "not registered yet")
             }
             LabeledContent("Device file on gateway", value: push.registeredAt.map { "published " + $0.formatted(date: .omitted, time: .shortened) } ?? "not published yet")
+            // Approval and clarify cards arrive as server→client requests on this socket; this
+            // says whether the gateway agreed to send them and whether any have come.
+            LabeledContent("Approval requests") {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(rt.serverRequestsAdvertised.isEmpty ? "not acknowledged by the gateway" : "\(rt.serverRequestsReceived) received")
+                    Text(rt.lastServerRequest ?? (rt.serverRequestsAdvertised.isEmpty ? "reconnect, or update Hermes on the gateway" : "none yet on this connection"))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .multilineTextAlignment(.trailing)
+            }
             if let e = push.relayError ?? push.lastError ?? push.registrationFailure { Label(e, systemImage: "xmark.octagon").font(.footnote).foregroundStyle(.red) }
             Button {
                 Task { await setup.registerPhone(push: push, runtime: rt) }

@@ -271,7 +271,12 @@ public actor GatewaySocket {
         if let result = await onServerRequest(req) {
             await sendText(RPCFrames.response(id: req.id, result: result))
         } else {
-            await sendText(RPCFrames.errorResponse(id: req.id, code: RPCError.methodNotFound, message: "unsupported request: \(req.method)"))
+            // The gateway settles a request on the FIRST reply from any client, so an error here
+            // would withdraw the approval for every client and time the turn out. A request
+            // this app cannot place (a session it has not opened, a method it does not draw) is
+            // left open instead: it waits in the gateway's open_requests, replays on the next
+            // resume, and another client can still answer it.
+            log.warning("server request \(req.method, privacy: .public) for \(req.sessionID, privacy: .public) left unanswered")
         }
     }
 

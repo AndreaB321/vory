@@ -66,11 +66,17 @@ final class LiveActivityController: TurnActivityReporting {
     /// …then it is ended and lingers on the Lock Screen this much longer.
     nonisolated static let finishedLinger: TimeInterval = 60
     /// The last dozen things that happened to activities, newest last, for the diagnostics page.
-    nonisolated(unsafe) static var log: [String] = []
+    /// Written from the main thread and from the detached token/state observers at once: the
+    /// lock is what keeps two appends from corrupting the array (a malloc abort on 1.1 (6), right
+    /// after a second chat started its activity while the first was running).
+    private nonisolated static let logLock = NSLock()
+    nonisolated(unsafe) private static var logStorage: [String] = []
+    nonisolated static var log: [String] { logLock.lock(); defer { logLock.unlock() }; return logStorage }
     nonisolated static func note(_ what: String) {
         let stamp = Date().formatted(.dateTime.hour().minute().second())
-        log.append("\(stamp) \(what)")
-        if log.count > 12 { log.removeFirst(log.count - 12) }
+        logLock.lock(); defer { logLock.unlock() }
+        logStorage.append("\(stamp) \(what)")
+        if logStorage.count > 12 { logStorage.removeFirst(logStorage.count - 12) }
     }
     private var stateTask: Task<Void, Never>?
 

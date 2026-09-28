@@ -54,7 +54,19 @@ public final class ChatSession: @MainActor Identifiable, ChatIdentity {
             runtime.publishSnapshot()
             if isRunning {
                 activityEndTask?.cancel(); activityEndTask = nil
+                // A missed approval frame (a proxy that drops it, another client that answered
+                // first, a capability the gateway never recorded): while the turn runs the
+                // gateway's pending queue is asked every few seconds, so the card still appears.
+                approvalPollTask?.cancel()
+                approvalPollTask = Task { [weak self] in
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: .seconds(6))
+                        guard let self, self.isRunning, !Task.isCancelled else { return }
+                        await self.pollPendingApprovals()
+                    }
+                }
             } else {
+                approvalPollTask?.cancel(); approvalPollTask = nil
                 // Every way a turn can stop (reclaim, a resume snapshot that says idle, a stray
                 // session.info) funnels through here, so the Live Activity cannot outlive the turn —
                 // but a moment later, so the brief idle blip between submit and the first token does
@@ -72,6 +84,7 @@ public final class ChatSession: @MainActor Identifiable, ChatIdentity {
     /// Phase the next `isRunning = false` reports to the activity surface.
     private var endPhase = "done"
     private var activityEndTask: Task<Void, Never>?
+    private var approvalPollTask: Task<Void, Never>?
     public var statusLine: String? {
         didSet { if isRunning, statusLine != oldValue, cards.isEmpty { activity.update(for: self, attention: false) } }
     }
