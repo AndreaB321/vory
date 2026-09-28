@@ -114,8 +114,6 @@ def render(build, version, groups, icon_path, out_path, theme="light", scale=1.5
     centred("Vory", F(64, True), 458, headline)
     centred(f"TestFlight build {build}", F(38), 540, accent)
     centred(f"Public beta {version}", F(28), 592, muted)
-    rule = tuple(int(c * 0.88) for c in bg) if theme == "light" else (40, 42, 56)
-    d.line((110 * S, 660 * S, W - 110 * S, 660 * S), fill=rule, width=max(1, int(1.5 * S)))
     # one column of bullets
     x, y, colw = 110, 700, 1200 - 220
     hf, bf = F(28, True), F(34)
