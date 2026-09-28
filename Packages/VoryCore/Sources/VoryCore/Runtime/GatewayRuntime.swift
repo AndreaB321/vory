@@ -82,6 +82,13 @@ public final class GatewayRuntime {
         return RequestSigner(authMode: connection.authMode, secrets: refreshed)
     }
 
+    /// Renews the session the way a 401 mid-request does, for a caller that got "session
+    /// expired" back from an action and wants one more go before asking the user to sign in.
+    public func refreshSession() async throws {
+        let s = try await refreshSigner()
+        await api.updateSigner(s)
+    }
+
     public func replaceSecrets(_ s: GatewaySecrets) async {
         secrets = s
         store.saveSecrets(s, for: connection.id)

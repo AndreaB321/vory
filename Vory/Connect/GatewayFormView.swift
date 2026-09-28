@@ -68,10 +68,13 @@ struct GatewayFormView: View {
     @State private var signingIn = false
     @State private var authClient = NativeAuthClient()
 
-    private var normalizedURL: GatewayURL? { try? GatewayURL.normalize(urlText, pathPrefix: pathPrefix) }
+    /// A bare address on a home network or tailnet means plain http (no certificate there);
+    /// anywhere else, https. Typing the scheme always wins.
+    private var defaultScheme: String { kind == .local || kind == .tailscale ? "http" : "https" }
+    private var normalizedURL: GatewayURL? { try? GatewayURL.normalize(urlText, pathPrefix: pathPrefix, defaultScheme: defaultScheme) }
     private var urlError: String? {
         guard !urlText.isEmpty else { return nil }
-        do { _ = try GatewayURL.normalize(urlText, pathPrefix: pathPrefix); return nil } catch { return error.localizedDescription }
+        do { _ = try GatewayURL.normalize(urlText, pathPrefix: pathPrefix, defaultScheme: defaultScheme); return nil } catch { return error.localizedDescription }
     }
     private var access: CloudflareAccess { CloudflareAccess(clientId: cfClientId.trimmingCharacters(in: .whitespaces), clientSecret: cfClientSecret.trimmingCharacters(in: .whitespaces)) }
 
@@ -101,6 +104,7 @@ struct GatewayFormView: View {
                     if let urlError { Text(urlError).foregroundStyle(.red) }
                     else if let u = normalizedURL {
                         Text("Will connect to \(u.description)").foregroundStyle(.secondary)
+                        if !urlText.contains("://") { Text(u.isTLS ? "No scheme typed, so https. Type http:// for a plain connection." : "No scheme typed, so plain http. Type https:// if the gateway has a certificate.").foregroundStyle(.secondary) }
                         if !u.isTLS && !u.isPrivateHost && !u.isTailscaleHost { Text("This is plain HTTP to a public host; credentials will travel unencrypted.").foregroundStyle(.orange) }
                         if kind == .tailscale && !u.isTailscaleHost { Text("This does not look like a Tailscale address (a *.ts.net name or 100.x.x.x).").foregroundStyle(.orange) }
                         if kind == .local && !u.isPrivateHost && !u.isTailscaleHost { Text("This is not a local address; pick another connection type if the gateway is elsewhere.").foregroundStyle(.orange) }
@@ -108,6 +112,12 @@ struct GatewayFormView: View {
                         if u.isTailscaleHost { Text("Tailscale must be connected on this iPhone for the test to pass.").foregroundStyle(.secondary) }
                     }
                 }
+            }
+
+            Section {
+                NavigationLink { TroubleshootingView() } label: { Label("Troubleshooting", systemImage: "wrench.and.screwdriver") }
+            } footer: {
+                Text("What to check when the test stops, sign-in fails, or the Companion will not install.")
             }
 
             Section("Authentication") {

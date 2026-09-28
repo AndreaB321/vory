@@ -286,7 +286,7 @@ struct PushSetupView: View {
             LabeledContent("Approval requests") {
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(rt.serverRequestsAdvertised.isEmpty ? "not acknowledged by the gateway" : "\(rt.serverRequestsReceived) received")
-                    Text(rt.lastServerRequest ?? (rt.serverRequestsAdvertised.isEmpty ? "reconnect, or update Hermes on the gateway" : "none yet on this connection"))
+                    Text(rt.lastServerRequest ?? (rt.serverRequestsAdvertised.isEmpty ? "reconnect, or update Hermes on the gateway" : "none yet on this connection; only actions the gateway's approval mode holds for a person reach the phone"))
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 .multilineTextAlignment(.trailing)
@@ -611,6 +611,11 @@ struct RestartCountdownRows: View {
             Label(setup.restartError.map { "The restart failed: \($0)" } ?? "Restart needed: the files are on the Gateway, but nothing works until it restarts.", systemImage: "exclamationmark.triangle.fill")
                 .font(.footnote).foregroundStyle(.orange)
             Button { Task { await setup.restartNow(runtime: runtime) } } label: { Label("Restart Gateway now", systemImage: "arrow.clockwise") }
+            if setup.restartError?.localizedCaseInsensitiveContains("expired") == true || setup.restartError?.localizedCaseInsensitiveContains("401") == true {
+                NavigationLink { GatewayFormView(existing: runtime.connection) } label: { Label("Sign in again", systemImage: "person.badge.key") }
+                Text("If the gateway already came back, Settings › Companion will show it running; sign in again and the restart is not needed.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
         }
     }
 }
@@ -1126,13 +1131,34 @@ final class PushSetupModel {
         // restart began; failing that, the action's own short deadline says what happened.
         let began = Date().timeIntervalSince1970
         let profile = heartbeat?.profile == "default" ? nil : heartbeat?.profile
-        let action = Task { await rt.maintenance.restartGateway(runtime: rt, profile: profile) }
+        var action = Task { await rt.maintenance.restartGateway(runtime: rt, profile: profile) }
         var back = false
+        var refreshed = false
         for _ in 0..<40 {   // up to two minutes
             try? await Task.sleep(for: .seconds(3))
-            if case .failed = rt.maintenance.phase { break }
+            if case .failed(let why) = rt.maintenance.phase {
+                // The gateway said the session had expired (a tester hit this seven minutes after
+                // a successful install): renew it once and go again before asking for a sign-in.
+                if !refreshed, why.localizedCaseInsensitiveContains("expired") || why.localizedCaseInsensitiveContains("401") {
+                    refreshed = true
+                    if (try? await rt.refreshSession()) != nil {
+                        action = Task { await rt.maintenance.restartGateway(runtime: rt, profile: profile) }
+                        continue
+                    }
+                }
+                break
+            }
             await checkCompanion(runtime: rt)
             if companionHealthy, let hb = heartbeat, hb.updatedAt > began + 2 { back = true; break }
+        }
+        if !back, case .failed = rt.maintenance.phase {
+            // The call failed, but the restart may still have gone through (the session dies
+            // with the old process): give the companion a minute to report back.
+            for _ in 0..<20 {
+                try? await Task.sleep(for: .seconds(3))
+                await checkCompanion(runtime: rt)
+                if companionHealthy, let hb = heartbeat, hb.updatedAt > began + 2 { back = true; break }
+            }
         }
         if back {
             rt.maintenance.finishEarly("Restarting gateway: back up")

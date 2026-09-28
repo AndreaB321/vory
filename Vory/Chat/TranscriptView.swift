@@ -238,6 +238,14 @@ extension TranscriptView {
                 guard !Task.isCancelled else { return }
             }
             withAnimation(.easeOut(duration: 0.25)) { scrollPosition.scrollTo(edge: .bottom) }
+            // A tester on iOS 26.5 tapped the arrow and nothing moved: if the edge scroll did
+            // not land, aim at the bottom marker, then the edge once more.
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled, distanceFromBottom > 24 else { return }
+            scrollPosition.scrollTo(id: "bottom", anchor: .bottom)
+            try? await Task.sleep(for: .milliseconds(60))
+            guard !Task.isCancelled else { return }
+            scrollPosition.scrollTo(edge: .bottom)
         }
     }
 }

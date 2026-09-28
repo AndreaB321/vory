@@ -26,13 +26,15 @@ public struct GatewayURL: Hashable, Codable, Sendable, CustomStringConvertible {
 
     /// Normalizes user input. Accepts `https://host`, `https://host/path`, `http://host:9119`, `host:9119`.
     /// Strips trailing slashes and any pasted `/api/...` or `/chat` suffix; appends an optional path prefix.
-    public static func normalize(_ raw: String, pathPrefix: String? = nil) throws(GatewayURLError) -> GatewayURL {
+    /// `defaultScheme` is what a bare `host:port` gets: https, or http for a home or tailnet
+    /// address where there is no certificate to be had.
+    public static func normalize(_ raw: String, pathPrefix: String? = nil, defaultScheme: String = "https") throws(GatewayURLError) -> GatewayURL {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty { throw .empty }
         if !text.contains("://") {
             if text.lowercased().hasPrefix("ws://") { text = "http://" + text.dropFirst(5) }
             else if text.lowercased().hasPrefix("wss://") { text = "https://" + text.dropFirst(6) }
-            else { text = "https://" + text }
+            else { text = defaultScheme + "://" + text }
         }
         guard var comps = URLComponents(string: text) else { throw .invalid }
         let scheme = (comps.scheme ?? "").lowercased()
