@@ -60,7 +60,7 @@ def wrap(d, text, f, width):
 PALETTES = {
     # background, glow 1, glow 2, headline, body, muted, accent, shadow alpha
     "dark":  ((9, 10, 16), (20, 60, 120), (50, 22, 90), (245, 245, 250), (228, 229, 238), (150, 152, 168), (120, 160, 255), 160),
-    "light": ((246, 247, 251), (200, 222, 255), (232, 214, 250), (18, 20, 30), (40, 42, 56), (112, 116, 134), (31, 110, 210), 70),
+    "light": ((246, 247, 251), (200, 222, 255), (232, 214, 250), (18, 20, 30), (40, 42, 56), (112, 116, 134), (31, 110, 210), 48),
 }
 
 def background(W, H, bg, g1, g2, seed=7):
@@ -74,18 +74,20 @@ def background(W, H, bg, g1, g2, seed=7):
         d2 = ((x / W - cx) ** 2 + ((y / H - cy) * H / W) ** 2) / (r * r)
         w = np.exp(-d2 * 1.8)[:, :, None]
         img = img * (1 - w) + np.array(col, np.float32)[None, None, :] * w
+    # TPDF dither: ±1 level, triangular, the standard for hiding quantisation steps without
+    # visible grain (Gaussian noise at 2 levels read as texture on the phone).
     rng = np.random.default_rng(seed)
-    img += rng.normal(0, 0.9, img.shape).astype(np.float32)
+    img += (rng.uniform(-0.5, 0.5, img.shape) + rng.uniform(-0.5, 0.5, img.shape)).astype(np.float32)
     return Image.fromarray(np.clip(img + 0.5, 0, 255).astype(np.uint8), "RGB")
 
-def dithered(rgba):
-    """A touch of noise on the icon's colour: the glass gradient in the 8-bit render bands
-    when the tile is shown large."""
-    import numpy as np
-    a = np.asarray(rgba).astype(np.float32)
-    rng = np.random.default_rng(11)
-    a[:, :, :3] += rng.normal(0, 0.8, a[:, :, :3].shape).astype(np.float32)
-    return Image.fromarray(np.clip(a + 0.5, 0, 255).astype(np.uint8), "RGBA")
+def smoothed(rgba, target):
+    """The glass gradient in the 8-bit icon render steps by several levels at a time. A small
+    blur of the colour at full render size (2048) spreads each step over a few pixels, and the
+    4x downsample then averages them away; the outline and eyes lose under a pixel of edge."""
+    r, g, b, a = rgba.split()
+    rgb = Image.merge("RGB", (r, g, b)).filter(ImageFilter.GaussianBlur(3.5))
+    out = Image.merge("RGBA", (*rgb.split(), a))
+    return out.resize((target, target), Image.LANCZOS)
 
 def render(build, version, groups, icon_path, out_path, theme="light", scale=1.5):
     """A 4:5 portrait card (1200x1500 layout units, drawn at `scale`): what X shows uncropped
@@ -97,11 +99,12 @@ def render(build, version, groups, icon_path, out_path, theme="light", scale=1.5
     # the icon tile, centred, floating on a soft shadow
     size, ix, iy = int(330 * S), (W - int(330 * S)) // 2, int(96 * S)
     if icon_path and os.path.exists(icon_path):
-        ic = dithered(Image.open(icon_path).convert("RGBA").resize((size, size), Image.LANCZOS))
-        pad = int(60 * S)
+        ic = smoothed(Image.open(icon_path).convert("RGBA"), size)
+        # a wide, faint shadow under the tile (a tight dark one showed the dither as texture)
+        pad = int(90 * S)
         sh = Image.new("RGBA", (size + 2 * pad, size + 2 * pad), (0, 0, 0, 0))
-        ImageDraw.Draw(sh).rounded_rectangle((pad, pad + int(18 * S), size + pad, size + pad + int(18 * S)), radius=int(size * 0.22), fill=(0, 0, 0, shadow_a))
-        sh = sh.filter(ImageFilter.GaussianBlur(28 * S))
+        ImageDraw.Draw(sh).rounded_rectangle((pad, pad + int(22 * S), size + pad, size + pad + int(22 * S)), radius=int(size * 0.22), fill=(20, 30, 70, shadow_a))
+        sh = sh.filter(ImageFilter.GaussianBlur(36 * S))
         img.paste(sh, (ix - pad, iy - pad), sh)
         img.paste(ic, (ix, iy), ic)
     d = ImageDraw.Draw(img)
@@ -130,7 +133,7 @@ def render(build, version, groups, icon_path, out_path, theme="light", scale=1.5
     centred(SITE, F(34, True), 1408, accent)
     img.save(out_path, optimize=True)
     # The one to post: X re-encodes to JPEG anyway, and the dither makes the PNG several MB.
-    img.save(os.path.splitext(out_path)[0] + ".jpg", quality=92, subsampling=0, optimize=True)
+    img.save(os.path.splitext(out_path)[0] + ".jpg", quality=95, subsampling=0, optimize=True)
 
 def posts(build, groups):
     fixed = [short(b, 95) for b in groups.get("Fixed in this build", [])]
