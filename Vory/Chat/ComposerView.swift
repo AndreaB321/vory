@@ -115,6 +115,12 @@ struct ComposerView: View {
             HStack(alignment: .bottom, spacing: 8) {
                 attachMenu
                 HStack(alignment: .bottom, spacing: 6) {
+                    if dictation.isListening {
+                        // The field is the waveform while the mic listens; the words land when it stops.
+                        DictationWaveform(dictation: dictation)
+                            .padding(.leading, 14).padding(.vertical, 7)
+                            .transition(.opacity)
+                    } else {
                     ComposerTextView(text: $text, placeholder: "Type / for commands", focused: $focused, accessibilityID: "composer.text",
                                      onSend: { Task { await send() } },
                                      onPasteData: { data, name, type in stagePasted(data, name: name, type: type) },
@@ -128,6 +134,7 @@ struct ComposerView: View {
                             if new.count >= limit, old.count < limit || new.count - old.count > 400 { withAnimation(.snappy) { longTextOffer = true } }
                             else if new.count < limit { longTextOffer = false }
                         }
+                    }
                     trailingControl
                         .padding(.trailing, 4).padding(.bottom, 4)
                 }
@@ -147,6 +154,9 @@ struct ComposerView: View {
             }
         }
         .animation(.snappy(duration: 0.25), value: slashSuggestions.map(\.name))
+        .animation(.snappy(duration: 0.2), value: dictation.isListening)
+        // Why the mic did nothing (no permission, no recognizer): said in the banner, not swallowed.
+        .onChange(of: dictation.error) { _, e in if let e { chat.banner = e; dictation.error = nil } }
         .photosPicker(isPresented: $showPhotos, selection: $photoItems, maxSelectionCount: 6, matching: .any(of: [.images, .videos]))
         .onChange(of: photoItems) { _, items in Task { await importPhotos(items) } }
         .fullScreenCover(isPresented: $showCamera) { CameraPicker { data, name in chat.stageAttachment(data: data, name: name, kind: .image) }.ignoresSafeArea() }
@@ -159,7 +169,9 @@ struct ComposerView: View {
 
     /// Mic when the field is empty, send otherwise, stop while a turn runs — one 28pt slot.
     @ViewBuilder private var trailingControl: some View {
-        if chat.isRunning, text.isEmpty {
+        if dictation.isListening {
+            TalkButton(dictation: dictation) { transcript in text = transcript; focused = true }
+        } else if chat.isRunning, text.isEmpty {
             Button { Task { await chat.stop() } } label: {
                 Image(systemName: "stop.fill").font(.caption.weight(.bold)).foregroundStyle(.white)
                     .frame(width: 28, height: 28).background(.red, in: .circle)
@@ -167,7 +179,7 @@ struct ComposerView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Stop")
         } else if text.isEmpty && chat.staged.isEmpty {
-            HoldToTalkButton(dictation: dictation) { transcript in text = transcript }
+            TalkButton(dictation: dictation) { transcript in text = transcript; focused = true }
         } else {
             let disabled = text.trimmingCharacters(in: .whitespaces).isEmpty && chat.staged.isEmpty
             Button { Task { await send() } } label: {

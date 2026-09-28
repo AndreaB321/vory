@@ -131,18 +131,19 @@ struct MainTabView: View {
             // chat opened after launch (the bar stayed, tappable, over the composer). It slides
             // and fades instead, and its reserved height collapses to nothing.
             VoryTabBar(tabs: tabs) { compose() }
-                .frame(height: model.tabBarHidden ? 0 : VoryTabBar.reservedHeight, alignment: .top)
                 .offset(y: model.tabBarHidden ? 140 : 0)
                 .opacity(model.tabBarHidden ? 0 : 1)
+                // The slide and fade animate; the reserved height below does not. Animating the
+                // safe-area inset while a chat opened made its thread bounce up and down.
+                .animation(.snappy(duration: 0.3), value: model.tabBarHidden)
+                .frame(height: model.tabBarHidden ? 0 : VoryTabBar.reservedHeight, alignment: .top)
                 // Not tappable while it slides away: a tap then switched tabs under an open chat.
                 .allowsHitTesting(!model.tabBarHidden)
                 .accessibilityHidden(model.tabBarHidden)
         }
-        // Lists inside the pages' navigation stacks do not pick up the inset above on this iOS
-        // (their last rows ended under the bar), so their scroll content gets the same margin plus a
-        // breath of room, like the system's lists above its bar.
-        .contentMargins(.bottom, model.tabBarHidden ? 0 : VoryTabBar.reservedHeight + 16, for: .scrollContent)
-        .animation(.snappy(duration: 0.3), value: model.tabBarHidden)
+        // The matching scroll margin for the pages' lists lives on each tab root (`tabRoot`), not
+        // here: applied to the whole tree it reached the chat thread as well and, on some phones,
+        // stacked onto the thread's own margin as a blank band under the last reply.
         .onChange(of: tabs) { _, now in
             // The selected tab was removed from the layout: fall back to Chats instead of a blank pane.
             if !now.contains(model.selectedTab) { model.selectedTab = .chats }

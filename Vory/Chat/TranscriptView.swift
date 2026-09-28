@@ -7,8 +7,14 @@ struct TranscriptView: View {
     @Bindable var chat: ChatSession
     /// Long-press › "Edit & resend" hands the text back to the composer.
     var onEditMessage: (String) -> Void = { _ in }
-    /// Height of the floating dock, so the last line clears it while text still scrolls under.
-    var bottomInset: CGFloat = 60
+    /// The dock's top edge in screen coordinates (0 = unknown). The thread's bottom margin is the
+    /// distance from its own bottom edge to this: measured, not derived from a dock height added
+    /// onto some inset, which left a blank band under the last reply on some phones.
+    var dockTop: CGFloat = 0
+    /// What to use until the dock has been measured.
+    var fallbackInset: CGFloat = 60
+    @State private var scrollBottom: CGFloat = 0
+    private var bottomInset: CGFloat { dockTop > 0 && scrollBottom > dockTop ? scrollBottom - dockTop : fallbackInset }
     /// Height of the floating header (the nav bar is hidden in a chat).
     var topInset: CGFloat = 96
     /// Locked to the bottom: the thread follows every new token, tool call and card. Only the
@@ -24,7 +30,12 @@ struct TranscriptView: View {
     /// How far the bottom of the content sits below the visible area, insets included; 0 at the end.
     @State private var distanceFromBottom: CGFloat = 0
     @State private var offsetY: CGFloat = 0
+    /// While the chat is still settling after it opened (history arriving, header and dock
+    /// measuring), every adjustment lands without animation; animated ones fought each other.
+    @State private var openedAt = Date()
+    private var settling: Bool { Date().timeIntervalSince(openedAt) < 1.5 }
     @State private var jumpTask: Task<Void, Never>?
+    @State private var threadDim = false
     /// How much of the scroll view the keyboard covers (beyond the home-indicator safe area). The
     /// thread moves up with the keyboard and, when it was at the bottom, stays there.
     @State private var keyboardInset: CGFloat = 0
@@ -126,12 +137,17 @@ struct TranscriptView: View {
                 .animation(.snappy(duration: 0.28), value: chat.items.count)
                 }
             }
+            .opacity(threadDim ? 0.35 : 1)
+            .scaleEffect(threadDim ? 0.985 : 1)
             .scrollPosition($scrollPosition)
-            .contentMargins(.bottom, bottomInset + 8 + keyboardInset, for: .scrollContent)
+            // `bottomInset` is the dock's measured reach into the thread, keyboard included; the
+            // scroll view adds its own safe-area inset under that.
+            .contentMargins(.bottom, bottomInset + 8, for: .scrollContent)
             .contentMargins(.top, topInset + 8, for: .scrollContent)
             // The keyboard is handled by hand (below) so the last message rides up with it instead
             // of vanishing under the composer; SwiftUI's own avoidance would then double the inset.
             .ignoresSafeArea(.keyboard, edges: .bottom)
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { scrollBottom = $0 }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { n in
                 guard let end = (n.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue else { return }
                 let covered = max(0, UIScreen.main.bounds.maxY - end.minY)
@@ -170,15 +186,23 @@ struct TranscriptView: View {
             .overlay(alignment: .bottomLeading) {
                 if showBots, chat.isRunning {
                     BotAvatar(profile: chat.profileName, size: 28, active: true, mood: BotFaceView.Mood(state: chat.botState))
-                        .padding(.leading, 16).padding(.bottom, bottomInset + 12 + keyboardInset)
+                        .padding(.leading, 16).padding(.bottom, bottomInset + 12)
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
                         .allowsHitTesting(false)
                 }
             }
             .animation(.snappy, value: chat.isRunning)
+            .overlay(alignment: .topLeading) {
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-vory-geometry") {
+                    Text("dockTop \(Int(dockTop)) scrollBottom \(Int(scrollBottom)) inset \(Int(bottomInset)) dist \(Int(distanceFromBottom))")
+                        .font(.caption2.monospacedDigit()).padding(4).background(.yellow).foregroundStyle(.black).padding(.top, 120)
+                }
+                #endif
+            }
             .overlay(alignment: .bottomTrailing) {
                 JumpToBottomButton(visible: awayFromBottom) { jumpToBottom() }
-                .padding(.trailing, 16).padding(.bottom, bottomInset + 12 + keyboardInset)
+                .padding(.trailing, 16).padding(.bottom, bottomInset + 12)
             }
             .sheet(item: Binding(get: { selectText.map { SelectTextItem(text: $0) } }, set: { selectText = $0?.text })) { SelectTextSheet(text: $0.text) }
             .ignoresSafeArea(.container, edges: .top)
@@ -192,8 +216,11 @@ struct TranscriptView: View {
                 if stickToBottom, !userScrolling { scrollPosition.scrollTo(edge: .bottom) }
             }
             .onChange(of: chat.items.count) { _, _ in
-                if stickToBottom, !userScrolling { withAnimation(.easeOut(duration: 0.28)) { scrollPosition.scrollTo(edge: .bottom) } }
+                guard stickToBottom, !userScrolling else { return }
+                if settling { scrollPosition.scrollTo(edge: .bottom) }
+                else { withAnimation(.easeOut(duration: 0.28)) { scrollPosition.scrollTo(edge: .bottom) } }
             }
+            .onAppear { openedAt = Date() }
             .onChange(of: chat.statusLine) { _, _ in
                 if stickToBottom, !userScrolling { withAnimation(.easeOut(duration: 0.2)) { scrollPosition.scrollTo(edge: .bottom) } }
             }
@@ -212,7 +239,8 @@ struct TranscriptView: View {
                 insetSettle = Task {
                     try? await Task.sleep(for: .milliseconds(80))
                     guard !Task.isCancelled else { return }
-                    withAnimation(.easeOut(duration: 0.2)) { scrollPosition.scrollTo(edge: .bottom) }
+                    if settling { scrollPosition.scrollTo(edge: .bottom) }
+                    else { withAnimation(.easeOut(duration: 0.2)) { scrollPosition.scrollTo(edge: .bottom) } }
                 }
             }
         }
@@ -227,17 +255,21 @@ extension TranscriptView {
         stickToBottom = true
         jumpTask?.cancel()
         let far = distanceFromBottom > 900
-        if far { scrollPosition.scrollTo(edge: .bottom) }
         jumpTask = Task { @MainActor in
             if far {
-                // Land the end, then step back one screen for the run-in.
+                // Too far for an animated scroll through a lazy thread (rows laid out mid-flight
+                // jittered, and the two-step run-in read as a stutter): the thread dips, lands
+                // at the end in one move, and comes back up.
+                withAnimation(.easeIn(duration: 0.12)) { threadDim = true }
+                try? await Task.sleep(for: .milliseconds(130))
+                guard !Task.isCancelled else { return }
+                scrollPosition.scrollTo(edge: .bottom)
                 try? await Task.sleep(for: .milliseconds(40))
                 guard !Task.isCancelled else { return }
-                scrollPosition.scrollTo(y: max(0, offsetY - 700))
-                try? await Task.sleep(for: .milliseconds(40))
-                guard !Task.isCancelled else { return }
+                withAnimation(.easeOut(duration: 0.18)) { threadDim = false }
+            } else {
+                withAnimation(.easeOut(duration: 0.25)) { scrollPosition.scrollTo(edge: .bottom) }
             }
-            withAnimation(.easeOut(duration: 0.25)) { scrollPosition.scrollTo(edge: .bottom) }
             // A tester on iOS 26.5 tapped the arrow and nothing moved: if the edge scroll did
             // not land, aim at the bottom marker, then the edge once more.
             try? await Task.sleep(for: .milliseconds(400))
@@ -487,7 +519,7 @@ struct TranscriptRow: View {
                     Button { onSelectText(text) } label: { Label("Select Text", systemImage: "selection.pin.in.out") }
                     ShareLink(item: text) { Label("Share", systemImage: "square.and.arrow.up") }
                 }
-                Spacer(minLength: 40)
+                Spacer(minLength: 24)
                 }
             }
         case .steer(let text, let status):

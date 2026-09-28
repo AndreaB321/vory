@@ -95,7 +95,7 @@ struct NewChatSheet: View {
                             }
                         }
                 }
-                Button { focus = .to } label: {
+                Button { messageFocused = false; focus = .to } label: {
                     Image(systemName: "plus").font(.body.weight(.semibold))
                         .frame(width: 32, height: 32).glassEffect(.regular.interactive(), in: .circle)
                 }

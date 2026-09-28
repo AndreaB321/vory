@@ -12,6 +12,7 @@ struct ConversationView: View {
     @State private var composerText = ""
     @State private var dockHeight: CGFloat = 60
     @State private var headerHeight: CGFloat = 96
+    @State private var dockTop: CGFloat = 0
     private var safeTop: CGFloat { UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow?.safeAreaInsets.top }.first ?? 0 }
     /// The keyboard's height above the home-indicator area. Tracked by hand for the dock as the
     /// transcript does for itself: SwiftUI's own avoidance hands the inset to any scroll view in
@@ -30,7 +31,7 @@ struct ConversationView: View {
                 // The thread runs under the status bar (it ignores the top safe area) while the
                 // header sits inside it, so the thread's top margin is the header plus that inset;
                 // without it the first message starts under the pill.
-                TranscriptView(chat: chat, onEditMessage: { composerText = $0 }, bottomInset: dockHeight, topInset: headerHeight + safeTop)
+                TranscriptView(chat: chat, onEditMessage: { composerText = $0 }, dockTop: dockTop, fallbackInset: dockHeight + keyboardInset, topInset: headerHeight + safeTop)
                     .overlay {
                         if let e = chat.resumeError, chat.items.isEmpty {
                             ContentUnavailableView("Could not open chat", systemImage: "exclamationmark.triangle", description: Text(e))
@@ -44,6 +45,9 @@ struct ConversationView: View {
                             .disabled(chat.resumeError != nil && chat.items.isEmpty)
                             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { if $0 < 400 { dockHeight = $0 } }
                             .padding(.bottom, keyboardInset)
+                            // The dock's top edge on screen, keyboard included: the thread measures its
+                            // own bottom edge the same way and keeps its last line above this.
+                            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { dockTop = $0 }
                     }
                     .ignoresSafeArea(.keyboard, edges: .bottom)
                     .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { n in

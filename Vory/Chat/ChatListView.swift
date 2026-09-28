@@ -102,6 +102,8 @@ struct ChatListView: View {
             }
             .navigationDestination(for: ChatRoute.self) { route in ConversationView(route: route) }
             .navigationDestination(for: RoomRoute.self) { r in RoomView(room: r.room, initialText: r.initialText) }
+            // Room above the tab bar for the last row; only the list, not the chats pushed over it.
+            .contentMargins(.bottom, model.tabBarHidden ? 0 : VoryTabBar.reservedHeight + 16, for: .scrollContent)
             // Under the title, not docked at the bottom where our tab bar lives.
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search chats")
             .onChange(of: searchText) { _, q in Task { await search(q) } }
