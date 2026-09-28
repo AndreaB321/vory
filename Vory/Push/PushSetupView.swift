@@ -577,12 +577,14 @@ struct RestartCountdownRows: View {
                     Label("Restarting the Gateway in", systemImage: "arrow.clockwise.circle").font(.footnote.weight(.medium))
                     Spacer()
                     // The countdown itself pulls the trigger when it reaches zero.
+                    // The tick that reaches zero renders with `now` past `end`; a range must
+                    // not run backwards (it trapped: "Range requires lowerBound <= upperBound").
                     TimelineView(.periodic(from: .now, by: 1)) { ctx in
-                        Text(timerInterval: Date()...end, countsDown: true).font(.title3.monospacedDigit().weight(.semibold))
+                        Text(timerInterval: min(ctx.date, end)...end, countsDown: true).font(.title3.monospacedDigit().weight(.semibold))
                             .onChange(of: ctx.date >= end) { _, due in if due { Task { await setup.restartNow(runtime: runtime) } } }
                     }
                 }
-                ProgressView(timerInterval: Date()...end, countsDown: true) { EmptyView() } currentValueLabel: { EmptyView() }
+                ProgressView(timerInterval: min(Date(), end)...end, countsDown: true) { EmptyView() } currentValueLabel: { EmptyView() }
                     .tint(.orange)
                 HStack {
                     Button { Task { await setup.restartNow(runtime: runtime) } } label: { Text("Restart now").frame(maxWidth: .infinity) }
@@ -1108,15 +1110,28 @@ final class PushSetupModel {
         }
         // Another maintenance action still tailing its log would make the restart a silent no-op.
         for _ in 0..<20 where rt.maintenance.isBusy { try? await Task.sleep(for: .seconds(1)) }
-        await rt.maintenance.restartGateway(runtime: rt, profile: heartbeat?.profile == "default" ? nil : heartbeat?.profile)
+        // The restart action rarely reports back: the dashboard it reports through is the thing
+        // restarting (a tester sat on a spinner for nine minutes). So the action runs on the
+        // side, and what ends the wait is the companion's first heartbeat written AFTER the
+        // restart began; failing that, the action's own short deadline says what happened.
+        let began = Date().timeIntervalSince1970
+        let profile = heartbeat?.profile == "default" ? nil : heartbeat?.profile
+        let action = Task { await rt.maintenance.restartGateway(runtime: rt, profile: profile) }
+        var back = false
+        for _ in 0..<40 {   // up to two minutes
+            try? await Task.sleep(for: .seconds(3))
+            if case .failed = rt.maintenance.phase { break }
+            await checkCompanion(runtime: rt)
+            if companionHealthy, let hb = heartbeat, hb.updatedAt > began + 2 { back = true; break }
+        }
+        if back {
+            rt.maintenance.finishEarly("Restarting gateway: back up")
+            await rt.reconnectNow()
+        } else {
+            _ = await action.value
+        }
         if case .failed(let why) = rt.maintenance.phase { restartError = why; return }
         restartPending = false
-        // Give the process a moment to come back and write its first heartbeat.
-        for _ in 0..<20 {
-            try? await Task.sleep(for: .seconds(3))
-            await checkCompanion(runtime: rt)
-            if companionHealthy { break }
-        }
     }
 
     // MARK: Companion update

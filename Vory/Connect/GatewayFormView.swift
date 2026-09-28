@@ -259,9 +259,20 @@ struct GatewayFormView: View {
         if let p = try? await NativeAuthClient.providers(gateway: u, access: access), !p.isEmpty {
             providers = p
             if providerName.isEmpty || !p.contains(where: { $0.name == providerName }) {
-                providerName = p.first(where: { authMode == .password ? ($0.supportsPassword ?? false) : true })?.name ?? p[0].name
+                // Username/password only fits a provider that takes one; falling back to the
+                // first provider (a browser sign-in) sent people into "does not support password
+                // login" from the gateway. Say so here instead, before they type anything.
+                if authMode == .password, let pw = p.first(where: { $0.supportsPassword ?? false }) { providerName = pw.name }
+                else if authMode == .password { providerName = ""; errorMessage = Self.noPasswordProviderMessage(p) }
+                else { providerName = p[0].name }
             }
         }
+    }
+
+    /// The gateway offers sign-in, but none of it takes a username and password.
+    static func noPasswordProviderMessage(_ providers: [AuthProvider]) -> String {
+        let names = providers.map(\.name).joined(separator: ", ")
+        return "This gateway has no username/password sign-in (it offers: \(names)). Choose Sign in with browser above, or enable a password provider on the gateway (HERMES_DASHBOARD_BASIC_AUTH_USER and HERMES_DASHBOARD_BASIC_AUTH_PASSWORD) and try again."
     }
 
     private func signInWithBrowser() async {
@@ -285,8 +296,21 @@ struct GatewayFormView: View {
         case .password:
             if let b = bearerSecrets, b.bearer != nil, username.isEmpty { s = b; s.access = access; break }
             guard let u = normalizedURL else { throw GatewayURLError.invalid }
+            if !providers.isEmpty, !providers.contains(where: { $0.supportsPassword ?? false }) {
+                throw NativeAuthError.invalidResponse(Self.noPasswordProviderMessage(providers))
+            }
             let provider = providerName.isEmpty ? "basic" : providerName
-            s = try await NativeAuthClient.signInWithPassword(gateway: u, provider: provider, username: username, password: password, access: access)
+            do {
+                s = try await NativeAuthClient.signInWithPassword(gateway: u, provider: provider, username: username, password: password, access: access)
+            } catch let e as HermesAPIError {
+                // The gateway's own wording for a browser-only provider, turned into what to do.
+                if e.localizedDescription.localizedCaseInsensitiveContains("does not support password") {
+                    throw NativeAuthError.invalidResponse(providers.isEmpty
+                        ? "The provider “\(provider)” on this gateway does not take a username and password. Choose Sign in with browser above, or enable a password provider on the gateway (HERMES_DASHBOARD_BASIC_AUTH_USER and HERMES_DASHBOARD_BASIC_AUTH_PASSWORD)."
+                        : Self.noPasswordProviderMessage(providers))
+                }
+                throw e
+            }
             bearerSecrets = s
         case .oauth:
             guard var b = bearerSecrets else { throw NativeAuthError.noCallback }

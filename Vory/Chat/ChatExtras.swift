@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftUI
 import UIKit
 import VoryCore
@@ -93,5 +94,23 @@ struct SelectTextSheet: View {
                 ToolbarItem(placement: .primaryAction) { Button { UIPasteboard.general.string = text } label: { Label("Copy all", systemImage: "doc.on.doc") } }
             }
         }
+    }
+}
+
+/// Small decoded previews of attachment images, by file and size, so a row never holds the
+/// full-resolution bitmap.
+enum AttachmentThumbs {
+    @MainActor private static let cache = NSCache<NSString, UIImage>()
+    @MainActor static func image(at url: URL, side: CGFloat) -> UIImage? {
+        let key = "\(url.path)|\(Int(side))" as NSString
+        if let hit = cache.object(forKey: key) { return hit }
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let pixels = Int(side * UIScreen.main.scale)
+        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: pixels,
+                                        kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceShouldCache: false]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        let image = UIImage(cgImage: cg)
+        cache.setObject(image, forKey: key)
+        return image
     }
 }

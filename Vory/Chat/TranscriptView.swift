@@ -56,7 +56,10 @@ struct TranscriptView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 TimeRevealColumn {
-                VStack(alignment: .leading, spacing: 10) {
+                // Lazy: a long session (hundreds of replies and tool rows) used to build every
+                // row at once, and the layer tree that made could exhaust memory in the render
+                // commit (abort in CA::Render::Encoder::grow, three crash reports on 1.1 (6)).
+                LazyVStack(alignment: .leading, spacing: 10) {
                     if chat.items.isEmpty, chat.resumeError == nil {
                         VStack(spacing: 8) {
                             BotAvatar(profile: chat.profileName, size: 56)
@@ -629,7 +632,9 @@ struct AttachmentStrip: View {
         HStack(spacing: 8) {
             ForEach(attachments) { a in
                 Button { if let u = a.localURL { preview = u } } label: {
-                    if a.kind == .image, let u = a.localURL, let img = UIImage(contentsOfFile: u.path) {
+                    // A thumbnail, never the full photo: a 12-megapixel bitmap per row is what a
+                    // thread of screenshots turns into otherwise.
+                    if a.kind == .image, let u = a.localURL, let img = AttachmentThumbs.image(at: u, side: 96) {
                         Image(uiImage: img).resizable().scaledToFill().frame(width: 96, height: 96).clipShape(.rect(cornerRadius: 12))
                     } else {
                         Label(a.name, systemImage: a.kind == .pdf ? "doc.richtext" : a.kind == .audio ? "waveform" : a.kind == .video ? "video" : "doc")

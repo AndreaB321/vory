@@ -126,13 +126,17 @@ struct MainTabView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             // Reserves the bar's height so lists end above it; the bar itself is hidden (slid down)
-            // inside a chat and the setup wizard, and the pages then use the full height.
-            if !model.tabBarHidden {
-                VoryTabBar(tabs: tabs) { compose() }
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    // Not tappable while it slides away: a tap then switched tabs under an open chat.
-                    .allowsHitTesting(!model.tabBarHidden)
-            }
+            // inside a chat and the setup wizard, and the pages then use the full height. The bar
+            // is never removed from the tree: an insert/remove transition got stuck on the first
+            // chat opened after launch (the bar stayed, tappable, over the composer). It slides
+            // and fades instead, and its reserved height collapses to nothing.
+            VoryTabBar(tabs: tabs) { compose() }
+                .frame(height: model.tabBarHidden ? 0 : VoryTabBar.reservedHeight, alignment: .top)
+                .offset(y: model.tabBarHidden ? 140 : 0)
+                .opacity(model.tabBarHidden ? 0 : 1)
+                // Not tappable while it slides away: a tap then switched tabs under an open chat.
+                .allowsHitTesting(!model.tabBarHidden)
+                .accessibilityHidden(model.tabBarHidden)
         }
         // Lists inside the pages' navigation stacks do not pick up the inset above on this iOS
         // (their last rows ended under the bar), so their scroll content gets the same margin plus a

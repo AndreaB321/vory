@@ -114,13 +114,23 @@ public final class MaintenanceModel {
     }
 
     /// Restart one profile's gateway (nil = the default profile's), not necessarily the one selected in the app.
+    /// The action is reported through the dashboard that is restarting, so its status often never
+    /// comes back: two minutes is the most it waits before calling that out.
     public func restartGateway(runtime rt: GatewayRuntime, profile: String?) async {
-        await run(runtime: rt, name: "gateway-restart", label: "Restarting gateway") {
+        await run(runtime: rt, name: "gateway-restart", label: "Restarting gateway", deadline: 120) {
             try await rt.api.send("POST", "/api/gateway/restart", profile: profile, body: EmptyBody())
         }
     }
 
-    private func run(runtime rt: GatewayRuntime, name: String, label: String, start: @escaping () async throws -> JSONValue) async {
+    /// Ends the running action from outside with a verdict of its own (the caller saw the
+    /// gateway come back by other means, say); a no-op when nothing is running.
+    public func finishEarly(_ message: String) {
+        guard case .running = phase else { return }
+        phase = .finished(message, exitCode: nil)
+        pollTask?.cancel(); pollTask = nil
+    }
+
+    private func run(runtime rt: GatewayRuntime, name: String, label: String, deadline: TimeInterval = 15 * 60, start: @escaping () async throws -> JSONValue) async {
         guard !isBusy else { return }
         pollTask?.cancel()
         actionLog = []
@@ -135,14 +145,14 @@ public final class MaintenanceModel {
             phase = .failed(error.localizedDescription)
             return
         }
-        pollTask = Task { await poll(runtime: rt, name: name, label: label) }
+        pollTask = Task { await poll(runtime: rt, name: name, label: label, deadline: deadline) }
         await pollTask?.value
     }
 
     /// Tails the action until it exits. The update relaunches the dashboard mid-run, so transport
     /// errors while polling mean "restarting", not "failed" — keep going until the deadline.
-    private func poll(runtime rt: GatewayRuntime, name: String, label: String) async {
-        let deadline = Date().addingTimeInterval(15 * 60)
+    private func poll(runtime rt: GatewayRuntime, name: String, label: String, deadline: TimeInterval) async {
+        let deadline = Date().addingTimeInterval(deadline)
         var sawRunning = false
         while !Task.isCancelled, Date() < deadline {
             try? await Task.sleep(for: .seconds(2))
