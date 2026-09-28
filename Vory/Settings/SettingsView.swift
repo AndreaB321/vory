@@ -31,6 +31,7 @@ struct SettingsView: View {
             Row(id: "security", title: "Security", symbol: "faceid", color: .green, destination: AnyView(SecurityView())),
             Row(id: "bots", title: "Bots", symbol: "cloud.fill", color: .indigo, destination: AnyView(BotsSettingsView())),
             Row(id: "appearance", title: "Appearance", symbol: "circle.lefthalf.filled", color: .black, destination: AnyView(AppearanceView())),
+            Row(id: "summaries", title: "Vory Summaries", symbol: "sparkles", color: .purple, destination: AnyView(SummariesSettingsView())),
             Row(id: "companion", title: "Companion", symbol: "puzzlepiece.fill", color: .blue, destination: AnyView(CompanionView())),
             Row(id: "about", title: "About", symbol: "info.circle", color: .blue, destination: AnyView(AboutView())),
         ]
@@ -394,6 +395,37 @@ struct BotsSettingsView: View {
     }
 }
 
+/// Settings › Vory Summaries: the on-device model's titles and previews for the chat list, each
+/// on its own switch so one can be tried without the other.
+struct SummariesSettingsView: View {
+    @AppStorage(ChatSummarizer.titlesKey) private var titles = ChatSummarizer.titlesOn
+    @AppStorage(ChatSummarizer.previewsKey) private var previews = ChatSummarizer.previewsOn
+    @State private var cleared = false
+
+    var body: some View {
+        List {
+            SettingsHeaderSection(title: "Vory Summaries", symbol: "sparkles", color: .purple, description: "Apple Intelligence, on this phone, reads each chat and writes its line in the list.")
+            Section {
+                Toggle(isOn: $titles) {
+                    HStack(spacing: 6) {
+                        Text("Titles")
+                        Text("BETA").font(.caption2.weight(.bold)).padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Capsule().fill(Color.accentColor.opacity(0.15))).foregroundStyle(Color.accentColor)
+                    }
+                }
+                Toggle("Previews", isOn: $previews)
+            } header: { Text("What the model writes") } footer: {
+                Text(ChatSummarizer.unavailableReason ?? "Titles: a short name for each chat in place of the gateway's. Previews: two lines on where the chat stands in place of the last message. Either can be on alone. Nothing leaves your phone and nothing changes on the gateway; off, the list shows the gateway's own titles and previews.")
+            }
+            .disabled(!ChatSummarizer.isAvailable)
+            Section {
+                Button(cleared ? "Summaries forgotten" : "Forget all summaries") { ChatSummarizer.shared.forgetAll(); cleared = true }
+                    .disabled(cleared)
+            } footer: { Text("Rows go back to the gateway's text until new summaries are made.") }
+        }
+    }
+}
+
 struct AppearanceView: View {
     @Environment(AppModel.self) private var model
     @AppStorage("colorSchemePreference") private var scheme = "system"
@@ -403,7 +435,6 @@ struct AppearanceView: View {
     @AppStorage(ChatStyle.showTurnStats) private var showTurnStats = true
     @AppStorage(ChatStyle.showSystemNotes) private var showSystemNotes = true
     @AppStorage(ChatStyle.showBots) private var showBots = true
-    @AppStorage(ChatSummarizer.enabledKey) private var aiSummaries = false
     @Environment(\.editMode) private var editMode
 
     private var layout: TabLayout { TabLayout.parse(layoutRaw) }
@@ -483,18 +514,6 @@ struct AppearanceView: View {
                 Toggle("Bot beside replies", isOn: $showBots)
             } header: { Text("Chat") } footer: {
                 Text("Hidden rows are still received and kept; this only changes what the transcript draws. Approval cards are always shown.")
-            }
-            Section {
-                Toggle(isOn: $aiSummaries) {
-                    HStack(spacing: 6) {
-                        Text("Vory Summaries")
-                        Text("BETA").font(.caption2.weight(.bold)).padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(Capsule().fill(Color.accentColor.opacity(0.15))).foregroundStyle(Color.accentColor)
-                    }
-                }
-                .disabled(!ChatSummarizer.isAvailable)
-            } header: { Text("Apple Intelligence") } footer: {
-                Text(ChatSummarizer.unavailableReason ?? "Uses the on-device model to give each chat in the list a short title and a two-line summary of where it stands. Nothing leaves your phone and nothing changes on the gateway; off, the list shows the gateway's own titles and previews.")
             }
             Section {
                 Button("Clear chat list cache") { SessionCache.clearAll() }

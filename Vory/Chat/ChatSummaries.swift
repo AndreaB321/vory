@@ -10,6 +10,12 @@ import VoryCore
 final class ChatSummarizer {
     static let shared = ChatSummarizer()
     static let enabledKey = "chats.aiSummaries"
+    /// The two halves, switchable one at a time: the model's title for a chat, and its two-line
+    /// preview. Unset, each follows the old single switch.
+    static let titlesKey = "chats.aiSummaries.titles"
+    static let previewsKey = "chats.aiSummaries.previews"
+    static var titlesOn: Bool { UserDefaults.standard.object(forKey: titlesKey) as? Bool ?? UserDefaults.standard.bool(forKey: enabledKey) }
+    static var previewsOn: Bool { UserDefaults.standard.object(forKey: previewsKey) as? Bool ?? UserDefaults.standard.bool(forKey: enabledKey) }
 
     struct Summary: Codable, Equatable { var title: String; var summary: String; var stamp: Double }
 
@@ -48,7 +54,19 @@ final class ChatSummarizer {
         }
     }
 
-    var enabled: Bool { UserDefaults.standard.bool(forKey: Self.enabledKey) }
+    var enabled: Bool { Self.titlesOn || Self.previewsOn }
+
+    /// What the row shows: the summary with the switched-off half replaced by the gateway's own text.
+    func shown(_ s: Summary?, title: String, preview: String) -> Summary? {
+        guard let s, enabled else { return nil }
+        return Summary(title: Self.titlesOn ? s.title : title, summary: Self.previewsOn ? s.summary : preview, stamp: s.stamp)
+    }
+
+    /// Drops every stored summary; rows fall back to the gateway's text until new ones are made.
+    func forgetAll() {
+        summaries = [:]
+        UserDefaults.standard.removeObject(forKey: Self.cacheKey)
+    }
 
     /// The summary for a chat if it is current (same last-activity stamp); nil otherwise.
     func summary(for session: StoredSession) -> Summary? {

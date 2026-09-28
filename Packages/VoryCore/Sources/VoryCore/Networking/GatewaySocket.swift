@@ -301,8 +301,10 @@ public actor GatewaySocket {
         pending[id] = continuation
         do { try await task.send(.string(text)) }
         catch {
-            pending.removeValue(forKey: id)
-            continuation.resume(throwing: SocketError.notConnected)
+            // The socket may have closed while the send was in flight, and the close path has
+            // then already failed every pending call, this one included: a second resume traps
+            // (a crash report on 1.1 (9)). Only the one still registered is ours to fail.
+            if pending.removeValue(forKey: id) != nil { continuation.resume(throwing: SocketError.notConnected) }
         }
     }
 

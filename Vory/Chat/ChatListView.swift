@@ -28,7 +28,9 @@ struct ChatListView: View {
     @AppStorage("chats.allBots") private var allBots = false
     @State private var showNewChat = false
     @State private var showNewBot = false
-    @AppStorage(ChatSummarizer.enabledKey) private var aiSummaries = false
+    @AppStorage(ChatSummarizer.titlesKey) private var aiTitles = ChatSummarizer.titlesOn
+    @AppStorage(ChatSummarizer.previewsKey) private var aiPreviews = ChatSummarizer.previewsOn
+    private var aiSummaries: Bool { aiTitles || aiPreviews }
     private var summarizer: ChatSummarizer { ChatSummarizer.shared }
     @State private var rooms: [Room] = []
     /// Each room's recent log, for the row's preview and its summary.
@@ -365,7 +367,7 @@ struct ChatListView: View {
                 NavigationLink(value: ChatRoute(storedID: s.id, title: s.displayTitle, profile: allBots ? s.profile : nil)) {
                     SessionRow(session: s, needsYou: runtime.needsAttention.contains(s.id), live: runtime.chatForStored(s.id)?.isRunning ?? false, showBot: allBots,
                                thinking: runtime.chatForStored(s.id).map { $0.isRunning && ($0.statusLine ?? "Thinking…") == "Thinking…" } ?? false,
-                               summary: summarizer.summary(for: s))
+                               summary: summarizer.shown(summarizer.summary(for: s), title: s.displayTitle, preview: s.preview ?? ""))
                         .task(id: "\(s.id)-\(s.lastActive ?? 0)-\(aiSummaries)") { if aiSummaries { summarizer.refresh(s, runtime: runtime, profile: allBots ? s.profile : nil) } }
                 }
                 .listRowInsets(EdgeInsets(top: 10, leading: ChatRowStyle.rowInset, bottom: 10, trailing: 8))
@@ -392,7 +394,7 @@ struct ChatListView: View {
     @ViewBuilder private func roomRow(_ room: Room, runtime: GatewayRuntime) -> some View {
         let archived = archivedRooms.contains(room.roomId)
         let log = roomLogs[room.roomId] ?? []
-        let summary = summarizer.summary(forRoom: room, events: log)
+        let summary = summarizer.shown(summarizer.summary(forRoom: room, events: log), title: room.name, preview: Self.lastLine(room, log) ?? "")
                 NavigationLink(value: RoomRoute(room: room, initialText: nil)) {
                     HStack(spacing: 12) {
                         HStack(spacing: -12) {
