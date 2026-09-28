@@ -313,7 +313,7 @@ struct NotificationsView: View {
 
 struct SecurityView: View {
     @Environment(AppModel.self) private var model
-    @AppStorage(ApprovalConfirm.key) private var confirmApprovals = true
+    @AppStorage(ApprovalConfirm.modeKey) private var confirmMode = ApprovalConfirm.mode
     var body: some View {
         List {
             SettingsHeaderSection(title: "Security", symbol: "faceid", color: .green, description: "Face ID lock, a second step for approvals, and how this phone keeps its credentials.")
@@ -321,10 +321,14 @@ struct SecurityView: View {
                 Toggle("Require \(model.lock.biometryName)", isOn: Binding(get: { model.lock.isEnabled }, set: { model.lock.isEnabled = $0 }))
             } footer: { Text("Locks the app after it has been in the background. Gateway credentials are stored in the iOS Keychain (device-only).") }
             Section {
-                Toggle("Confirm approvals", isOn: $confirmApprovals)
-                    .onChange(of: confirmApprovals) { _, _ in LocalNotifier.registerCategories() }
+                Picker("Confirm from the Lock Screen", selection: $confirmMode) {
+                    Text("Risky actions").tag("risky")
+                    Text("Every approval").tag("all")
+                    Text("Never").tag("off")
+                }
+                .onChange(of: confirmMode) { _, _ in LocalNotifier.registerCategories() }
             } header: { Text("Approvals") } footer: {
-                Text("Approve or Deny on the Live Activity or a notification opens the chat and asks once more before it counts, so a stray tap on the Lock Screen cannot run a command. The card's own buttons in the chat apply at once.")
+                Text("Approve or Deny on the Live Activity or a notification opens the chat and, for the actions that matter, asks once more before it counts. Risky actions are writes, deletes and spends: a command that removes or changes files, pushes or deploys, installs, escalates, sends or pays for something, plus anything the smart guardian flagged. Reads and lookups apply at once, so the second question stays rare enough to mean something. The card's own buttons in the chat never ask twice.")
             }
         }
     }

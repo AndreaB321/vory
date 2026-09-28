@@ -218,7 +218,7 @@ final class AppModel {
                 let deadline = Date().addingTimeInterval(8)
                 while chat.cards.isEmpty, Date() < deadline { try? await Task.sleep(for: .milliseconds(250)) }
                 guard let card = chat.cards.first(where: { $0.method == "approval" }) else { return }
-                if ApprovalConfirm.isOn {
+                if ApprovalConfirm.shouldAsk(for: card.approval) {
                     // Settings › Security › Confirm approvals: the chat is open on its card; the
                     // conversation asks once more and only then answers.
                     approvalConfirm = ApprovalConfirm(storedID: chat.storedID, cardID: card.id, choice: choice)
@@ -284,9 +284,26 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
 /// A second step for approvals that arrive from outside the chat (Settings › Security).
 struct ApprovalConfirm: Equatable {
+    /// "risky" (writes, deletes, spends and what the guardian flagged; the default), "all", "off".
+    static let modeKey = "approvals.confirmMode"
+    /// The first cut's on/off switch, honoured if it was ever set.
     static let key = "approvals.confirmFromOutside"
-    /// On by default: a stray tap on the Lock Screen must not run a command.
-    static var isOn: Bool { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
+    static var mode: String {
+        if let m = UserDefaults.standard.string(forKey: modeKey) { return m }
+        if let old = UserDefaults.standard.object(forKey: key) as? Bool { return old ? "all" : "off" }
+        return "risky"
+    }
+    /// Whether the Lock Screen / notification answers open the app instead of applying at once.
+    static var isOn: Bool { mode != "off" }
+    /// Whether THIS approval gets the second question. A second yes on everything becomes one
+    /// two-tap gesture within a week; it keeps its meaning by staying rare.
+    static func shouldAsk(for approval: ApprovalRequest?) -> Bool {
+        switch mode {
+        case "off": return false
+        case "all": return true
+        default: return approval.map(ApprovalRisk.isRisky) ?? true
+        }
+    }
     var storedID: String
     var cardID: String
     /// "once" or "deny".
