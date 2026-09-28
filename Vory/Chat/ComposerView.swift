@@ -10,7 +10,8 @@ struct ComposerView: View {
     /// The dock's morph namespace: the text capsule (alone, not the whole stack — the steer strip
     /// and the command list come and go under it) is what an approval card morphs from.
     var namespace: Namespace.ID
-    @FocusState private var focused: Bool
+    /// Keyboard focus, driven both ways (the text view is UIKit; see ComposerTextView).
+    @State private var focused = false
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var showPhotos = false
     @State private var showCamera = false
@@ -23,9 +24,6 @@ struct ComposerView: View {
     @State private var stagedPreview: URL?
     /// Shown after a paste that dropped a lot of text into the field.
     @State private var longTextOffer = false
-    /// Re-created after a send: with a pending autocorrect suggestion the vertical TextField keeps
-    /// drawing the old text even though the binding is empty; a fresh identity forces the redraw.
-    @State private var fieldID = UUID()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The field's text becomes a staged text file and the field is cleared.
@@ -37,7 +35,6 @@ struct ComposerView: View {
             .trimmingCharacters(in: .whitespaces)
         chat.stageAttachment(data: data, name: (stem.isEmpty ? "Pasted text" : stem) + ".txt", kind: .file)
         withAnimation(.snappy) { longTextOffer = false; text = "" }
-        fieldID = UUID()
     }
 
     /// Every command the gateway lists, narrowed by what follows the "/" (a bare "/" shows all).
@@ -118,16 +115,11 @@ struct ComposerView: View {
             HStack(alignment: .bottom, spacing: 8) {
                 attachMenu
                 HStack(alignment: .bottom, spacing: 6) {
-                    TextField("Type / for commands", text: $text, axis: .vertical)
-                        .id(fieldID)
-                        .lineLimit(1...6)
-                        .focused($focused)
-                        .accessibilityIdentifier("composer.text")
-                        .textFieldStyle(.plain)
+                    ComposerTextView(text: $text, placeholder: "Type / for commands", focused: $focused, accessibilityID: "composer.text",
+                                     onSend: { Task { await send() } },
+                                     onPasteData: { data, name, type in stagePasted(data, name: name, type: type) },
+                                     onArrow: { recallHistory($0) })
                         .padding(.leading, 14).padding(.vertical, 7)
-                        .onKeyPress(.upArrow) { recallHistory(-1) ? .handled : .ignored }
-                        .onKeyPress(.downArrow) { recallHistory(1) ? .handled : .ignored }
-                        .onSubmit { Task { await send() } }
                         .task { catalog = await chat.commandsCatalog() }
                         .onChange(of: text) { old, new in
                             // Offered once as the text gets long (a paste lands in one jump;
@@ -215,7 +207,6 @@ struct ComposerView: View {
     private func send() async {
         let t = text
         text = ""
-        fieldID = UUID()
         focused = true
         historyCursor = nil
         if let prefill = await chat.send(t) { text = prefill }
@@ -251,18 +242,25 @@ struct ComposerView: View {
         chat.stageAttachment(data: data, name: url.lastPathComponent, kind: k)
     }
 
+    /// The attach menu's Paste: images and files become attachments, text lands in the field.
     private func paste() {
         let pb = UIPasteboard.general
-        if let img = pb.image, let data = img.jpegData(compressionQuality: 0.9) {
-            chat.stageAttachment(data: data, name: "pasted-\(Int(Date().timeIntervalSince1970)).jpg", kind: .image)
+        if pb.hasImages, let img = pb.image, let data = img.jpegData(compressionQuality: 0.9) {
+            chat.stageAttachment(data: data, name: "photo-\(Int(Date().timeIntervalSince1970)).jpg", kind: .image)
         } else if let s = pb.string {
             text += s
         } else if let items = pb.items.first, let (type, value) = items.first, let data = value as? Data {
-            let ext = UTType(type)?.preferredFilenameExtension ?? "bin"
-            chat.stageAttachment(data: data, name: "pasted.\(ext)", kind: .file)
+            stagePasted(data, name: "pasted-\(Int(Date().timeIntervalSince1970)).\(UTType(type)?.preferredFilenameExtension ?? "bin")", type: UTType(type) ?? .data)
         } else {
             chat.banner = "Nothing to paste."
         }
+    }
+
+    /// Something other than text pasted into the field (the edit menu, or the keyboard's
+    /// "Paste from Screenshots"): staged like a picked file.
+    private func stagePasted(_ data: Data, name: String, type: UTType) {
+        let kind: AttachmentPreview.Kind = type.conforms(to: .image) ? .image : type.conforms(to: .movie) ? .video : type.conforms(to: .pdf) ? .pdf : type.conforms(to: .audio) ? .audio : .file
+        withAnimation(.snappy) { chat.stageAttachment(data: data, name: name, kind: kind) }
     }
 }
 

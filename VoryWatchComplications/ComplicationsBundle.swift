@@ -5,6 +5,7 @@ import WidgetKit
 @main
 struct VoryComplicationsBundle: WidgetBundle {
     var body: some Widget {
+        StatusWidget()
         AttentionWidget()
         ActivityWidget()
         ContextWidget()

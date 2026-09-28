@@ -8,6 +8,8 @@ struct ChatRoute: Hashable {
     var profile: String?
     /// Sent as soon as the chat opens: the first message typed in the compose sheet.
     var initialText: String? = nil
+    /// Files picked in the compose sheet; staged into the chat and sent with the first message.
+    var initialAttachments: [AttachmentPreview] = []
 }
 
 struct ChatListView: View {
@@ -92,7 +94,7 @@ struct ChatListView: View {
                 if let runtime {
                     NewChatSheet(runtime: runtime) { start in
                         switch start {
-                        case .chat(let profile, let text): path.append(ChatRoute(storedID: nil, title: nil, profile: profile, initialText: text))
+                        case .chat(let profile, let text, let attachments): path.append(ChatRoute(storedID: nil, title: nil, profile: profile, initialText: text, initialAttachments: attachments))
                         case .group(let room, let text): rooms.insert(room, at: 0); path.append(RoomRoute(room: room, initialText: text))
                         }
                     }

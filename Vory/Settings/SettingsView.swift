@@ -413,7 +413,13 @@ struct SummariesSettingsView: View {
                             .background(Capsule().fill(Color.accentColor.opacity(0.15))).foregroundStyle(Color.accentColor)
                     }
                 }
-                Toggle("Previews", isOn: $previews)
+                Toggle(isOn: $previews) {
+                    HStack(spacing: 6) {
+                        Text("Previews")
+                        Text("BETA").font(.caption2.weight(.bold)).padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Capsule().fill(Color.accentColor.opacity(0.15))).foregroundStyle(Color.accentColor)
+                    }
+                }
             } header: { Text("What the model writes") } footer: {
                 Text(ChatSummarizer.unavailableReason ?? "Titles: a short name for each chat in place of the gateway's. Previews: two lines on where the chat stands in place of the last message. Either can be on alone. Nothing leaves your phone and nothing changes on the gateway; off, the list shows the gateway's own titles and previews.")
             }

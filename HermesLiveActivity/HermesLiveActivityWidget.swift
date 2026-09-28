@@ -6,6 +6,7 @@ import WidgetKit
 struct HermesLiveActivityBundle: WidgetBundle {
     var body: some Widget {
         HermesTurnLiveActivity()
+        StatusWidget()
         AttentionWidget()
         ActivityWidget()
         ContextWidget()

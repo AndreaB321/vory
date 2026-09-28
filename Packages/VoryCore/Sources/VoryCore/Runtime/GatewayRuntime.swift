@@ -54,7 +54,13 @@ public final class GatewayRuntime {
                 return try await self.websocketURL()
             },
             onEvent: { [weak self] ev in Task { @MainActor in self?.handle(event: ev) } },
-            onState: { [weak self] s in Task { @MainActor in self?.socketState = s } },
+            onState: { [weak self] s in Task { @MainActor in
+                guard let self else { return }
+                let wasOpen = self.socketState.isOpen
+                self.socketState = s
+                // The status widget shows whether the gateway is reachable: tell it on every flip.
+                if wasOpen != s.isOpen { self.publishSnapshot() }
+            } },
             onServerRequest: { [weak self] req in
                 guard let self else { return nil }
                 return await self.answer(serverRequest: req)
@@ -284,7 +290,7 @@ public final class GatewayRuntime {
             }
             let ctx = registry.all.first { $0.isRunning }?.usage?.computedContextPercent ?? registry.all.last?.usage?.computedContextPercent
             let snap = WidgetSnapshot(gatewayName: connection.name, connectionID: connection.id.uuidString, profile: selectedProfile ?? "default",
-                                      needsAttention: needsAttention.count, chats: chats, contextPercent: ctx)
+                                      needsAttention: needsAttention.count, chats: chats, contextPercent: ctx, connected: socketState.isOpen)
             snap.save()
             onSnapshotPublished?(snap)
         }

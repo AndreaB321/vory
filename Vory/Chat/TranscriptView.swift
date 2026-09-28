@@ -21,6 +21,10 @@ struct TranscriptView: View {
     /// overshot and bounced back up.
     @State private var scrollPosition = ScrollPosition(edge: .bottom)
     @State private var insetSettle: Task<Void, Never>?
+    /// How far the bottom of the content sits below the visible area, insets included; 0 at the end.
+    @State private var distanceFromBottom: CGFloat = 0
+    @State private var offsetY: CGFloat = 0
+    @State private var jumpTask: Task<Void, Never>?
     /// How much of the scroll view the keyboard covers (beyond the home-indicator safe area). The
     /// thread moves up with the keyboard and, when it was at the bottom, stays there.
     @State private var keyboardInset: CGFloat = 0
@@ -98,7 +102,9 @@ struct TranscriptView: View {
                     // bubble stands on its own, dark with the badge while a tool runs.
                     if chat.isRunning, !lastIsEmptyStreamingReply {
                         HStack(alignment: .bottom, spacing: 10) {
-                            if showBots { BotAvatar(profile: chat.profileName, size: 28, active: true, mood: BotFaceView.Mood(profile: chat.profileName, state: chat.botState)) }
+                            // The working bot is pinned at the bottom-left of the thread (below);
+                            // this only keeps the bubble in the bot column.
+                            if showBots { Color.clear.frame(width: 28, height: 1) }
                             TypingBubble(tool: typingTool)
                             Spacer(minLength: 40)
                         }
@@ -110,7 +116,8 @@ struct TranscriptView: View {
                             ProgressView().controlSize(.small)
                             Text(s).font(.caption).foregroundStyle(.secondary)
                         }
-                        .padding(.horizontal, 4)
+                        // Clear of the bot column when the pinned working bot sits there.
+                        .padding(.leading, showBots ? 38 : 4).padding(.trailing, 4)
                     }
                     Color.clear.frame(height: 0).id("bottom")
                 }
@@ -138,11 +145,15 @@ struct TranscriptView: View {
                 }
             }
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in
+                offsetY = new
                 if userScrolling { BotAmbient.shared.scrolled(dy: new - old) }
             }
+            // Insets included: the bottom margin (dock plus home indicator) is about the size of
+            // the threshold, so without it a slightly taller dock showed the arrow at the very end.
             .onScrollGeometryChange(for: CGFloat.self) { g in
-                g.contentSize.height - (g.contentOffset.y + g.containerSize.height)
+                g.contentSize.height + g.contentInsets.bottom - g.visibleRect.maxY
             } action: { _, distance in
+                distanceFromBottom = distance
                 let away = distance > 120
                 if away != awayFromBottom { withAnimation(.snappy) { awayFromBottom = away } }
                 // Content growing under a locked thread also reads as "away" for a frame; only a
@@ -153,11 +164,20 @@ struct TranscriptView: View {
             .onScrollPhaseChange { _, phase in
                 userScrolling = phase == .interacting || phase == .decelerating
             }
-            .overlay(alignment: .bottomTrailing) {
-                JumpToBottomButton(visible: awayFromBottom) {
-                    stickToBottom = true
-                    withAnimation(.snappy) { scrollPosition.scrollTo(edge: .bottom) }
+            // The working bot: one spot at the bottom-left of the thread for the whole turn, in
+            // the same pose as the bot on the header pill, gone once the turn ends. It used to sit
+            // beside whichever row was live and hopped between them as the turn went on.
+            .overlay(alignment: .bottomLeading) {
+                if showBots, chat.isRunning {
+                    BotAvatar(profile: chat.profileName, size: 28, active: true, mood: BotFaceView.Mood(state: chat.botState))
+                        .padding(.leading, 16).padding(.bottom, bottomInset + 12 + keyboardInset)
+                        .transition(.scale(scale: 0.6).combined(with: .opacity))
+                        .allowsHitTesting(false)
                 }
+            }
+            .animation(.snappy, value: chat.isRunning)
+            .overlay(alignment: .bottomTrailing) {
+                JumpToBottomButton(visible: awayFromBottom) { jumpToBottom() }
                 .padding(.trailing, 16).padding(.bottom, bottomInset + 12 + keyboardInset)
             }
             .sheet(item: Binding(get: { selectText.map { SelectTextItem(text: $0) } }, set: { selectText = $0?.text })) { SelectTextSheet(text: $0.text) }
@@ -177,6 +197,11 @@ struct TranscriptView: View {
             .onChange(of: chat.statusLine) { _, _ in
                 if stickToBottom, !userScrolling { withAnimation(.easeOut(duration: 0.2)) { scrollPosition.scrollTo(edge: .bottom) } }
             }
+            // The turn ending takes the typing bubble and status line out from under the last
+            // reply; a locked thread follows so no blank band is left there.
+            .onChange(of: chat.isRunning) { _, _ in
+                if stickToBottom, !userScrolling { withAnimation(.easeOut(duration: 0.2)) { scrollPosition.scrollTo(edge: .bottom) } }
+            }
             // The dock changing height (an approval card arriving or leaving) moves the bottom
             // margin; a locked thread follows, so no blank band opens under the last row. Once
             // the height has settled, not per frame of the card's grow animation: a scroll per
@@ -190,6 +215,29 @@ struct TranscriptView: View {
                     withAnimation(.easeOut(duration: 0.2)) { scrollPosition.scrollTo(edge: .bottom) }
                 }
             }
+        }
+    }
+}
+
+extension TranscriptView {
+    /// The jump arrow: a long animated scroll through a lazy thread laid rows out mid-flight and
+    /// the bubbles glitched. From far away the thread first lands, unanimated, a screen short of
+    /// the end, then the last stretch scrolls fast and smooth.
+    private func jumpToBottom() {
+        stickToBottom = true
+        jumpTask?.cancel()
+        let far = distanceFromBottom > 900
+        if far { scrollPosition.scrollTo(edge: .bottom) }
+        jumpTask = Task { @MainActor in
+            if far {
+                // Land the end, then step back one screen for the run-in.
+                try? await Task.sleep(for: .milliseconds(40))
+                guard !Task.isCancelled else { return }
+                scrollPosition.scrollTo(y: max(0, offsetY - 700))
+                try? await Task.sleep(for: .milliseconds(40))
+                guard !Task.isCancelled else { return }
+            }
+            withAnimation(.easeOut(duration: 0.25)) { scrollPosition.scrollTo(edge: .bottom) }
         }
     }
 }
@@ -388,7 +436,8 @@ struct TranscriptRow: View {
             HStack(alignment: .bottom, spacing: 10) {
                 if let profile {
                     if botShown, streaming {
-                        BotAvatar(profile: profile, size: 28, active: true, mood: BotFaceView.Mood(profile: profile, state: text.isEmpty ? .thinking : .streaming))
+                        // The live bot is the pinned one at the bottom of the thread; keep the column.
+                        Color.clear.frame(width: 28, height: 1)
                     } else if botShown {
                         // A finished reply keeps a painted bot: a live one per row is what stuttered.
                         Image(uiImage: BotAvatarImage.cached(profile: profile, size: 28, scheme: scheme))

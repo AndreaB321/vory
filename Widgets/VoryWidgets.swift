@@ -60,6 +60,8 @@ struct SnapshotProvider: TimelineProvider {
                 WidgetSnapshot.Chat(id: s.id, title: s.displayTitle, profile: s.profile ?? snap.profile, lastActive: s.lastActive, running: s.isActive ?? false, needsYou: needs.contains(s.id))
             }
             snap.updatedAt = Date()
+            // The gateway answered, so it is reachable even if the app has no socket open.
+            snap.connected = true
             snap.save()
         }
         return snap
@@ -67,6 +69,107 @@ struct SnapshotProvider: TimelineProvider {
 }
 
 // MARK: Widgets
+
+/// One glance at the gateway: reachable or not, how many chats are working, how many need you.
+struct StatusWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "vory.status", provider: SnapshotProvider()) { entry in
+            StatusView(entry: entry)
+                .containerBackground(.fill.tertiary, for: .widget)
+                .widgetURL(entry.snapshot?.attentionChat.map { URL(string: "vory://chat/\($0.id)") } ?? URL(string: "vory://chats"))
+        }
+        .configurationDisplayName("Status")
+        .description("Gateway health, chats at work and chats that need you.")
+        .supportedFamilies(Self.families)
+    }
+
+    static var families: [WidgetFamily] {
+        #if os(watchOS)
+        [.accessoryRectangular]
+        #else
+        [.systemSmall, .systemMedium, .accessoryRectangular]
+        #endif
+    }
+}
+
+struct StatusView: View {
+    var entry: SnapshotEntry
+    @Environment(\.widgetFamily) private var family
+
+    private var snap: WidgetSnapshot? { entry.snapshot }
+    private var working: Int { snap?.runningCount ?? 0 }
+    private var needs: Int { snap?.needsAttention ?? 0 }
+    private var health: WidgetSnapshot.Health { snap?.health ?? .unknown }
+    private var healthColor: Color {
+        switch health { case .online: .green; case .offline: .red; case .unknown: .secondary }
+    }
+    private var healthWord: String {
+        switch health {
+        case .online: "Online"
+        case .offline: "Offline"
+        case .unknown: snap == nil ? "Not set up" : "Last seen \(entry.date.timeIntervalSince(snap!.updatedAt) < 90 ? "just now" : RelativeDateTimeFormatter().localizedString(for: snap!.updatedAt, relativeTo: entry.date))"
+        }
+    }
+    private var isMedium: Bool {
+        #if os(watchOS)
+        false
+        #else
+        family == .systemMedium
+        #endif
+    }
+
+    var body: some View {
+        switch family {
+        case .accessoryRectangular:
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    Circle().fill(healthColor).frame(width: 7, height: 7)
+                    Text(snap?.gatewayName ?? "Vory").font(.headline).lineLimit(1).widgetAccentable()
+                }
+                Text(healthWord).font(.caption2).foregroundStyle(.secondary)
+                Text("\(working) working · \(needs) need you").font(.caption2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        default:
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Circle().fill(healthColor).frame(width: 9, height: 9)
+                    Text(snap?.gatewayName ?? "Vory").font(.headline).lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                Text(healthWord).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Spacer(minLength: 0)
+                HStack(alignment: .firstTextBaseline, spacing: 14) {
+                    counter(working, "working", "ellipsis.message.fill", tint: .green)
+                    counter(needs, "need you", "exclamationmark.bubble.fill", tint: .orange)
+                    if isMedium { counter(snap?.chats.count ?? 0, "recent", "bubble.left", tint: .secondary) }
+                }
+                if isMedium, let chats = snap?.chats.filter({ $0.running || $0.needsYou }).prefix(3), !chats.isEmpty {
+                    Divider()
+                    ForEach(Array(chats)) { c in
+                        HStack(spacing: 6) {
+                            Circle().fill(c.needsYou ? Color.orange : Color.green).frame(width: 6, height: 6)
+                            Text(c.title).font(.caption).lineLimit(1)
+                            Spacer(minLength: 0)
+                            Text(c.profile).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+
+    private func counter(_ n: Int, _ label: String, _ symbol: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 4) {
+                Image(systemName: symbol).font(.caption2).foregroundStyle(n == 0 ? AnyShapeStyle(.secondary) : AnyShapeStyle(tint))
+                Text("\(n)").font(.system(.title3, design: .rounded).weight(.bold)).monospacedDigit().contentTransition(.numericText())
+            }
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+}
 
 /// Approvals waiting for you. The one to put on a watch face.
 struct AttentionWidget: Widget {

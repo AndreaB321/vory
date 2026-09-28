@@ -1,4 +1,7 @@
+import PhotosUI
+import QuickLook
 import SwiftUI
+import UniformTypeIdentifiers
 import VoryCore
 
 /// Compose, the way Messages does it: a To: field that takes bots, the matching bots listed as
@@ -6,7 +9,7 @@ import VoryCore
 /// more than one starts a group chat with all of them.
 struct NewChatSheet: View {
     enum Start {
-        case chat(profile: String, text: String)
+        case chat(profile: String, text: String, attachments: [AttachmentPreview])
         case group(room: Room, text: String)
     }
     var runtime: GatewayRuntime
@@ -23,7 +26,16 @@ struct NewChatSheet: View {
     @State private var busy = false
     @State private var error: String?
     @FocusState private var focus: Field?
-    enum Field { case to, message }
+    enum Field { case to }
+    /// The message field is UIKit (ComposerTextView), so its focus is a plain flag.
+    @State private var messageFocused = false
+    /// Files picked before the chat exists; staged into the chat as soon as it opens.
+    @State private var staged: [AttachmentPreview] = []
+    @State private var photoItems: [PhotosPickerItem] = []
+    @State private var showPhotos = false
+    @State private var showCamera = false
+    @State private var showFiles = false
+    @State private var stagedPreview: URL?
 
     private var candidates: [ProfileInfo] {
         let q = typed.trimmingCharacters(in: .whitespaces).lowercased()
@@ -32,7 +44,7 @@ struct NewChatSheet: View {
             (q.isEmpty || p.label.lowercased().contains(q) || p.name.lowercased().contains(q))
         }
     }
-    private var canSend: Bool { !chosen.isEmpty && chosen.count <= 6 && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !busy }
+    private var canSend: Bool { !chosen.isEmpty && chosen.count <= 6 && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (!staged.isEmpty && chosen.count == 1)) && !busy }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -123,12 +135,48 @@ struct NewChatSheet: View {
             }
             .scrollDismissesKeyboard(.interactively)
 
-            // The first message.
+            // The first message, with the same attach button as a chat's composer.
+            VStack(spacing: 8) {
+                if !staged.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(staged) { a in
+                                StagedCard(attachment: a, onOpen: { stagedPreview = a.localURL },
+                                           onRemove: { withAnimation(.snappy) { staged.removeAll { $0.id == a.id } } })
+                                    .transition(.scale(scale: 0.9).combined(with: .opacity))
+                            }
+                        }
+                        .padding(.leading, 2)
+                    }
+                    // Only as tall as the cards: a scroll view in this stack would otherwise split
+                    // the sheet's spare height with the bot list and float the cards up.
+                    .frame(height: StagedCard.side + 12)
+                    .quickLookPreview($stagedPreview)
+                    if chosen.count > 1 {
+                        Text("Attachments go with a chat to one bot; a group chat starts with text only.")
+                            .font(.caption2).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
             HStack(alignment: .bottom, spacing: 8) {
+                Menu {
+                    Button { showPhotos = true } label: { Label("Photo Library", systemImage: "photo.on.rectangle") }
+                    Button { showCamera = true } label: { Label("Camera", systemImage: "camera") }
+                        .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
+                    Button { showFiles = true } label: { Label("Files", systemImage: "folder") }
+                    Button { pasteAttachment() } label: { Label("Paste", systemImage: "doc.on.clipboard") }
+                } label: {
+                    Image(systemName: "plus").font(.body.weight(.semibold))
+                        .frame(width: 36, height: 36)
+                        .glassEffect(.regular.interactive(), in: .circle)
+                }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .disabled(chosen.count != 1)
+                .accessibilityLabel("Attach")
                 HStack(alignment: .bottom, spacing: 6) {
-                    TextField(chosen.isEmpty ? "Choose a bot first" : "Message", text: $text, axis: .vertical)
-                        .lineLimit(1...6)
-                        .focused($focus, equals: .message)
+                    ComposerTextView(text: $text, placeholder: chosen.isEmpty ? "Choose a bot first" : "Message", focused: $messageFocused,
+                                     onSend: { Task { await start() } },
+                                     onPasteData: { data, name, type in stage(data, name: name, type: type) })
                         .padding(.leading, 14).padding(.vertical, 7)
                         .disabled(chosen.isEmpty)
                     Button { Task { await start() } } label: {
@@ -140,13 +188,62 @@ struct NewChatSheet: View {
                     .accessibilityLabel("Send")
                 }
                 .frame(minHeight: 36)
-                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 18))
+                // Plain glass: an interactive capsule answered touches meant for the field's Paste menu.
+                .glassEffect(.regular, in: .rect(cornerRadius: 18))
+            }
             }
             .padding(.horizontal, 16).padding(.vertical, 8)
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
         .onAppear { focus = .to }
+        .photosPicker(isPresented: $showPhotos, selection: $photoItems, maxSelectionCount: 6, matching: .any(of: [.images, .videos]))
+        .onChange(of: photoItems) { _, items in Task { await importPhotos(items) } }
+        .fullScreenCover(isPresented: $showCamera) { CameraPicker { data, name in stage(data, name: name, kind: .image) }.ignoresSafeArea() }
+        .fileImporter(isPresented: $showFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            if case .success(let urls) = result { for u in urls { importFile(u) } }
+        }
+    }
+
+    // MARK: Attachments before the chat exists
+
+    private func stage(_ data: Data, name: String, kind: AttachmentPreview.Kind) {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("newchat-staged", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent(UUID().uuidString + "-" + name)
+        guard (try? data.write(to: url)) != nil else { error = "Could not stage \(name)."; return }
+        withAnimation(.snappy) { staged.append(AttachmentPreview(id: url.lastPathComponent, name: name, kind: kind, localURL: url, byteCount: data.count)) }
+    }
+
+    private func stage(_ data: Data, name: String, type: UTType) {
+        stage(data, name: name, kind: type.conforms(to: .image) ? .image : type.conforms(to: .movie) ? .video : type.conforms(to: .pdf) ? .pdf : type.conforms(to: .audio) ? .audio : .file)
+    }
+
+    private func importPhotos(_ items: [PhotosPickerItem]) async {
+        for item in items {
+            let isVideo = item.supportedContentTypes.contains { $0.conforms(to: .movie) }
+            guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
+            let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? (isVideo ? "mov" : "jpg")
+            stage(data, name: "\(isVideo ? "video" : "photo")-\(Int(Date().timeIntervalSince1970)).\(ext)", kind: isVideo ? .video : .image)
+        }
+        photoItems = []
+    }
+
+    private func importFile(_ url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url) else { error = "Could not read \(url.lastPathComponent)"; return }
+        if data.count > 200 * 1024 * 1024 { error = "\(url.lastPathComponent) is larger than 200 MB."; return }
+        stage(data, name: url.lastPathComponent, type: UTType(filenameExtension: url.pathExtension) ?? .data)
+    }
+
+    private func pasteAttachment() {
+        let pb = UIPasteboard.general
+        if pb.hasImages, let img = pb.image, let data = img.jpegData(compressionQuality: 0.9) {
+            stage(data, name: "photo-\(Int(Date().timeIntervalSince1970)).jpg", kind: .image)
+        } else if let s = pb.string {
+            text += s
+        }
     }
 
     private func highlighted(_ label: String) -> AttributedString {
@@ -160,7 +257,8 @@ struct NewChatSheet: View {
         guard chosen.count < 6 else { error = "A group chat can have up to six bots."; return }
         withAnimation(.snappy) { chosen.append(p) }
         query = mark
-        focus = .message
+        focus = nil
+        messageFocused = true
     }
 
     private func remove(_ p: ProfileInfo) {
@@ -170,12 +268,13 @@ struct NewChatSheet: View {
 
     private func start() async {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !chosen.isEmpty, !t.isEmpty else { return }
+        guard !chosen.isEmpty, canSend else { return }
         if chosen.count == 1 {
-            onStart(.chat(profile: chosen[0].name, text: t))
+            onStart(.chat(profile: chosen[0].name, text: t, attachments: staged))
             dismiss()
             return
         }
+        guard !t.isEmpty else { return }
         busy = true; defer { busy = false }
         do {
             let room = try await GroupChats.create(runtime: runtime, name: chosen.map(\.label).joined(separator: ", "), profiles: chosen)

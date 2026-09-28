@@ -22,10 +22,14 @@ public struct WidgetSnapshot: Codable, Sendable, Equatable {
     public var chats: [Chat]
     public var contextPercent: Int?
     public var updatedAt: Date
+    /// Whether the app's socket to the gateway was open when this was written; nil on snapshots
+    /// from before the field existed, or written by a widget refresh that could not tell.
+    public var connected: Bool?
 
-    public init(gatewayName: String, connectionID: String, profile: String, needsAttention: Int, chats: [Chat], contextPercent: Int?, updatedAt: Date = Date()) {
+    public init(gatewayName: String, connectionID: String, profile: String, needsAttention: Int, chats: [Chat], contextPercent: Int?, updatedAt: Date = Date(), connected: Bool? = nil) {
         self.gatewayName = gatewayName; self.connectionID = connectionID; self.profile = profile
         self.needsAttention = needsAttention; self.chats = chats; self.contextPercent = contextPercent; self.updatedAt = updatedAt
+        self.connected = connected
     }
 
     public static let account = "widget.snapshot"
@@ -35,4 +39,12 @@ public struct WidgetSnapshot: Codable, Sendable, Equatable {
 
     public var activeChat: Chat? { chats.first { $0.running } }
     public var attentionChat: Chat? { chats.first { $0.needsYou } }
+    public var runningCount: Int { chats.filter(\.running).count }
+    /// How the status widget reads the gateway: reachable, unreachable, or unknown (stale).
+    public enum Health: Sendable { case online, offline, unknown }
+    public var health: Health {
+        // Older than an hour, the last word is not worth much either way.
+        guard Date().timeIntervalSince(updatedAt) < 3600, let connected else { return .unknown }
+        return connected ? .online : .offline
+    }
 }

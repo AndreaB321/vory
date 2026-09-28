@@ -110,8 +110,13 @@ struct ConversationView: View {
             else { chat = try await runtime.newChat() }
             if let chat, composerText.isEmpty, let draft = ComposerDrafts.load(for: chat) { composerText = draft }
             // The first message from the compose sheet goes out as soon as the chat exists.
-            if let chat, let t = route.initialText, !t.isEmpty, !sentInitial {
+            if let chat, !sentInitial, let t = route.initialText, !t.isEmpty || !route.initialAttachments.isEmpty {
                 sentInitial = true
+                for a in route.initialAttachments {
+                    guard let u = a.localURL, let data = try? Data(contentsOf: u) else { continue }
+                    chat.stageAttachment(data: data, name: a.name, kind: a.kind)
+                    try? FileManager.default.removeItem(at: u)
+                }
                 _ = await chat.send(t)
                 NotificationCenter.default.post(name: .hermesSessionsChanged, object: nil)
             }

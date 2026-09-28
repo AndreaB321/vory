@@ -629,6 +629,10 @@ class Gateway:
             return ok({"resolved": 1})
         if method == "approval.received":
             return ok({"acknowledged": True})
+        if method in ("image.attach_bytes", "pdf.attach"):
+            return ok({"attached": True, "filename": p.get("filename", "")})
+        if method == "file.attach":
+            return ok({"ref_text": f"[file: {p.get('name', 'file')}]"})
         return {"jsonrpc": "2.0", "id": rid,
                 "error": {"code": -32601, "message": f"unknown method: {method}"}}
 
@@ -669,7 +673,7 @@ async def main() -> None:
     global TOKEN
     TOKEN = args.token
     print(f"mock Hermes gateway on http://{args.host}:{args.port}  (session token: {TOKEN})", flush=True)
-    async with serve(ws_handler, args.host, args.port, process_request=process_request) as server:
+    async with serve(ws_handler, args.host, args.port, process_request=process_request, max_size=None) as server:
         await server.serve_forever()
 
 

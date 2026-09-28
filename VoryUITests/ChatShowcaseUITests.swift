@@ -97,7 +97,7 @@ final class ChatShowcaseUITests: XCTestCase {
 
         // New chat -> send
         newChat.tap()
-        let composer = app.textFields["composer.text"].firstMatch
+        let composer = app.descendants(matching: .any).matching(identifier: "composer.text").firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 30))
         composer.tap()
         composer.typeText("The log host is at 94% disk. Can you take a look?")
