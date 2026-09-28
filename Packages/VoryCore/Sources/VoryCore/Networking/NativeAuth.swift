@@ -18,7 +18,7 @@ public enum NativeAuthError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .cancelled: return "Sign-in was cancelled."
-        case .noCallback: return "The gateway never redirected back to the app."
+        case .noCallback: return "The sign-in finished in the browser, but the gateway never sent the app its code. Usual causes: Hermes on the gateway is older than native sign-in (update it), or a reverse proxy rule blocked the sign-in request. A session token from the dashboard always works as a fallback."
         case .stateMismatch: return "Sign-in state mismatch; try again."
         case .invalidResponse(let s): return s
         case .providerRequired(let p): return "Choose a sign-in provider: \(p.map(\.name).joined(separator: ", "))."
@@ -63,6 +63,7 @@ public final class NativeAuthClient: NSObject {
 
     #if !os(watchOS)
     public func signInWithBrowser(gateway: GatewayURL, provider: String?, access: CloudflareAccess) async throws -> GatewaySecrets {
+        try await Self.checkNativeSignIn(gateway: gateway, access: access)
         let pkce = PKCE()
         let state = UUID().uuidString
         let listener = try LoopbackCallbackServer()
@@ -108,6 +109,27 @@ public final class NativeAuthClient: NSObject {
         return try await Self.exchange(gateway: gateway, code: callback.code, verifier: pkce.verifier, access: access)
     }
     #endif
+
+    /// Whether the gateway knows the native sign-in route at all. A Hermes from before it answers
+    /// 404 (or its dashboard page), and the browser would then "sign in" straight into the
+    /// dashboard with nothing ever coming back to the app; better to say so first. A gateway
+    /// that has the route answers 400 for the missing parameters. Anything else (a proxy's own
+    /// answer, a network blip) is not held against it.
+    public static func checkNativeSignIn(gateway: GatewayURL, access: CloudflareAccess) async throws {
+        var req = URLRequest(url: gateway.api("/auth/native/authorize"))
+        req.timeoutInterval = 15
+        for (k, v) in access.headers { req.setValue(v, forHTTPHeaderField: k) }
+        guard let (data, resp) = try? await URLSession.shared.data(for: req), let http = resp as? HTTPURLResponse else { return }
+        // Only a real 404 counts: an access login page in front of the gateway (Cloudflare
+        // Access without a service token) also answers 200 with HTML, and the browser flow can
+        // still get through that.
+        if http.statusCode == 404 {
+            throw NativeAuthError.invalidResponse("This gateway's Hermes does not have native sign-in yet (the /auth/native/authorize route is missing), so the browser would sign in to the dashboard without handing anything back to the app. Update Hermes on the gateway, or use a session token from the dashboard.")
+        }
+        if http.statusCode == 403, String(data: data, encoding: .utf8)?.lowercased().contains("nginx") == true {
+            throw NativeAuthError.invalidResponse("The reverse proxy in front of the gateway refused the sign-in request (403). If it is Nginx Proxy Manager with Block Common Exploits, this build encodes the request so that rule no longer matches; otherwise allow /auth/ through the proxy.")
+        }
+    }
 
     // MARK: Username / password (dashboard basic-auth provider) → bearer tokens, no browser
 

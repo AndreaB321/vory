@@ -100,8 +100,18 @@ public struct GatewayURL: Hashable, Codable, Sendable, CustomStringConvertible {
     public func api(_ path: String, query: [URLQueryItem] = []) -> URL {
         var comps = URLComponents(url: base, resolvingAgainstBaseURL: false)!
         comps.path = pathPrefix + (path.hasPrefix("/") ? path : "/" + path)
-        comps.queryItems = query.isEmpty ? nil : query
+        // Every query value fully percent-encoded (Foundation leaves ":" and "/" bare in a query,
+        // which is legal, but a reverse proxy's "block common exploits" rule sees "=http://" in
+        // the native sign-in's redirect_uri and answers 403). Servers decode either form alike.
+        comps.percentEncodedQuery = query.isEmpty ? nil : Self.encodedQuery(query)
         return comps.url!
+    }
+
+    /// `name=value&…` with names and values encoded down to RFC 3986 unreserved characters.
+    public static func encodedQuery(_ items: [URLQueryItem]) -> String {
+        let unreserved = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        func enc(_ s: String) -> String { s.addingPercentEncoding(withAllowedCharacters: unreserved) ?? s }
+        return items.map { enc($0.name) + ($0.value.map { "=" + enc($0) } ?? "") }.joined(separator: "&")
     }
 
     /// `ws(s)://host[:port]<prefix><path>?<query>`
