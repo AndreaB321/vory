@@ -33,5 +33,6 @@ What it does:
 Requirements: an iPhone on iOS 27, TestFlight, and a Hermes gateway you run. Not on the App Store yet; iPhone only for now.
 
 Site and TestFlight link: https://vory.dev
+Source: https://github.com/matt0975/vory (SwiftUI, Swift 6; the bots are drawn from code in `Shared/BotFace.swift`; the push companion and relay are in `server/`)
 
 Happy to answer questions about the bot motion system (everything is drawn from code, nothing is a sprite) or the approval flow.

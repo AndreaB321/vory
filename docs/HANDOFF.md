@@ -1,9 +1,9 @@
 # Vory — handoff and change log (2026-09-23 → 2026-09-25)
 
 For the next agent picking this up. Everything below is committed on `master` of the private repo
-`github.com/matt0975/vory` (local checkout `~/claude-sandbox/Vory`). The user is Matt (they/them);
-they test on their own iPhone 17 Pro via TestFlight and send screenshots with feedback. Work one item
-at a time, ship a TestFlight build, wait for their verdict.
+`github.com/matt0975/vory` (local checkout `~/claude-sandbox/Vory`). The owner tests on their own
+iPhone via TestFlight and sends screenshots with feedback. Work one item at a time, ship a TestFlight
+build, wait for their verdict.
 
 ## Where things stand
 
@@ -80,7 +80,7 @@ cd ~/claude-sandbox/Vory && ./Tools/release/testflight.sh
   "Redundant Binary Upload" (90189). Within ~10 min of the last upload pass `BUILD_NUMBER=<n>`.
 - **Never kill a running `testflight.sh`**: altool may already have delivered the build (that is how
   builds 20 and 22 slipped out). Check the log for "No errors uploading" first.
-- **USB device build** (user's phone UDID `00008150-001069912108401C`):
+- **USB device build** (the owner's phone UDID, from `xcrun devicectl list devices`):
   `xcodebuild -project Vory.xcodeproj -scheme Vory -configuration Debug -destination 'generic/platform=iOS'
   -derivedDataPath build/device -allowProvisioningUpdates -authenticationKeyPath "$ASC_KEY_PATH"
   -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
@@ -612,7 +612,7 @@ LiveActivity `782XTY4C7G`, notifications `T65FW8D9U5`, notificationcontent `ZBC5
 - 24: Creator Studio, BotFace drawing everywhere, Messages-style chat header, swipe back anywhere,
   Software Update page, first-run setup card, About with the Vory bot and rain, reply window with
   thread pages, companion 1.0.25 (LA finished first, thread fetch capped).
-- 23: bot attribution from the gateway's session list (unifi chats no longer "Hermes MA"), live
+- 23: bot attribution from the gateway's session list (chats attributed to the right profile), live
   tokens/context in the LA, red row badges, keyboard spring, reply pane drag no longer dismisses.
 - 21: reply window shows the thread, companion 1.0.23 sends it, test notifications from the cloud bot,
   update badge path, keyboard-following transcript. (20 and 22: stray cuts, expired.)
