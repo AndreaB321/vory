@@ -114,8 +114,6 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .tabRoot(.settings)
-            // Pushed pages open with their header card right under the bar, not a blank band.
-            .contentMargins(.top, 0, for: .scrollContent)
             .background(InteractivePopEnabler())
             .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search settings")
         }

@@ -146,6 +146,8 @@ struct MainTabView: View {
         // the bar's height plus a breath of room. Inside a chat the bar is hidden and this is 0;
         // the thread measures its own margin against the composer.
         .contentMargins(.bottom, model.tabBarHidden ? 0 : VoryTabBar.reservedHeight + 16, for: .scrollContent)
+        // No blank band under the bar at the top of any page: the first card sits right there.
+        .contentMargins(.top, 0, for: .scrollContent)
         .onChange(of: tabs) { _, now in
             // The selected tab was removed from the layout: fall back to Chats instead of a blank pane.
             if !now.contains(model.selectedTab) { model.selectedTab = .chats }

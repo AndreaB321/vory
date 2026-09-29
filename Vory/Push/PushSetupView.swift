@@ -779,37 +779,9 @@ struct CompanionView: View {
                     }
                 }
                 Section {
-                    LabeledContent("Last notification") {
-                        Text(setup.extensionBreadcrumb ?? "none handled yet").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
-                    }
-                    LabeledContent("Live Activity") {
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text(push.liveActivityToken != nil ? "active · token since \(push.liveActivityTokenAt?.formatted(date: .omitted, time: .shortened) ?? "?")" : "none running")
-                            if let d = setup.deviceFileLiveActivity { Text(d).font(.caption).foregroundStyle(.secondary) }
-                            if let at = LiveActivityController.lastStartedAt { Text("last started \(at.formatted(date: .omitted, time: .shortened))").font(.caption).foregroundStyle(.secondary) }
-                            if let e = LiveActivityController.lastStartError { Text("could not start: \(e)").font(.caption).foregroundStyle(.orange) }
-                        }
-                    }
-                    if !LiveActivityController.log.isEmpty {
-                        VStack(alignment: .leading, spacing: 2) {
-                            ForEach(Array(LiveActivityController.log.suffix(6).enumerated()), id: \.offset) { _, line in
-                                Text(line).font(.caption2.monospaced()).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    LabeledContent("Last Live Activity push") {
-                        if let hb = setup.heartbeat, let ev = hb.lastLaEvent {
-                            VStack(alignment: .trailing, spacing: 2) {
-                                Text("\(ev) · \(hb.lastLaOk == true ? "sent" : "failed")\(hb.lastLaAt.map { " · " + Date(timeIntervalSince1970: $0).formatted(date: .omitted, time: .shortened) } ?? "")")
-                                    .font(.caption).foregroundStyle(hb.lastLaOk == true ? Color.secondary : Color.orange)
-                                if let r = hb.lastLaResponse, !r.isEmpty { Text(r).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(3) }
-                            }
-                        } else {
-                            Text("none yet").font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                } header: { sectionHeader("Diagnostics") } footer: {
-                    Text("With a Live Activity running, finish and approval alerts go through it (the Island expands and buzzes); banners only when there is none.")
+                    NavigationLink { CompanionDiagnosticsView(setup: setup, push: push) } label: { Label("Diagnostics", systemImage: "stethoscope") }
+                } footer: {
+                    Text("The last notification, the Live Activity's tokens and log, and the last push the Companion sent.")
                 }
             } else {
                 Text("Connect a gateway first.").foregroundStyle(.secondary)
@@ -864,6 +836,8 @@ struct CompanionStatusChecks: View {
 
 /// Installed version, running version and heartbeat age, with the one action each state calls for.
 struct CompanionStatusRows: View {
+    @State private var checkShown = false
+    @State private var justChecked = false
     @Bindable var setup: PushSetupModel
     var runtime: GatewayRuntime
     var showInstall = true
@@ -913,12 +887,23 @@ struct CompanionStatusRows: View {
                 if let r = setup.pluginResult { Text(r).font(.footnote).foregroundStyle(r.hasPrefix("Installed") ? Color.secondary : Color.red) }
             }
             Button {
-                Task { await setup.checkCompanion(runtime: runtime) }
+                Task {
+                    // The check itself takes a blink; a moment of "Checking…" says it happened.
+                    checkShown = true
+                    async let done: () = setup.checkCompanion(runtime: runtime)
+                    try? await Task.sleep(for: .milliseconds(900))
+                    await done
+                    checkShown = false
+                    justChecked = true
+                    try? await Task.sleep(for: .seconds(4))
+                    justChecked = false
+                }
             } label: {
-                if setup.checkingCompanion { Label { Text("Checking…") } icon: { ProgressView() } }
+                if setup.checkingCompanion || checkShown { Label { Text("Checking…") } icon: { ProgressView() } }
+                else if justChecked { Label("Checked just now", systemImage: "checkmark.circle") }
                 else { Label(setup.companionCheckedAt.map { "Check again (last \($0.formatted(date: .omitted, time: .shortened)))" } ?? "Check now", systemImage: "arrow.triangle.2.circlepath") }
             }
-            .disabled(setup.checkingCompanion)
+            .disabled(setup.checkingCompanion || checkShown)
         }
     }
 
@@ -1766,5 +1751,53 @@ enum ProvisioningProfile {
         if let ids = plist["TeamIdentifier"] as? [String], let first = ids.first { return first }
         if let ent = plist["Entitlements"] as? [String: Any], let t = ent["com.apple.developer.team-identifier"] as? String { return t }
         return nil
+    }
+}
+
+
+/// Settings › Companion › Diagnostics: what the last notification, the Live Activity and the
+/// Companion's last push looked like, for when something does not arrive.
+struct CompanionDiagnosticsView: View {
+    @Bindable var setup: PushSetupModel
+    var push: PushRegistrar
+
+    var body: some View {
+        List {
+            SettingsHeaderSection(title: "Diagnostics", symbol: "stethoscope", color: .gray, description: "The last notification, the Live Activity's tokens and log, and the last push the Companion sent.")
+            Section {
+                    LabeledContent("Last notification") {
+                        Text(setup.extensionBreadcrumb ?? "none handled yet").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
+                    }
+                    LabeledContent("Live Activity") {
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(push.liveActivityToken != nil ? "active · token since \(push.liveActivityTokenAt?.formatted(date: .omitted, time: .shortened) ?? "?")" : "none running")
+                            if let d = setup.deviceFileLiveActivity { Text(d).font(.caption).foregroundStyle(.secondary) }
+                            if let at = LiveActivityController.lastStartedAt { Text("last started \(at.formatted(date: .omitted, time: .shortened))").font(.caption).foregroundStyle(.secondary) }
+                            if let e = LiveActivityController.lastStartError { Text("could not start: \(e)").font(.caption).foregroundStyle(.orange) }
+                        }
+                    }
+                    if !LiveActivityController.log.isEmpty {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(Array(LiveActivityController.log.suffix(6).enumerated()), id: \.offset) { _, line in
+                                Text(line).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    LabeledContent("Last Live Activity push") {
+                        if let hb = setup.heartbeat, let ev = hb.lastLaEvent {
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text("\(ev) · \(hb.lastLaOk == true ? "sent" : "failed")\(hb.lastLaAt.map { " · " + Date(timeIntervalSince1970: $0).formatted(date: .omitted, time: .shortened) } ?? "")")
+                                    .font(.caption).foregroundStyle(hb.lastLaOk == true ? Color.secondary : Color.orange)
+                                if let r = hb.lastLaResponse, !r.isEmpty { Text(r).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(3) }
+                            }
+                        } else {
+                            Text("none yet").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+            } footer: {
+                Text("With a Live Activity running, finish and approval alerts go through it (the Island expands and buzzes); banners only when there is none.")
+            }
+        }
+        .navigationTitle("").navigationBarTitleDisplayMode(.inline)
     }
 }

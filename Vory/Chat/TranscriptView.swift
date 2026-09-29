@@ -19,8 +19,12 @@ struct TranscriptView: View {
     /// on phones where the scroll view already inset the safe area, the last reply sat a home
     /// indicator's height above the composer.
     @State private var reportedInsetBottom: CGFloat = 0
-    @State private var appliedMargin: CGFloat = 0
-    private var autoInset: CGFloat { max(0, reportedInsetBottom - appliedMargin) }
+    /// Measured once, from the first report, and quantised to 0 or the home indicator's height.
+    /// Not re-derived on every report: while the dock resizes (the slash list opening, say) a
+    /// report lags the margin by a frame, and a value fed straight back into the margin chased
+    /// itself frame after frame.
+    private var autoInset: CGFloat { autoInsetFixed ?? 0 }
+    @State private var autoInsetFixed: CGFloat?
     /// How far the dock reaches up into the scroll view's frame: what the overlays clear.
     private var dockReach: CGFloat { dockTop > 0 && scrollBottom > dockTop ? scrollBottom - dockTop : fallbackInset }
     /// Where the content's last line can actually sit: the frame's bottom, unless the frame runs
@@ -50,7 +54,8 @@ struct TranscriptView: View {
     @State private var openedAt = Date()
     private var settling: Bool { Date().timeIntervalSince(openedAt) < 1.5 }
     @State private var jumpTask: Task<Void, Never>?
-    @State private var threadDim = false
+    @State private var contentHeight: CGFloat = 0
+    @State private var containerHeight: CGFloat = 0
     /// How much of the scroll view the keyboard covers (beyond the home-indicator safe area). The
     /// thread moves up with the keyboard and, when it was at the bottom, stays there.
     @State private var keyboardInset: CGFloat = 0
@@ -152,8 +157,6 @@ struct TranscriptView: View {
                 .animation(.snappy(duration: 0.28), value: chat.items.count)
                 }
             }
-            .opacity(threadDim ? 0.35 : 1)
-            .scaleEffect(threadDim ? 0.985 : 1)
             .scrollPosition($scrollPosition)
             // `bottomInset` is the dock's measured reach into the thread, keyboard included; the
             // scroll view adds its own safe-area inset under that.
@@ -164,9 +167,14 @@ struct TranscriptView: View {
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { scrollBottom = $0 }
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentInsets.bottom } action: { _, v in
-                let applied = bottomInset + 8
                 reportedInsetBottom = v
-                appliedMargin = applied
+                guard autoInsetFixed == nil, dockTop > 0 else { return }
+                let raw = max(0, v - (bottomInset + 8))
+                let safe = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow?.safeAreaInsets.bottom }.first ?? 0
+                autoInsetFixed = safe > 0 && raw > safe / 2 ? safe : 0
+            }
+            .onScrollGeometryChange(for: [CGFloat].self) { [$0.contentSize.height, $0.containerSize.height] } action: { _, v in
+                contentHeight = v[0]; containerHeight = v[1]
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { n in
                 guard let end = (n.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue else { return }
@@ -277,27 +285,22 @@ extension TranscriptView {
         let far = distanceFromBottom > 900
         jumpTask = Task { @MainActor in
             if far {
-                // Too far for an animated scroll through a lazy thread (rows laid out mid-flight
-                // jittered, and the two-step run-in read as a stutter): the thread dips, lands
-                // at the end in one move, and comes back up.
-                withAnimation(.easeIn(duration: 0.12)) { threadDim = true }
-                try? await Task.sleep(for: .milliseconds(130))
+                // A fast scroll, not a fade: from far away the thread first jumps (unanimated,
+                // before the next frame draws) to one screen short of the end, worked out from
+                // the geometry rather than by landing first, then scrolls the last stretch.
+                let end = contentHeight + reportedInsetBottom - containerHeight
+                scrollPosition.scrollTo(y: max(0, end - 900))
+                try? await Task.sleep(for: .milliseconds(16))
                 guard !Task.isCancelled else { return }
-                scrollPosition.scrollTo(edge: .bottom)
-                try? await Task.sleep(for: .milliseconds(40))
-                guard !Task.isCancelled else { return }
-                withAnimation(.easeOut(duration: 0.18)) { threadDim = false }
-            } else {
-                withAnimation(.easeOut(duration: 0.25)) { scrollPosition.scrollTo(edge: .bottom) }
             }
-            // A tester on iOS 26.5 tapped the arrow and nothing moved: if the edge scroll did
-            // not land, aim at the bottom marker, then the edge once more.
-            try? await Task.sleep(for: .milliseconds(400))
+            withAnimation(.easeOut(duration: 0.35)) { scrollPosition.scrollTo(edge: .bottom) }
+            // If it did not land (a lazy row laid out late, an older iOS), finish the job flat.
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled, distanceFromBottom > 24 else { return }
+            scrollPosition.scrollTo(edge: .bottom)
+            try? await Task.sleep(for: .milliseconds(60))
             guard !Task.isCancelled, distanceFromBottom > 24 else { return }
             scrollPosition.scrollTo(id: "bottom", anchor: .bottom)
-            try? await Task.sleep(for: .milliseconds(60))
-            guard !Task.isCancelled else { return }
-            scrollPosition.scrollTo(edge: .bottom)
         }
     }
 }
