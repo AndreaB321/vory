@@ -158,6 +158,7 @@ struct TranscriptView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
                 .animation(.snappy(duration: 0.28), value: chat.items.count)
+                .background(ScrollViewProbe(metrics: metrics))
                 }
             }
             .scrollPosition($scrollPosition)
@@ -199,16 +200,23 @@ struct TranscriptView: View {
             // composer; once its height has settled, the thread scrolls just enough to show
             // its bottom edge. Collapsing posts nothing, so the thread stays put then.
             .onReceive(NotificationCenter.default.publisher(for: .hermesRevealRow)) { n in
-                guard let bottom = n.userInfo?["bottom"] as? CGFloat else { return }
+                guard let bottom = n.userInfo?["bottom"] as? CGFloat, let id = n.userInfo?["id"] as? String else { return }
                 revealTask?.cancel()
                 revealTask = Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(80))
                     guard !Task.isCancelled else { return }
+                    // Only when the opened row runs under the composer; then its bottom edge is
+                    // aligned to the visible bottom (the scroll view resolves the row itself,
+                    // so no offset arithmetic across coordinate spaces).
                     let limit = (dockTop > 0 ? dockTop : UIScreen.main.bounds.height - fallbackInset) - 8
                     let overshoot = bottom - limit
                     guard overshoot > 0 else { return }
-                    let maxOffset = max(0, metrics.contentHeight + metrics.reportedInsetBottom - metrics.containerHeight)
-                    withAnimation(.easeOut(duration: 0.25)) { scrollPosition.scrollTo(y: min(maxOffset, metrics.offsetY + overshoot)) }
+                    if let sv = metrics.scrollView {
+                        let maxY = max(0, sv.contentSize.height + sv.adjustedContentInset.bottom - sv.bounds.height)
+                        sv.setContentOffset(CGPoint(x: sv.contentOffset.x, y: min(maxY, sv.contentOffset.y + overshoot)), animated: true)
+                    } else {
+                        withAnimation(.easeOut(duration: 0.25)) { scrollPosition.scrollTo(id: id, anchor: .bottom) }
+                    }
                 }
             }
             // Insets included: the bottom margin (dock plus home indicator) is about the size of
@@ -348,8 +356,27 @@ extension TranscriptView {
     }
 }
 
+/// Finds the UIKit scroll view behind the thread and hands it to the metrics box.
+private struct ScrollViewProbe: UIViewRepresentable {
+    let metrics: ScrollMetrics
+    func makeUIView(context: Context) -> ProbeView { let v = ProbeView(); v.metrics = metrics; v.isUserInteractionEnabled = false; return v }
+    func updateUIView(_ v: ProbeView, context: Context) { v.metrics = metrics }
+    final class ProbeView: UIView {
+        var metrics: ScrollMetrics?
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            var s = superview
+            while let x = s, !(x is UIScrollView) { s = x.superview }
+            metrics?.scrollView = s as? UIScrollView
+        }
+    }
+}
+
 /// The figures a scroll changes every frame. Not observable on purpose (see `TranscriptView.metrics`).
 final class ScrollMetrics {
+    /// The UIKit scroll view under the SwiftUI one, for a scroll by a measured distance: its
+    /// offset and the rows' global frames are in the same points, so a delta is just a delta.
+    weak var scrollView: UIScrollView?
     /// Locked to the bottom: the thread follows every new token, tool call and card. Only the
     /// user's own drag releases it; the jump button (or scrolling back down) locks it again.
     var stickToBottom = true
@@ -584,7 +611,7 @@ struct TranscriptRow: View, Equatable {
                     // runs), the reasoning above it when there is some, the live count below.
                     VStack(alignment: .leading, spacing: 6) {
                         if showReasoning, let reasoning, !reasoning.isEmpty {
-                            ReasoningDisclosure(text: reasoning, open: reasoningOpen)
+                            ReasoningDisclosure(text: reasoning, open: reasoningOpen, itemID: item.id)
                                 .padding(.horizontal, 14).padding(.vertical, 9)
                                 .background(Color(.systemGray5), in: MessageBubbleShape(side: .leading, tailed: false))
                         }
@@ -598,7 +625,7 @@ struct TranscriptRow: View, Equatable {
                     Spacer(minLength: 40)
                 } else {
                 VStack(alignment: .leading, spacing: 6) {
-                    if showReasoning, let reasoning, !reasoning.isEmpty { ReasoningDisclosure(text: reasoning, open: reasoningOpen) }
+                    if showReasoning, let reasoning, !reasoning.isEmpty { ReasoningDisclosure(text: reasoning, open: reasoningOpen, itemID: item.id) }
                     MarkdownView(text: text).equatable()
                     if showStats, let s = item.stats {
                         Text(s.label).font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
@@ -633,7 +660,7 @@ struct TranscriptRow: View, Equatable {
                 }
             }
         case .tool(let act):
-            ToolCardView(activity: act)
+            ToolCardView(activity: act, itemID: item.id)
         case .system(let text, let symbol):
             HStack(spacing: 6) {
                 Image(systemName: symbol)
@@ -667,6 +694,7 @@ struct TranscriptRow: View, Equatable {
 struct ReasoningDisclosure: View {
     var text: String
     @Binding var open: Bool
+    var itemID: String? = nil
     @State private var revealing = false
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -690,7 +718,7 @@ struct ReasoningDisclosure: View {
             }
         }
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { _, y in
-            if revealing { NotificationCenter.default.post(name: .hermesRevealRow, object: nil, userInfo: ["bottom": y]) }
+            if revealing, let itemID { NotificationCenter.default.post(name: .hermesRevealRow, object: nil, userInfo: ["bottom": y, "id": itemID]) }
         }
     }
 }
@@ -784,6 +812,8 @@ struct MarkdownView: View, Equatable {
 
 struct ToolCardView: View {
     var activity: ToolActivity
+    /// The transcript row this card is, for the reveal after it opens.
+    var itemID: String? = nil
     @State private var expanded = false
     /// Set while the card opens: its frame changes are reported so the thread can reveal it.
     @State private var revealing = false
@@ -827,7 +857,7 @@ struct ToolCardView: View {
             withAnimation(.snappy) { expanded.toggle() }
         }
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { _, y in
-            if revealing { NotificationCenter.default.post(name: .hermesRevealRow, object: nil, userInfo: ["bottom": y]) }
+            if revealing, let itemID { NotificationCenter.default.post(name: .hermesRevealRow, object: nil, userInfo: ["bottom": y, "id": itemID]) }
         }
         .accessibilityElement(children: .combine)
         .accessibilityHint("Double-tap to expand the tool log")
