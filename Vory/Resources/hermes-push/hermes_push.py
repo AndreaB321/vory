@@ -53,7 +53,7 @@ except ImportError as exc:  # pragma: no cover
 log = logging.getLogger("hermes-push")
 
 # Keep in step with plugin/vory-push/plugin.yaml; the app compares the two.
-VERSION = "1.0.29"
+VERSION = "1.0.30"
 USER_AGENT = f"Vory-Push/{VERSION} (Hermes companion)"
 try:
     # Fingerprint of the code actually running: the app compares it with the copy it ships, so a
@@ -145,7 +145,7 @@ class APNs:
 
     def send_via_relay(self, device: dict, *, alert: dict | None = None, push_type: str = "alert", collapse_id: str | None = None,
                        token_override: str | None = None, content_state: dict | None = None, event: str | None = None,
-                       la_alert: dict | None = None, dismissal_date: int | None = None) -> bool:
+                       la_alert: dict | None = None, dismissal_date: int | None = None, attributes: dict | None = None) -> bool:
         relay = device.get("relay") or {}
         url, install_id, secret = relay.get("url", "").rstrip("/"), relay.get("install_id"), relay.get("secret")
         if not (url and install_id and secret):
@@ -163,6 +163,8 @@ class APNs:
             body.update({"thread_id": (alert or {}).get("thread_id", ""), "collapse_id": collapse_id})
         elif push_type == "liveactivity":
             body.update({"token": token_override, "content_state": content_state or {}, "event": event or "update"})
+            if attributes:
+                body["attributes"] = attributes   # a push-to-start: the activity's fixed fields
             if la_alert:
                 body["alert"] = la_alert   # plain words only: no extension can decrypt a Live Activity push
             if dismissal_date:
@@ -210,7 +212,7 @@ class APNs:
                 state["detail"] = {"waiting": "Waiting for you", "done": "Turn finished", "error": "The turn failed", "thinking": "Thinking…",
                                    "streaming": "Writing…", "tool": "Running a tool…"}.get(state.get("phase"), "Working…")
                 return self.send_via_relay(device, push_type="liveactivity", token_override=token_override, content_state=state, event=aps.get("event"),
-                                           la_alert=aps.get("alert"), dismissal_date=aps.get("dismissal-date"))
+                                           la_alert=aps.get("alert"), dismissal_date=aps.get("dismissal-date"), attributes=aps.get("attributes"))
             return self.send_via_relay(device, push_type=push_type)
         if not self.direct:
             return False
@@ -652,12 +654,54 @@ class Relay:
         except RuntimeError:
             send_end()
 
+    #: stored session id → when a push-to-start went out for it (one per turn, not per event).
+    _la_push_started: dict[str, float] = {}
+
+    def start_live_activities(self, stored: str, runtime_id: str, state_patch: dict) -> int:
+        """The app is closed and no phone shows an activity for this turn: start one by push on
+        every phone that filed a push-to-start token (app 1.1 (13)+). The phone then publishes
+        the new activity's own token and the usual updates and end follow. One start per turn."""
+        if time.time() - self._la_push_started.get(stored, 0) < 600:
+            return 0
+        a = self.attached.get(runtime_id) or {"stored": stored}
+        now = int(time.time())
+        started = 0
+        for d in load_devices(self.gw.url):
+            if d.get("platform") != "ios":
+                continue
+            token = d.get("live_activity_push_to_start_token")
+            if not token:
+                continue
+            entries = d.get("live_activities") or []
+            if any(isinstance(e, dict) and e.get("token") and e.get("session_id") in (stored, runtime_id) for e in entries):
+                continue   # this phone already shows one
+            profile = a.get("profile") or "default"
+            bot = (d.get("bots") or {}).get(profile) or {}
+            attrs = {"sessionTitle": a.get("title") or "Hermes", "storedSessionID": stored, "connectionID": d.get("connection_id") or "",
+                     "profile": profile, "model": "", "tintHex": bot.get("hex") or "",
+                     "botName": bot.get("label") or a.get("bot") or profile, "avatar": bot.get("avatar") or ""}
+            state = {"phase": "thinking", "detail": "Thinking…", "outputTokens": 0, "contextPercent": None, "needsAttention": False,
+                     "startedAtUnix": float(now), "endedAtUnix": None, **state_patch}
+            aps = {"timestamp": now, "event": "start", "content-state": state, "attributes-type": "HermesTurnAttributes", "attributes": attrs}
+            ok = self.apns.send(d, {"aps": aps}, push_type="liveactivity", token_override=token)
+            self._note_la("start", ok)
+            if ok:
+                started += 1
+        if started:
+            self._la_push_started[stored] = time.time()
+            log.info("started %d Live Activity(ies) by push for %s", started, stored[:12])
+        return started
+
     def update_live_activities(self, stored: str, state_patch: dict, alert: dict | None = None, runtime_id: str = "") -> set:
         """Mid-turn update (tool running, waiting for you): only what the companion can know. With
         ``alert`` the Island expands and buzzes. Returns the ids of the devices reached."""
         now = int(time.time())
         reached = set()
         targets = self.live_activity_devices(stored, runtime_id)
+        if not targets and state_patch.get("phase") in ("thinking", "streaming", "tool"):
+            # Nothing to update: the app is closed. Start one where the phone allows it.
+            self.start_live_activities(stored, runtime_id, state_patch)
+            targets = self.live_activity_devices(stored, runtime_id)
         if not targets and alert:
             self._la_skip("alert update", stored)
         for d in targets:

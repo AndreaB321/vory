@@ -27,6 +27,7 @@ struct SettingsView: View {
     }
     private var appRows: [Row] {
         [
+            Row(id: "status", title: "Status", symbol: "waveform.path.ecg", color: .green, destination: AnyView(StatusView())),
             Row(id: "notifications", title: "Notifications", symbol: "bell.badge", color: .red, destination: AnyView(NotificationsView())),
             Row(id: "security", title: "Security", symbol: "faceid", color: .green, destination: AnyView(SecurityView())),
             Row(id: "bots", title: "Bots", symbol: "cloud.fill", color: .indigo, destination: AnyView(BotsSettingsView())),

@@ -21,6 +21,8 @@ final class PushRegistrar: PushRegistrationSyncing {
     var liveActivitySessionID: String?
     /// When the current activity's push token arrived (nil once the activity ended).
     var liveActivityTokenAt: Date?
+    /// Lets the gateway start a Live Activity while the app is closed (push to start).
+    var pushToStartToken: String? = UserDefaults.standard.string(forKey: "liveActivity.pushToStartToken")
     var authorization: UNAuthorizationStatus = .notDetermined
     var lastRegistrationPath: String?
     var lastError: String?
@@ -32,6 +34,15 @@ final class PushRegistrar: PushRegistrationSyncing {
     init() {
         if let s = UserDefaults.standard.string(forKey: Self.installIDKey) { installID = s }
         else { let s = UUID().uuidString.lowercased(); UserDefaults.standard.set(s, forKey: Self.installIDKey); installID = s }
+        NotificationCenter.default.addObserver(forName: .hermesLiveActivityPushToStartToken, object: nil, queue: .main) { [weak self] n in
+            let token = n.userInfo?["token"] as? String
+            Task { @MainActor in
+                guard let self, let token, !token.isEmpty, token != self.pushToStartToken else { return }
+                self.pushToStartToken = token
+                UserDefaults.standard.set(token, forKey: "liveActivity.pushToStartToken")
+                NotificationCenter.default.post(name: .hermesPushRegistrationNeedsSync, object: nil)
+            }
+        }
         NotificationCenter.default.addObserver(forName: .hermesLiveActivityToken, object: nil, queue: .main) { [weak self] n in
             let token = n.userInfo?["token"] as? String
             let started = n.userInfo?["startedAt"] as? Double
@@ -139,6 +150,16 @@ final class PushRegistrar: PushRegistrationSyncing {
             "live_activity_started_at": liveActivityStartedAt.map { .number($0) } ?? .null,
             "live_activity_session_id": liveActivitySessionID.map { .string($0) } ?? .null,
             "live_activities": .array(liveActivities.map { .object(["session_id": .string($0.key), "token": .string($0.value.token), "started_at": .number($0.value.startedAt)]) }),
+            // Push to start: with this the companion can begin an activity for a turn that starts
+            // while the app is closed. It fills the activity's attributes from `bots` below.
+            "live_activity_push_to_start_token": pushToStartToken.map { .string($0) } ?? .null,
+            "connection_id": .string(runtime.connection.id.uuidString),
+            "bots": .object(Dictionary(uniqueKeysWithValues: runtime.profiles.map { p in
+                let looks = BotLooks.load()
+                let key = looks.key(profile: p.name, label: p.label) ?? p.name
+                return (p.name, JSONValue.object(["label": .string(p.label), "hex": .string(looks.colors[key] ?? BotColors.hex(for: p.name)),
+                                                   "avatar": .string(looks.avatars[key] ?? BotAvatarStore.choice(for: p.name).raw)]))
+            })),
             "gateway": .string(runtime.connection.gateway.description),
             "connection_name": .string(runtime.connection.name),
             "profiles": .array(runtime.profiles.map { .string($0.name) }),
@@ -171,6 +192,7 @@ final class PushRegistrar: PushRegistrationSyncing {
 
 extension Notification.Name {
     static let hermesPushRegistrationNeedsSync = Notification.Name("hermesPushRegistrationNeedsSync")
+    static let hermesLiveActivityPushToStartToken = Notification.Name("hermesLiveActivityPushToStartToken")
 }
 
 /// Adapter so the core can raise local notifications without importing UserNotifications.

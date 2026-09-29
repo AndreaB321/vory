@@ -15,6 +15,17 @@ enum SessionCache {
         return (try? JSONDecoder().decode([StoredSession].self, from: data)) ?? []
     }
 
+    /// Any cached list for this gateway, whichever bot it was for: shown at a cold launch when
+    /// the exact one is missing, so the page is never empty while the first load runs.
+    static func loadAny(connection: UUID) -> [StoredSession] {
+        let head = prefix + connection.uuidString + "."
+        var best: [StoredSession] = []
+        for (k, v) in UserDefaults.standard.dictionaryRepresentation() where k.hasPrefix(head) {
+            if let data = v as? Data, let list = try? JSONDecoder().decode([StoredSession].self, from: data), list.count > best.count { best = list }
+        }
+        return best
+    }
+
     static func save(_ sessions: [StoredSession], connection: UUID, profile: String?) {
         if let data = try? JSONEncoder().encode(sessions) { UserDefaults.standard.set(data, forKey: key(connection: connection, profile: profile)) }
     }

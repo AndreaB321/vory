@@ -111,8 +111,16 @@ async function push(request, env) {
     if (!token) return reply(400, { error: "no live activity token" });
     topic = dev.bundle_id + ".push-type.liveactivity";
     const now = Math.floor(Date.now() / 1000);
-    payload = { aps: { timestamp: now, event: b.event === "end" ? "end" : "update", "content-state": b.content_state || {} } };
-    if (b.event === "end") payload.aps["dismissal-date"] = b.dismissal_date || now + 60;
+    const event = b.event === "end" ? "end" : b.event === "start" ? "start" : "update";
+    payload = { aps: { timestamp: now, event, "content-state": b.content_state || {} } };
+    if (event === "end") payload.aps["dismissal-date"] = b.dismissal_date || now + 60;
+    // A push-to-start: the token is the phone's push-to-start token and the activity's fixed
+    // fields travel with it (plain words: title, bot name, colour, avatar choice).
+    if (event === "start") {
+      if (!b.attributes || typeof b.attributes !== "object") return reply(400, { error: "attributes required for start" });
+      payload.aps["attributes-type"] = "HermesTurnAttributes";
+      payload.aps.attributes = b.attributes;
+    }
     // An alerting update: the Island expands and the phone buzzes. Plain words only, by design.
     if (b.alert && typeof b.alert === "object") {
       payload.aps.alert = { title: String(b.alert.title || "Vory").slice(0, 80), body: String(b.alert.body || "").slice(0, 160), sound: "default" };

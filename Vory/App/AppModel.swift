@@ -236,6 +236,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     static var model: AppModel? { AppModel.shared }
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        // Push-to-start tokens and activities the gateway starts by push: observed from the
+        // first moment, since the system may have launched the app in the background for one.
+        LiveActivityController.observePushStarts()
         UNUserNotificationCenter.current().delegate = self
         LocalNotifier.registerCategories()
         BotLooksMirror.mirror()   // so the notification extensions show the right bot from the start

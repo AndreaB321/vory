@@ -80,6 +80,42 @@ final class LiveActivityController: TurnActivityReporting {
     }
     private var stateTask: Task<Void, Never>?
 
+    // MARK: Push to start
+
+    /// Tokens the gateway can use to START an activity while the app is closed (iOS 17.2+). The
+    /// system hands one out per attributes type; it goes into the device file like the others.
+    nonisolated(unsafe) private static var pushToStartTask: Task<Void, Never>?
+    nonisolated(unsafe) private static var startedByPushTask: Task<Void, Never>?
+    nonisolated(unsafe) private static var adoptedTokenTasks: [String: Task<Void, Never>] = [:]
+
+    /// Called once at launch. Publishes the push-to-start token, and for every activity the
+    /// system starts on a push, publishes that activity's own update token under its session so
+    /// the companion can keep driving it and end it.
+    static func observePushStarts() {
+        guard pushToStartTask == nil else { return }
+        pushToStartTask = Task.detached {
+            for await token in Activity<HermesTurnAttributes>.pushToStartTokenUpdates {
+                let hex = token.map { String(format: "%02x", $0) }.joined()
+                note("push-to-start token received")
+                NotificationCenter.default.post(name: .hermesLiveActivityPushToStartToken, object: nil, userInfo: ["token": hex])
+            }
+        }
+        startedByPushTask = Task.detached {
+            for await a in Activity<HermesTurnAttributes>.activityUpdates {
+                let id = a.id
+                guard adoptedTokenTasks[id] == nil else { continue }
+                note("activity \(id.prefix(6)) appeared (push start or relaunch)")
+                let h = ActivityHandle(a)
+                adoptedTokenTasks[id] = h.observePushTokens(storedID: a.attributes.storedSessionID, startedAt: a.content.state.startedAt)
+                if let token = a.pushToken {
+                    let hex = token.map { String(format: "%02x", $0) }.joined()
+                    NotificationCenter.default.post(name: .hermesLiveActivityToken, object: nil,
+                                                    userInfo: ["token": hex, "storedID": a.attributes.storedSessionID, "startedAt": a.content.state.startedAt.timeIntervalSince1970])
+                }
+            }
+        }
+    }
+
     /// Ends activities nobody is driving any more: ones whose turn already ended, or that belong to
     /// a chat this app has open and knows is idle. Called when the app comes to the foreground.
     static func endOrphans(runningStoredIDs: Set<String>, knownStoredIDs: Set<String>) {

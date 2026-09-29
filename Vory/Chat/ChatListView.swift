@@ -295,10 +295,14 @@ struct ChatListView: View {
         }
     }
 
-    private func load() async {
+    private func load(attempt: Int = 0) async {
         guard let runtime else { return }
         let cacheProfile = allBots ? "*" : runtime.selectedProfile
-        if sessions.isEmpty { sessions = SessionCache.load(connection: runtime.connection.id, profile: cacheProfile) }
+        if sessions.isEmpty {
+            sessions = SessionCache.load(connection: runtime.connection.id, profile: cacheProfile)
+            // A cold launch before the bot is known: any list for this gateway beats a blank page.
+            if sessions.isEmpty { sessions = SessionCache.loadAny(connection: runtime.connection.id) }
+        }
         loading = sessions.isEmpty; defer { loading = false }
         do {
             var all: [StoredSession] = []
@@ -346,8 +350,18 @@ struct ChatListView: View {
             if let r: GroupsListResult = try? await runtime.rpc("groups.list", ["limit": 50], timeout: 10).decode() {
                 rooms = r.rooms.filter { $0.disbandedAt == nil }
             }
+        } catch is CancellationError {
+            // A newer load (the bot or the gateway changed) took over.
         } catch {
+            if error.localizedDescription.localizedCaseInsensitiveContains("cancelled") { return }
             errorText = error.localizedDescription
+            // A cold launch can ask before the session is refreshed or the gateway answers:
+            // a blank page with nothing cached tries again a few times before giving up.
+            if sessions.isEmpty, attempt < 3, !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled else { return }
+                await load(attempt: attempt + 1)
+            }
         }
     }
 
