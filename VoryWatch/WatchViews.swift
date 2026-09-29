@@ -113,6 +113,15 @@ struct WatchChatsView: View {
                     ForEach(model.sessions.filter { !rt.needsAttention.contains($0.id) }) { s in
                         NavigationLink(value: s.id) { WatchSessionRow(session: s, badge: rt.chatForStored(s.id)?.isRunning == true ? "ellipsis.message" : nil, showBot: merged) }
                     }
+                    if model.hasMore {
+                        // A few chats load first; this brings the next page as you scroll down.
+                        Button { Task { await model.loadMore() } } label: {
+                            if model.loadingMore { Label { Text("Loading…") } icon: { ProgressView() } }
+                            else { Label("Show more", systemImage: "arrow.down.circle") }
+                        }
+                        .disabled(model.loadingMore)
+                        .onAppear { Task { await model.loadMore() } }
+                    }
                 } header: {
                     if merged { Text("All bots") }
                     else {
@@ -269,6 +278,8 @@ struct WatchChatView: View {
     @State private var statusText = ""
     @State private var title = "Chat"
     @State private var profile: String?
+    /// Messages on screen: the last few at first, more with "Show earlier".
+    @State private var shown = 12
 
     var body: some View {
         Group {
@@ -278,7 +289,11 @@ struct WatchChatView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 8) {
-                            ForEach(chat.items.suffix(30)) { item in WatchTranscriptRow(item: item, profile: chat.profileName).id(item.id) }
+                            if chat.items.count > shown {
+                                // The last few messages first; the rest a page at a time from the top.
+                                Button { shown += 20 } label: { Label("Show earlier", systemImage: "arrow.up.circle") }.font(.caption)
+                            }
+                            ForEach(chat.items.suffix(shown)) { item in WatchTranscriptRow(item: item, profile: chat.profileName).id(item.id) }
                             if let s = chat.statusLine, chat.isRunning { Text(s).font(.caption2).foregroundStyle(.secondary) }
                             if let card = chat.firstCard { WatchCardView(chat: chat, card: card) }
                             Color.clear.frame(height: 1).id("bottom")
@@ -294,11 +309,11 @@ struct WatchChatView: View {
                     .onChange(of: chat.items.last) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
                     .onChange(of: chat.firstCard?.id) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
                 }
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    composer { let t = text; text = ""; await chat.send(t) }
-                }
                 .navigationTitle(chat.title)
                 .toolbar {
+                    // The bottom bar is where watchOS pins a field to the screen's bottom edge; a
+                    // safe-area inset sat above a blank band on the Ultra.
+                    ToolbarItem(placement: .bottomBar) { composer { let t = text; text = ""; await chat.send(t) } }
                     if chat.isRunning {
                         ToolbarItem(placement: .topBarTrailing) { Button { Task { await chat.stop() } } label: { Image(systemName: "stop.fill") }.tint(.red) }
                     }
@@ -311,12 +326,12 @@ struct WatchChatView: View {
             guard let rt = model.runtime else { return }
             profile = model.sessions.first { $0.id == storedID }?.profile
             title = model.sessions.first { $0.id == storedID }?.displayTitle ?? "Chat"
-            // Give the socket a moment; on the Bluetooth link it never opens, so fall back to REST.
-            let deadline = Date().addingTimeInterval(4)
-            while !model.socketUsable, Date() < deadline { try? await Task.sleep(for: .milliseconds(300)) }
             if model.socketUsable {
                 do { chat = try await rt.openChat(storedID: storedID, title: nil); return } catch { /* fall through */ }
             }
+            // No socket yet (the Bluetooth link never opens one): show the last messages over
+            // REST at once instead of waiting on a socket that may never come, and keep polling.
+            // The 4 s wait before the first byte was most of the "long time to load".
             proxied = true
             await pollLoop(rt)
         }
@@ -330,8 +345,6 @@ struct WatchChatView: View {
                 .buttonStyle(.plain).disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
                 .foregroundStyle(text.isEmpty ? Color.secondary : Color.accentColor)
         }
-        .padding(.horizontal, 6).padding(.vertical, 4)
-        .background(Color.black)
     }
 
     // MARK: REST + phone proxy
@@ -340,7 +353,10 @@ struct WatchChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(items.suffix(30)) { item in WatchTranscriptRow(item: item, profile: profile).id(item.id) }
+                    if items.count >= shown {
+                        Button { shown += 20; Task { if let rt = model.runtime { await refreshProxied(rt) } } } label: { Label("Show earlier", systemImage: "arrow.up.circle") }.font(.caption)
+                    }
+                    ForEach(items.suffix(shown)) { item in WatchTranscriptRow(item: item, profile: profile).id(item.id) }
                     if running { Text(statusText.isEmpty ? "Working…" : statusText).font(.caption2).foregroundStyle(.secondary) }
                     ForEach(Array(cards.enumerated()), id: \.offset) { _, c in proxiedCard(c) }
                     if let error { Text(error).font(.caption2).foregroundStyle(.red) }
@@ -352,11 +368,9 @@ struct WatchChatView: View {
             .task { try? await Task.sleep(for: .milliseconds(350)); proxy.scrollTo("bottom", anchor: .bottom) }
             .onChange(of: items.count) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            composer { await proxySend() }
-        }
         .navigationTitle(title)
         .toolbar {
+            ToolbarItem(placement: .bottomBar) { composer { await proxySend() } }
             if running {
                 ToolbarItem(placement: .topBarTrailing) { Button { Task { _ = try? await model.connectivity.request(["op": "stop", "session": storedID, "profile": profile ?? ""]) } } label: { Image(systemName: "stop.fill") }.tint(.red) }
             }
@@ -389,7 +403,7 @@ struct WatchChatView: View {
     }
 
     private func refreshProxied(_ rt: GatewayRuntime) async {
-        if let r: JSONValue = try? await rt.api.get("/api/sessions/\(storedID)/messages", query: [URLQueryItem(name: "order", value: "latest"), URLQueryItem(name: "limit", value: "40")], profile: profile ?? rt.selectedProfile) {
+        if let r: JSONValue = try? await rt.api.get("/api/sessions/\(storedID)/messages", query: [URLQueryItem(name: "order", value: "latest"), URLQueryItem(name: "limit", value: String(shown + 2))], profile: profile ?? rt.selectedProfile) {
             let msgs = (r["messages"]?.arrayValue ?? r.arrayValue ?? []).compactMap { try? $0.decode(TranscriptMessage.self) }
             let built = msgs.enumerated().compactMap { TranscriptItem.fromHistory($1, index: $0) }
             let sorted = built.sorted { $0.timestamp < $1.timestamp }

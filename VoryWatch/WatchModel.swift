@@ -74,21 +74,53 @@ final class WatchModel {
         await loadSessions()
     }
 
+    /// How many chats the list holds; "Show more" at the end raises it.
+    var listLimit = 8
+    var loadingMore = false
+    var hasMore = true
+    private var cacheKey: String { "watch.sessions." + (runtime?.connection.id.uuidString ?? "-") + "." + (listProfile ?? runtime?.selectedProfile ?? "-") }
+
+    /// The list, in three steps so the wrist never waits on the slowest one: the last list this
+    /// watch saw (at once), a short page from the gateway, then the rest in the background.
     func loadSessions() async {
         guard let rt = runtime else { return }
+        if sessions.isEmpty, let d = UserDefaults.standard.data(forKey: cacheKey), let cached = try? JSONDecoder().decode([StoredSession].self, from: d) {
+            sessions = cached
+        }
+        await fetchSessions(limit: listLimit)
+    }
+
+    /// The next page: more rows from the same query.
+    func loadMore() async {
+        guard hasMore, !loadingMore else { return }
+        loadingMore = true; defer { loadingMore = false }
+        listLimit += 12
+        await fetchSessions(limit: listLimit)
+    }
+
+    private func fetchSessions(limit: Int) async {
+        guard let rt = runtime else { return }
         do {
+            var out: [StoredSession] = []
             if listProfile == "*" {
-                var all: [StoredSession] = []
-                for p in rt.profiles.map(\.name) {
-                    if let r: SessionListResponse = try? await rt.api.get("/api/sessions", query: [URLQueryItem(name: "order", value: "recent"), URLQueryItem(name: "limit", value: "20")], profile: p) {
-                        all += r.sessions.map { var s = $0; if s.profile == nil || s.profile!.isEmpty { s.profile = p }; return s }
+                // Every bot at once, not one after another: the slow path over Bluetooth.
+                try await withThrowingTaskGroup(of: [StoredSession].self) { group in
+                    for p in rt.profiles.map(\.name) {
+                        group.addTask {
+                            guard let r: SessionListResponse = try? await rt.api.get("/api/sessions", query: [URLQueryItem(name: "order", value: "recent"), URLQueryItem(name: "limit", value: String(max(6, limit / 2)))], profile: p) else { return [] }
+                            return r.sessions.map { var s = $0; if s.profile == nil || s.profile!.isEmpty { s.profile = p }; return s }
+                        }
                     }
+                    for try await part in group { out += part }
                 }
-                sessions = all.sorted { ($0.lastActive ?? 0) > ($1.lastActive ?? 0) }
+                out.sort { ($0.lastActive ?? 0) > ($1.lastActive ?? 0) }
             } else {
-                let r: SessionListResponse = try await rt.api.get("/api/sessions", query: [URLQueryItem(name: "order", value: "recent"), URLQueryItem(name: "limit", value: "30")], profile: listProfile ?? rt.selectedProfile)
-                sessions = r.sessions
+                let r: SessionListResponse = try await rt.api.get("/api/sessions", query: [URLQueryItem(name: "order", value: "recent"), URLQueryItem(name: "limit", value: String(limit))], profile: listProfile ?? rt.selectedProfile)
+                out = r.sessions
             }
+            hasMore = out.count >= limit
+            sessions = out
+            if let d = try? JSONEncoder().encode(Array(out.prefix(30))) { UserDefaults.standard.set(d, forKey: cacheKey) }
             loadError = nil
         } catch { loadError = error.localizedDescription }
     }
