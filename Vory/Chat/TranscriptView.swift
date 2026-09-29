@@ -291,15 +291,17 @@ extension TranscriptView {
 struct TimeRevealColumn<Content: View>: View {
     @ViewBuilder var content: Content
     @State private var reveal: CGFloat = 0
+    @AppStorage(ChatStyle.timeReveal) private var enabled = true
     var body: some View {
         content
             .offset(x: -reveal * 80)
-            .background(TimeRevealPan(reveal: $reveal))
+            .background(TimeRevealPan(reveal: $reveal, enabled: enabled))
     }
 }
 
 private struct TimeRevealPan: UIViewRepresentable {
     @Binding var reveal: CGFloat
+    var enabled = true
 
     func makeUIView(context: Context) -> Probe {
         let v = Probe()
@@ -307,7 +309,7 @@ private struct TimeRevealPan: UIViewRepresentable {
         v.coordinator = context.coordinator
         return v
     }
-    func updateUIView(_ v: Probe, context: Context) { context.coordinator.reveal = $reveal }
+    func updateUIView(_ v: Probe, context: Context) { context.coordinator.reveal = $reveal; context.coordinator.enabled = enabled }
     func makeCoordinator() -> Coordinator { Coordinator(reveal: $reveal) }
 
     final class Probe: UIView {
@@ -320,6 +322,7 @@ private struct TimeRevealPan: UIViewRepresentable {
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var reveal: Binding<CGFloat>
+        var enabled = true
         private weak var scrollView: UIScrollView?
         private weak var pan: UIPanGestureRecognizer?
         private var offsetObservation: NSKeyValueObservation?
@@ -348,10 +351,13 @@ private struct TimeRevealPan: UIViewRepresentable {
 
         func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
             guard g === pan, let sv = scrollView, let p = g as? UIPanGestureRecognizer else { return true }
+            guard enabled else { return false }
             // Only while the thread is still: not decelerating, and not moved in the last moment.
             guard !sv.isDecelerating, Date().timeIntervalSince(lastScrollAt) > 0.3 else { return false }
+            // A clearly sideways start: a diagonal scroll (a thumb drifting while it reads) used
+            // to grab the thread and slide it, which read as the chat "moving side to side".
             let t = p.translation(in: sv), v = p.velocity(in: sv)
-            return t.x < 0 && v.x < 0 && abs(t.x) > abs(t.y) * 1.5
+            return t.x < -10 && v.x < 0 && abs(t.x) > abs(t.y) * 3
         }
         func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
             other === scrollView?.panGestureRecognizer
@@ -383,6 +389,8 @@ enum ChatStyle {
     static let showSystemNotes = "chat.showSystemNotes"
     /// The bot beside each reply bubble.
     static let showBots = "chat.showBots"
+    /// Pull the thread left to see message times.
+    static let timeReveal = "chat.timeReveal"
 }
 
 /// A transcript item plus the "Tue, Sep 22 at 6:30 PM" separator that precedes it when the

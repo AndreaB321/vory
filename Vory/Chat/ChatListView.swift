@@ -149,6 +149,15 @@ struct ChatListView: View {
                         Button { Task { await runtime.reconnectNow() } } label: { Label("Reconnect", systemImage: "arrow.clockwise") }
                     }
                 }
+                // Two gateways (a main machine and a homelab, say): switch here instead of
+                // Settings › Gateways. Sessions belong to each gateway, so the list reloads.
+                if model.store.connections.count > 1 {
+                    Section("Switch gateway") {
+                        ForEach(model.store.connections.filter { $0.id != runtime.connection.id }) { c in
+                            Button { Task { await model.activate(c) } } label: { Label(c.name, systemImage: "server.rack") }
+                        }
+                    }
+                }
             }
         } label: {
             // A fixed-size avatar: a text label changed width with each profile name and the bar

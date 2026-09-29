@@ -25,6 +25,22 @@ struct ComposerView: View {
     /// Shown after a paste that dropped a lot of text into the field.
     @State private var longTextOffer = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(AppModel.self) private var model
+
+    /// "@" at the start of the word being typed lists the bots; a pick puts "@name " in its place.
+    private var mentionQuery: String? {
+        guard !text.hasPrefix("/"), let last = text.split(separator: " ", omittingEmptySubsequences: false).last, last.hasPrefix("@") else { return nil }
+        return String(last.dropFirst())
+    }
+    private var mentionSuggestions: [ProfileInfo] {
+        guard let q = mentionQuery?.lowercased(), let profiles = model.runtime?.profiles else { return [] }
+        return profiles.filter { q.isEmpty || $0.name.lowercased().hasPrefix(q) || $0.label.lowercased().hasPrefix(q) }
+    }
+    private func pickMention(_ p: ProfileInfo) {
+        var parts = text.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        if !parts.isEmpty { parts[parts.count - 1] = "@" + p.name }
+        text = parts.joined(separator: " ") + " "
+    }
 
     /// The field's text becomes a staged text file and the field is cleared.
     private func attachTextAsFile() {
@@ -81,6 +97,31 @@ struct ComposerView: View {
                 .frame(height: min(commandListCap, CGFloat(slashSuggestions.count) * 38 + 8))
                 .glassEffect(.regular, in: .rect(cornerRadius: 16))
                 // In place, not sliding up from under the keyboard.
+                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
+            }
+            if !mentionSuggestions.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(mentionSuggestions) { p in
+                            Button { pickMention(p) } label: {
+                                HStack(spacing: 10) {
+                                    BotAvatar(profile: p.name, size: 26)
+                                    Text("@" + p.name).font(.subheadline.weight(.medium)).lineLimit(1)
+                                    if let m = p.model?.split(separator: "/").last { Text(String(m)).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                                    Spacer(minLength: 0)
+                                }
+                                .frame(height: 34)
+                                .padding(.vertical, 3)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            if p.id != mentionSuggestions.last?.id { Divider() }
+                        }
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 4)
+                }
+                .frame(height: min(commandListCap, CGFloat(mentionSuggestions.count) * 40 + 8))
+                .glassEffect(.regular, in: .rect(cornerRadius: 16))
                 .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
             }
             if longTextOffer {
@@ -154,6 +195,7 @@ struct ComposerView: View {
             }
         }
         .animation(.snappy(duration: 0.25), value: slashSuggestions.map(\.name))
+        .animation(.snappy(duration: 0.25), value: mentionSuggestions.map(\.name))
         .animation(.snappy(duration: 0.2), value: dictation.isListening)
         // Why the mic did nothing (no permission, no recognizer): said in the banner, not swallowed.
         .onChange(of: dictation.error) { _, e in if let e { chat.banner = e; dictation.error = nil } }

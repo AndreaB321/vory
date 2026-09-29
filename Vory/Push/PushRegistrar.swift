@@ -98,7 +98,7 @@ final class PushRegistrar: PushRegistrationSyncing {
     /// With a relay baked into the build, the phone registers itself there; the gateway then only
     /// needs the install id + secret from the device file, never an APNs key.
     func registerWithRelay() async {
-        guard PushRelay.isConfigured, let token = deviceToken else { return }
+        guard notificationsEnabled, PushRelay.isConfigured, let token = deviceToken else { return }
         do {
             try await PushRelay.register(deviceToken: token, platform: "ios", bundleID: Bundle.main.bundleIdentifier ?? "", environment: apnsEnvironment, liveActivityToken: nil)
             relayRegisteredAt = Date(); relayError = nil
@@ -118,7 +118,13 @@ final class PushRegistrar: PushRegistrationSyncing {
     }
 
     /// Writes `<profile home>/push/devices/<install id>.json` through the gateway's managed files API.
+    /// Settings › Notifications › Notifications. Off removes this phone from the gateway and the
+    /// relay, so nothing is sent; on registers it again.
+    static let enabledKey = "notificationsEnabled"
+    var notificationsEnabled: Bool { UserDefaults.standard.object(forKey: Self.enabledKey) as? Bool ?? true }
+
     func syncRegistration(runtime: GatewayRuntime) async {
+        guard notificationsEnabled else { return }
         guard let token = deviceToken, let home = runtime.profileHome else { return }
         let path = "\(home)/push/devices/\(installID).json"
         var payload: [String: JSONValue] = [

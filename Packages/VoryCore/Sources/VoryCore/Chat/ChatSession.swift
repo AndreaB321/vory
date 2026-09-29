@@ -167,7 +167,14 @@ public final class ChatSession: @MainActor Identifiable, ChatIdentity {
         } catch {
             stale = true
             if !(error is CancellationError), !error.localizedDescription.contains("CancellationError") {
-                banner = "Reconnected, but the session could not be re-attached: \(error.localizedDescription)"
+                let why = error.localizedDescription
+                if why.localizedCaseInsensitiveContains("not found") {
+                    // A one-off run (a scheduled task, say) the gateway never kept, or one it
+                    // dropped on restart: say so instead of quoting the error.
+                    banner = "The gateway no longer has this chat. It may have been a one-off run, or the gateway restarted without it. Start a new chat to carry on."
+                } else {
+                    banner = "Reconnected, but the chat could not be re-attached: \(why)"
+                }
                 bannerIsReconnect = true
             }
         }

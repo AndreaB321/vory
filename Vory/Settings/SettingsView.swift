@@ -283,11 +283,24 @@ struct NotificationsView: View {
     @Environment(AppModel.self) private var model
     @AppStorage("liveActivitiesEnabled") private var liveActivities = true
     @AppStorage("hapticsEnabled") private var haptics = true
+    @AppStorage(PushRegistrar.enabledKey) private var notificationsOn = true
 
     var body: some View {
         let push = model.push
         List {
             SettingsHeaderSection(title: "Notifications", symbol: "bell.badge", color: .red, description: "Permission, Live Activities and haptics on this phone.")
+            Section {
+                Toggle("Notifications", isOn: $notificationsOn)
+                    .onChange(of: notificationsOn) { _, on in
+                        Task {
+                            guard let rt = model.runtime else { return }
+                            if on { await push.registerWithRelay(); await push.syncRegistration(runtime: rt) }
+                            else { await push.removeRegistration(runtime: rt) }
+                        }
+                    }
+            } footer: {
+                Text(notificationsOn ? "This phone is registered with the gateway for approvals, questions, finished turns and errors while Vory is closed." : "Off: this phone is removed from the gateway's device list, so the Companion sends it nothing. Turn it on to register again.")
+            }
             Section("Permission") {
                 LabeledContent("Status", value: statusText(push.authorization))
                 if push.authorization == .notDetermined {
@@ -442,6 +455,7 @@ struct AppearanceView: View {
     @AppStorage(ChatStyle.showTurnStats) private var showTurnStats = true
     @AppStorage(ChatStyle.showSystemNotes) private var showSystemNotes = true
     @AppStorage(ChatStyle.showBots) private var showBots = true
+    @AppStorage(ChatStyle.timeReveal) private var timeReveal = true
     @Environment(\.editMode) private var editMode
 
     private var layout: TabLayout { TabLayout.parse(layoutRaw) }
@@ -519,8 +533,9 @@ struct AppearanceView: View {
                 Toggle("Show tokens per second", isOn: $showTurnStats)
                 Toggle("Show system notes", isOn: $showSystemNotes)
                 Toggle("Bot beside replies", isOn: $showBots)
+                Toggle("Pull left for times", isOn: $timeReveal)
             } header: { Text("Chat") } footer: {
-                Text("Hidden rows are still received and kept; this only changes what the transcript draws. Approval cards are always shown.")
+                Text("Hidden rows are still received and kept; this only changes what the transcript draws. Approval cards are always shown. Pull left for times slides the thread aside to show when each message arrived; off, the thread never moves sideways.")
             }
             Section {
                 Button("Clear chat list cache") { SessionCache.clearAll() }
