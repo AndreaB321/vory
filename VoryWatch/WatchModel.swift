@@ -17,10 +17,31 @@ final class WatchModel {
     var sessions: [StoredSession] = []
     var loadError: String?
     var pendingChat: String?
+    /// A complication tapped: open the Activity page (working chats, approvals waiting).
+    var pendingActivity = false
     var syncStatus = "Waiting for iPhone…"
     /// nil = the selected profile; "*" = every profile merged.
     var listProfile: String?
     let connectivity = WatchConnectivityBridge()
+    /// The bots as the iPhone draws them, sent over with the gateways; the watch draws the
+    /// same faces, still.
+    var looks = BotLooks.load()
+    /// Vory Summaries made on the iPhone (Settings › Vory Summaries › Send to Apple Watch),
+    /// keyed by session id; the watch never runs a model of its own.
+    var summaries: [String: WatchSummary] = WatchSummary.loadCache()
+    struct WatchSummary: Codable { var title: String; var summary: String; var stamp: Double
+        static let cacheKey = "watch.summaries"
+        static func loadCache() -> [String: WatchSummary] {
+            guard let d = UserDefaults.standard.data(forKey: cacheKey) else { return [:] }
+            return (try? JSONDecoder().decode([String: WatchSummary].self, from: d)) ?? [:]
+        }
+    }
+    /// The summary for a chat when the phone made one for its current state.
+    func summary(for s: StoredSession) -> WatchSummary? {
+        guard let m = summaries[s.id] else { return nil }
+        if let last = s.lastActive, abs(m.stamp - last) > 1 { return nil }
+        return m
+    }
 
     var hasConnections: Bool { !store.connections.isEmpty }
 
@@ -88,6 +109,15 @@ final class WatchModel {
 
     /// The phone sends every saved gateway plus its secrets as one application context.
     private func receive(context: [String: Any]) {
+        if let ldata = context["looks"] as? Data, let l = try? JSONDecoder().decode(BotLooks.self, from: ldata) {
+            l.save(); looks = l
+        }
+        if let sdata = context["summaries"] as? Data, let m = try? JSONDecoder().decode([String: WatchSummary].self, from: sdata) {
+            summaries = m; UserDefaults.standard.set(sdata, forKey: WatchSummary.cacheKey)
+        } else if context["summaries"] == nil, !summaries.isEmpty {
+            // The switch on the phone went off: the list goes back to the gateway's text.
+            summaries = [:]; UserDefaults.standard.removeObject(forKey: WatchSummary.cacheKey)
+        }
         guard let cdata = context["connections"] as? Data, let sdata = context["secrets"] as? Data,
               let connections = try? JSONDecoder().decode([GatewayConnection].self, from: cdata),
               let secrets = try? JSONDecoder().decode([String: GatewaySecrets].self, from: sdata) else { return }
@@ -106,6 +136,7 @@ final class WatchModel {
     func open(_ url: URL) {
         guard url.scheme == "vory" else { return }
         if url.host == "chat", let id = url.pathComponents.dropFirst().first { pendingChat = id }
+        else if url.host == "activity" || url.host == "chats" { pendingActivity = true }
     }
 
     func route(from userInfo: [AnyHashable: Any], action: String?, replyText: String?) {

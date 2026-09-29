@@ -10,6 +10,11 @@ import WatchConnectivity
 final class WatchSync: NSObject, WCSessionDelegate {
     static let shared = WatchSync()
     private var pending: ConnectionStore?
+    private weak var lastStore: ConnectionStore?
+    private var refreshTask: Task<Void, Never>?
+    /// Settings › Vory Summaries › Send to Apple Watch.
+    static let summariesToWatchKey = "chats.aiSummaries.watch"
+    static var summariesToWatch: Bool { UserDefaults.standard.bool(forKey: summariesToWatchKey) }
 
     func start() {
         guard WCSession.isSupported() else { return }
@@ -18,6 +23,7 @@ final class WatchSync: NSObject, WCSessionDelegate {
     }
 
     func push(store: ConnectionStore) {
+        lastStore = store
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
         guard session.activationState == .activated, session.isPaired, session.isWatchAppInstalled else { pending = store; return }
@@ -26,7 +32,24 @@ final class WatchSync: NSObject, WCSessionDelegate {
         guard let cdata = try? JSONEncoder().encode(store.connections), let sdata = try? JSONEncoder().encode(secrets) else { return }
         var ctx: [String: Any] = ["connections": cdata, "secrets": sdata, "sent": Date().timeIntervalSince1970]
         if let a = store.activeConnectionID { ctx["active"] = a.uuidString }
+        // The bots as this phone draws them (shape, eyes, colour, photo thumbnail): the watch
+        // draws the same faces from this, static.
+        if let looks = try? JSONEncoder().encode(BotLooks.load()) { ctx["looks"] = looks }
+        // Vory Summaries, made here by Apple Intelligence, so the watch shows them without
+        // running a model of its own.
+        if Self.summariesToWatch, let s = try? JSONEncoder().encode(ChatSummarizer.shared.summaries) { ctx["summaries"] = s }
         try? session.updateApplicationContext(ctx)
+    }
+
+    /// Re-send the context after looks or summaries changed, coalesced: summaries arrive one
+    /// chat at a time and each would otherwise be a full context update.
+    func refresh() {
+        refreshTask?.cancel()
+        refreshTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled, let store = lastStore else { return }
+            push(store: store)
+        }
     }
 
     private func flushPending() {

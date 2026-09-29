@@ -13,9 +13,78 @@ struct WatchRootView: View {
                 else { WatchConnectView() }
             }
             .navigationDestination(for: String.self) { WatchChatView(storedID: $0) }
+            .navigationDestination(for: WatchActivityRoute.self) { _ in WatchActivityView(path: $path) }
         }
         .onChange(of: model.pendingChat) { _, id in
             if let id { path.append(id); model.pendingChat = nil }
+        }
+        .onChange(of: model.pendingActivity) { _, go in
+            if go { path = NavigationPath(); path.append(WatchActivityRoute()); model.pendingActivity = false }
+        }
+    }
+}
+
+struct WatchActivityRoute: Hashable {}
+
+/// What the complications open to: the chats waiting for an answer and the ones at work, with
+/// the gateway's state on top. A row opens its chat.
+struct WatchActivityView: View {
+    @Environment(WatchModel.self) private var model
+    @Binding var path: NavigationPath
+
+    var body: some View {
+        List {
+            if let rt = model.runtime {
+                let waiting = model.sessions.filter { rt.needsAttention.contains($0.id) }
+                let working = model.sessions.filter { !rt.needsAttention.contains($0.id) && (rt.chatForStored($0.id)?.isRunning == true || $0.isActive == true) }
+                Section {
+                    HStack(spacing: 6) {
+                        Circle().fill(model.socketUsable ? Color.green : Color.orange).frame(width: 8, height: 8)
+                        Text(rt.connection.name).font(.headline).lineLimit(1)
+                        Spacer(minLength: 0)
+                        Text(model.socketUsable ? "Online" : "Via iPhone").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Label("\(waiting.count) need you", systemImage: "exclamationmark.bubble.fill").foregroundStyle(waiting.isEmpty ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
+                        Spacer()
+                        Label("\(working.count) working", systemImage: "ellipsis.message.fill").foregroundStyle(working.isEmpty ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.green))
+                    }
+                    .font(.caption2)
+                }
+                Section("Needs you") {
+                    if waiting.isEmpty { Text("Nothing waiting").font(.footnote).foregroundStyle(.secondary) }
+                    ForEach(waiting) { s in NavigationLink(value: s.id) { WatchSessionRow(session: s, badge: "exclamationmark.bubble.fill", showBot: true) } }
+                }
+                Section("Working") {
+                    if working.isEmpty { Text("No chat is working right now").font(.footnote).foregroundStyle(.secondary) }
+                    ForEach(working) { s in NavigationLink(value: s.id) { WatchSessionRow(session: s, badge: "ellipsis.message", showBot: true) } }
+                }
+            }
+        }
+        .navigationTitle("Activity")
+        .refreshable { await model.loadSessions() }
+        .task { await model.loadSessions() }
+    }
+}
+
+/// The bot's face on the watch: the look the iPhone sent (shape, eyes, colour, or a photo),
+/// drawn still. Falls back to the default shape in the bot's palette colour.
+struct WatchBotFace: View {
+    @Environment(WatchModel.self) private var model
+    var profile: String
+    var label: String? = nil
+    var size: CGFloat = 24
+
+    var body: some View {
+        let looks = model.looks
+        let key = looks.key(profile: profile, label: label ?? "") ?? profile
+        if looks.avatars[key] == "photo", let data = looks.photos[key], let img = UIImage(data: data) {
+            Image(uiImage: img).resizable().scaledToFill()
+                .frame(width: size, height: size).clipShape(.circle)
+        } else {
+            let hex = looks.colors[key] ?? WatchBotColor.hex(for: profile)
+            BotFaceView(spec: BotLookSpec.from(choice: looks.avatars[key], hex: hex), size: size, active: false, drawn: true)
+                .frame(width: size, height: size)
         }
     }
 }
@@ -26,6 +95,7 @@ struct WatchChatsView: View {
     @Binding var path: NavigationPath
     @State private var showPicker = false
     @State private var showSettings = false
+    @State private var showNewChat = false
 
     var body: some View {
         List {
@@ -34,15 +104,25 @@ struct WatchChatsView: View {
                 let waiting = model.sessions.filter { rt.needsAttention.contains($0.id) }
                 if !waiting.isEmpty {
                     Section("Needs you") {
-                        ForEach(waiting) { s in NavigationLink(value: s.id) { WatchSessionRow(session: s, badge: "exclamationmark.bubble.fill", dot: merged) } }
+                        ForEach(waiting) { s in NavigationLink(value: s.id) { WatchSessionRow(session: s, badge: "exclamationmark.bubble.fill", showBot: merged) } }
                     }
                 }
                 Section {
-                    Button { Task { await newChat() } } label: { Label("New chat", systemImage: "square.and.pencil") }
+                    NavigationLink(value: WatchActivityRoute()) { Label("Activity", systemImage: "bolt.horizontal.circle") }
+                    Button { showNewChat = true } label: { Label("New chat", systemImage: "square.and.pencil") }
                     ForEach(model.sessions.filter { !rt.needsAttention.contains($0.id) }) { s in
-                        NavigationLink(value: s.id) { WatchSessionRow(session: s, badge: rt.chatForStored(s.id)?.isRunning == true ? "ellipsis.message" : nil, dot: merged) }
+                        NavigationLink(value: s.id) { WatchSessionRow(session: s, badge: rt.chatForStored(s.id)?.isRunning == true ? "ellipsis.message" : nil, showBot: merged) }
                     }
-                } header: { Text(merged ? "All bots" : (model.listProfile ?? rt.selectedProfile ?? rt.connection.name)) }
+                } header: {
+                    if merged { Text("All bots") }
+                    else {
+                        let p = model.listProfile ?? rt.selectedProfile ?? ""
+                        HStack(spacing: 6) {
+                            if !p.isEmpty { WatchBotFace(profile: p, label: rt.profiles.first { $0.name == p }?.label, size: 18) }
+                            Text(p.isEmpty ? rt.connection.name : (rt.profiles.first { $0.name == p }?.label ?? p))
+                        }
+                    }
+                }
                 if let e = model.loadError { Text(e).font(.footnote).foregroundStyle(.red) }
             }
         }
@@ -59,19 +139,60 @@ struct WatchChatsView: View {
         }
         .sheet(isPresented: $showPicker) { WatchProfilePicker() }
         .sheet(isPresented: $showSettings) { WatchSettingsView() }
+        .sheet(isPresented: $showNewChat) {
+            WatchNewChatSheet { profile in
+                showNewChat = false
+                Task { await newChat(profile: profile) }
+            }
+        }
         .refreshable { await model.loadSessions() }
         .task { await model.loadSessions() }
     }
 
-    private func newChat() async {
+    private func newChat(profile: String) async {
         guard let rt = model.runtime else { return }
+        rt.selectedProfile = profile
+        if model.listProfile != "*" { model.listProfile = profile }
         if model.socketUsable, let chat = try? await rt.newChat() { path.append(chat.storedID); return }
         // No direct socket (Bluetooth to the phone): ask the phone app to create it.
         do {
-            let r = try await model.connectivity.request(["op": "new", "profile": model.listProfile == "*" ? "" : (model.listProfile ?? rt.selectedProfile ?? "")])
+            let r = try await model.connectivity.request(["op": "new", "profile": profile])
             if let sid = r["session"] as? String, !sid.isEmpty { path.append(sid) }
             else { model.loadError = r["error"] as? String ?? "The phone could not create a chat." }
         } catch { model.loadError = "New chat needs the iPhone nearby: \(error.localizedDescription)" }
+    }
+}
+
+/// New chat: the bots as a scrolling list, like the Bots page on the phone. Pick one and the
+/// chat opens with it.
+struct WatchNewChatSheet: View {
+    @Environment(WatchModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    var onPick: (String) -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let rt = model.runtime {
+                    ForEach(rt.profiles) { p in
+                        Button { onPick(p.name) } label: {
+                            HStack(spacing: 10) {
+                                WatchBotFace(profile: p.name, label: p.label, size: 40)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(p.label).font(.headline).lineLimit(1)
+                                    if let m = p.model?.split(separator: "/").last { Text(String(m)).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                    if rt.profiles.isEmpty { Text("No bots yet. Open Vory on the iPhone once.").font(.footnote).foregroundStyle(.secondary) }
+                }
+            }
+            .navigationTitle("New chat")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+        }
     }
 }
 
@@ -88,7 +209,7 @@ struct WatchProfilePicker: View {
                 ForEach(rt.profiles) { p in
                     Button { model.listProfile = p.name; rt.selectedProfile = p.name; Task { await model.loadSessions() }; dismiss() } label: {
                         HStack(spacing: 8) {
-                            Circle().fill(WatchBotColor.color(for: p.name)).frame(width: 10, height: 10)
+                            WatchBotFace(profile: p.name, label: p.label, size: 26)
                             Text(p.label)
                             Spacer()
                             if (model.listProfile ?? rt.selectedProfile) == p.name { Image(systemName: "checkmark") }
@@ -103,24 +224,27 @@ struct WatchProfilePicker: View {
 
 /// The same deterministic palette the phone uses when no colour was picked for a bot.
 enum WatchBotColor {
-    static let palette: [Color] = [Color(red: 0.49, green: 0.36, blue: 1), Color(red: 0.04, green: 0.52, blue: 1), Color(red: 0.19, green: 0.82, blue: 0.35), Color(red: 1, green: 0.62, blue: 0.04), Color(red: 1, green: 0.22, blue: 0.37), Color(red: 0.39, green: 0.82, blue: 1), Color(red: 0.75, green: 0.35, blue: 0.95), Color(red: 1, green: 0.84, blue: 0.04), Color(red: 1, green: 0.42, blue: 0.21), Color(red: 0.35, green: 0.78, blue: 0.98)]
-    static func color(for profile: String) -> Color {
+    static let hexes = ["#7D5CFF", "#0A85FF", "#30D159", "#FF9E0A", "#FF385E", "#63D1FF", "#BF59F2", "#FFD60A", "#FF6B36", "#59C7FA"]
+    static func hex(for profile: String) -> String {
         var hash: UInt64 = 5381
         for b in profile.utf8 { hash = (hash &* 33) &+ UInt64(b) }
-        return palette[Int(hash % UInt64(palette.count))]
+        return hexes[Int(hash % UInt64(hexes.count))]
     }
+    static func color(for profile: String) -> Color { Color(botHex: hex(for: profile)) ?? .accentColor }
 }
 
 struct WatchSessionRow: View {
+    @Environment(WatchModel.self) private var model
     var session: StoredSession
     var badge: String?
-    var dot = false
+    var showBot = false
     var body: some View {
+        let summary = model.summary(for: session)
         HStack(spacing: 8) {
-            if dot { Circle().fill(WatchBotColor.color(for: session.profile ?? "?")).frame(width: 8, height: 8) }
+            if showBot { WatchBotFace(profile: session.profile ?? "?", size: 24) }
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.displayTitle).font(.headline).lineLimit(2)
-                Text(session.preview ?? "").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                Text(summary?.title ?? session.displayTitle).font(.headline).lineLimit(2)
+                Text(summary?.summary ?? session.preview ?? "").font(.caption2).foregroundStyle(.secondary).lineLimit(summary == nil ? 1 : 2)
             }
             Spacer(minLength: 0)
             if let badge { Image(systemName: badge).foregroundStyle(badge.hasPrefix("exclamation") ? .orange : .green) }
@@ -128,8 +252,9 @@ struct WatchSessionRow: View {
     }
 }
 
-/// One chat: the tail of the transcript, the approval card when one is waiting, and a dictation
-/// composer. The runtime and streaming are the same VoryCore code the phone runs.
+/// One chat: the tail of the transcript, the approval card when one is waiting, and a composer
+/// pinned to the bottom edge so the thread opens at its end. The runtime and streaming are the
+/// same VoryCore code the phone runs.
 struct WatchChatView: View {
     @Environment(WatchModel.self) private var model
     var storedID: String
@@ -153,21 +278,24 @@ struct WatchChatView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 8) {
-                            ForEach(chat.items.suffix(40)) { item in WatchTranscriptRow(item: item).id(item.id) }
+                            ForEach(chat.items.suffix(30)) { item in WatchTranscriptRow(item: item, profile: chat.profileName).id(item.id) }
                             if let s = chat.statusLine, chat.isRunning { Text(s).font(.caption2).foregroundStyle(.secondary) }
                             if let card = chat.firstCard { WatchCardView(chat: chat, card: card) }
-                            HStack(spacing: 6) {
-                                TextField("Message", text: $text)
-                                Button { Task { let t = text; text = ""; await chat.send(t) } } label: { Image(systemName: "arrow.up.circle.fill").font(.title3) }
-                                    .buttonStyle(.plain).disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
-                                    .foregroundStyle(text.isEmpty ? Color.secondary : Color.accentColor)
-                            }
-                            .padding(.top, 4)
                             Color.clear.frame(height: 1).id("bottom")
                         }
                     }
-                    .onChange(of: chat.items.last) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
                     .defaultScrollAnchor(.bottom)
+                    .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
+                    // The history lands after the view does: land the end again once it is in,
+                    // and once more when the live snapshot replaces it.
+                    .task { try? await Task.sleep(for: .milliseconds(350)); proxy.scrollTo("bottom", anchor: .bottom) }
+                    .onChange(of: chat.isResuming) { _, resuming in if !resuming { proxy.scrollTo("bottom", anchor: .bottom) } }
+                    .onChange(of: chat.items.count) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
+                    .onChange(of: chat.items.last) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
+                    .onChange(of: chat.firstCard?.id) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+                }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    composer { let t = text; text = ""; await chat.send(t) }
                 }
                 .navigationTitle(chat.title)
                 .toolbar {
@@ -194,28 +322,38 @@ struct WatchChatView: View {
         }
     }
 
+    /// The message field and its send button, one row on the bottom edge.
+    private func composer(send: @escaping () async -> Void) -> some View {
+        HStack(spacing: 6) {
+            TextField("Message", text: $text)
+            Button { Task { await send() } } label: { Image(systemName: "arrow.up.circle.fill").font(.title3) }
+                .buttonStyle(.plain).disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
+                .foregroundStyle(text.isEmpty ? Color.secondary : Color.accentColor)
+        }
+        .padding(.horizontal, 6).padding(.vertical, 4)
+        .background(Color.black)
+    }
+
     // MARK: REST + phone proxy
 
     private var proxiedBody: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(items.suffix(40)) { item in WatchTranscriptRow(item: item).id(item.id) }
+                    ForEach(items.suffix(30)) { item in WatchTranscriptRow(item: item, profile: profile).id(item.id) }
                     if running { Text(statusText.isEmpty ? "Working…" : statusText).font(.caption2).foregroundStyle(.secondary) }
                     ForEach(Array(cards.enumerated()), id: \.offset) { _, c in proxiedCard(c) }
-                    HStack(spacing: 6) {
-                        TextField("Message", text: $text)
-                        Button { Task { await proxySend() } } label: { Image(systemName: "arrow.up.circle.fill").font(.title3) }
-                            .buttonStyle(.plain).disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
-                            .foregroundStyle(text.isEmpty ? Color.secondary : Color.accentColor)
-                    }
-                    .padding(.top, 4)
                     if let error { Text(error).font(.caption2).foregroundStyle(.red) }
                     Color.clear.frame(height: 1).id("bottom")
                 }
             }
-            .onChange(of: items.count) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
             .defaultScrollAnchor(.bottom)
+            .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
+            .task { try? await Task.sleep(for: .milliseconds(350)); proxy.scrollTo("bottom", anchor: .bottom) }
+            .onChange(of: items.count) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            composer { await proxySend() }
         }
         .navigationTitle(title)
         .toolbar {
@@ -254,7 +392,9 @@ struct WatchChatView: View {
         if let r: JSONValue = try? await rt.api.get("/api/sessions/\(storedID)/messages", query: [URLQueryItem(name: "order", value: "latest"), URLQueryItem(name: "limit", value: "40")], profile: profile ?? rt.selectedProfile) {
             let msgs = (r["messages"]?.arrayValue ?? r.arrayValue ?? []).compactMap { try? $0.decode(TranscriptMessage.self) }
             let built = msgs.enumerated().compactMap { TranscriptItem.fromHistory($1, index: $0) }
-            items = built.sorted { $0.timestamp < $1.timestamp }
+            let sorted = built.sorted { $0.timestamp < $1.timestamp }
+            // Only replace what changed: a fresh array every poll re-laid out every row.
+            if sorted.map(\.id) != items.map(\.id) || sorted.last?.kind != items.last?.kind { items = sorted }
         }
         if let reply = try? await model.connectivity.request(["op": "cards", "session": storedID, "profile": profile ?? ""]) {
             cards = reply["cards"] as? [[String: Any]] ?? []
@@ -287,14 +427,17 @@ struct WatchChatView: View {
 
 struct WatchTranscriptRow: View {
     var item: TranscriptItem
+    /// The bot the reply came from: a small face beside each reply, as on the phone.
+    var profile: String? = nil
     var body: some View {
         switch item.kind {
         case .user(let t, _):
             HStack { Spacer(minLength: 24); Text(t).font(.footnote).padding(8).background(Color.accentColor, in: .rect(cornerRadius: 12)).foregroundStyle(.white) }
         case .assistant(let t, _, let streaming):
-            HStack {
+            HStack(alignment: .bottom, spacing: 4) {
+                if let profile { WatchBotFace(profile: profile, size: 16) }
                 Text(t.isEmpty && streaming ? "…" : t).font(.footnote).padding(8).background(Color.gray.opacity(0.25), in: .rect(cornerRadius: 12))
-                Spacer(minLength: 16)
+                Spacer(minLength: 12)
             }
         case .tool(let a):
             Label("\(a.displayName)\(a.summary.map { " · \($0)" } ?? "")", systemImage: a.status == .done ? "checkmark.circle" : a.status == .failed ? "xmark.circle" : "gear")
@@ -399,10 +542,11 @@ struct WatchSettingsView: View {
                         LabeledContent("Link", value: model.socketUsable ? "Direct (Wi-Fi)" : "Through iPhone")
                         LabeledContent("Status", value: rt.socketState.label)
                         LabeledContent("Bot", value: model.listProfile == "*" ? "All bots" : (model.listProfile ?? rt.selectedProfile ?? "—"))
+                        LabeledContent("Summaries", value: model.summaries.isEmpty ? "off on iPhone" : "\(model.summaries.count) from iPhone")
                     }
                     Section {
                         Button { Task { await rt.reconnectNow() } } label: { Label("Reconnect", systemImage: "arrow.clockwise") }
-                    } footer: { Text("Chats always load over HTTP. Sending and approving go through the iPhone unless the watch has its own Wi-Fi route to the gateway.") }
+                    } footer: { Text("Chats always load over HTTP. Sending and approving go through the iPhone unless the watch has its own Wi-Fi route to the gateway. Summaries and bot looks come from the iPhone.") }
                 } else {
                     Section { Text("Open Vory on the iPhone once; it hands the gateway to the watch.").font(.footnote) }
                 }

@@ -133,6 +133,7 @@ enum BotLooksMirror {
             avatars[p.label] = avatars[p.name]; colors[p.label] = colors[p.name]; photos[p.label] = photos[p.name]
         }
         BotLooks(colors: colors, avatars: avatars, photos: photos).save()
+        WatchSync.shared.refresh()
     }
 
     private static func thumbnail(_ image: UIImage) -> Data? {

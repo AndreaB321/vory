@@ -66,6 +66,7 @@ final class ChatSummarizer {
     func forgetAll() {
         summaries = [:]
         UserDefaults.standard.removeObject(forKey: Self.cacheKey)
+        if WatchSync.summariesToWatch { WatchSync.shared.refresh() }
     }
 
     /// The summary for a chat if it is current (same last-activity stamp); nil otherwise.
@@ -181,5 +182,6 @@ final class ChatSummarizer {
             summaries = Dictionary(uniqueKeysWithValues: keep.map { ($0.key, $0.value) })
         }
         if let d = try? JSONEncoder().encode(summaries) { UserDefaults.standard.set(d, forKey: Self.cacheKey) }
+        if WatchSync.summariesToWatch { WatchSync.shared.refresh() }
     }
 }

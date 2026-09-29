@@ -76,7 +76,7 @@ struct StatusWidget: Widget {
         StaticConfiguration(kind: "vory.status", provider: SnapshotProvider()) { entry in
             StatusView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
-                .widgetURL(entry.snapshot?.attentionChat.map { URL(string: "vory://chat/\($0.id)") } ?? URL(string: "vory://chats"))
+                .widgetURL(Self.tapURL(entry))
         }
         .configurationDisplayName("Status")
         .description("Gateway health, chats at work and chats that need you.")
@@ -88,6 +88,17 @@ struct StatusWidget: Widget {
         [.accessoryRectangular]
         #else
         [.systemSmall, .systemMedium, .accessoryRectangular]
+        #endif
+    }
+
+    /// Where a tap lands. On the watch every complication opens the Activity page (what needs
+    /// you, what is working); on the phone the widget opens the chat that needs you, else the list.
+    static func tapURL(_ entry: SnapshotEntry, prefer: WidgetSnapshot.Chat? = nil) -> URL? {
+        #if os(watchOS)
+        return URL(string: "vory://activity")
+        #else
+        let chat = entry.snapshot?.attentionChat ?? prefer
+        return chat.map { URL(string: "vory://chat/\($0.id)") } ?? URL(string: "vory://chats")
         #endif
     }
 }
@@ -177,7 +188,7 @@ struct AttentionWidget: Widget {
         StaticConfiguration(kind: "vory.attention", provider: SnapshotProvider()) { entry in
             AttentionView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
-                .widgetURL(entry.snapshot?.attentionChat.map { URL(string: "vory://chat/\($0.id)") } ?? URL(string: "vory://chats"))
+                .widgetURL(StatusWidget.tapURL(entry))
         }
         .configurationDisplayName("Needs you")
         .description("Approvals and questions waiting for an answer.")
@@ -243,7 +254,7 @@ struct ActivityWidget: Widget {
         StaticConfiguration(kind: "vory.activity", provider: SnapshotProvider()) { entry in
             ActivityView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
-                .widgetURL((entry.snapshot?.activeChat ?? entry.snapshot?.chats.first).map { URL(string: "vory://chat/\($0.id)") } ?? URL(string: "vory://chats"))
+                .widgetURL(StatusWidget.tapURL(entry, prefer: entry.snapshot?.activeChat ?? entry.snapshot?.chats.first))
         }
         .configurationDisplayName("Current chat")
         .description("What the agent is working on, or the last chat.")

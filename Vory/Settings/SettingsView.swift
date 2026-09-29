@@ -414,6 +414,7 @@ struct BotsSettingsView: View {
 struct SummariesSettingsView: View {
     @AppStorage(ChatSummarizer.titlesKey) private var titles = ChatSummarizer.titlesOn
     @AppStorage(ChatSummarizer.previewsKey) private var previews = ChatSummarizer.previewsOn
+    @AppStorage(WatchSync.summariesToWatchKey) private var toWatch = false
     @State private var cleared = false
 
     var body: some View {
@@ -438,6 +439,12 @@ struct SummariesSettingsView: View {
                 Text(ChatSummarizer.unavailableReason ?? "Titles: a short name for each chat in place of the gateway's. Previews: two lines on where the chat stands in place of the last message. Either can be on alone. Nothing leaves your phone and nothing changes on the gateway; off, the list shows the gateway's own titles and previews.")
             }
             .disabled(!ChatSummarizer.isAvailable)
+            Section {
+                Toggle(isOn: $toWatch) { Label("Send to Apple Watch", systemImage: "applewatch") }
+                    .onChange(of: toWatch) { _, _ in WatchSync.shared.refresh() }
+            } header: { Text("Apple Watch") } footer: {
+                Text("The summaries this iPhone has made go to the watch, which shows them in its chat list in place of the gateway's titles and previews. The watch runs no model itself; nothing is made there.")
+            }
             Section {
                 Button(cleared ? "Summaries forgotten" : "Forget all summaries") { ChatSummarizer.shared.forgetAll(); cleared = true }
                     .disabled(cleared)
