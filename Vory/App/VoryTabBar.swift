@@ -263,11 +263,6 @@ struct TabRoot: ViewModifier {
     var tab: AppModel.AppTab
     func body(content: Content) -> some View {
         content
-            // Lists at a tab's root do not pick up the bar's safe-area inset on this iOS (their
-            // last rows ended under the bar), so their scroll content gets the bar's height plus
-            // a breath of room, like the system's lists above its bar. Only the root: a pushed
-            // chat has its own dock and its own margin.
-            .contentMargins(.bottom, model.tabBarHidden ? 0 : VoryTabBar.reservedHeight + 16, for: .scrollContent)
             .onAppear { model.tabAtRoot[tab] = true }
             .onDisappear { model.tabAtRoot[tab] = false }
             .background(PopToRootProbe(tab: tab))

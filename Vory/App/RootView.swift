@@ -141,9 +141,11 @@ struct MainTabView: View {
                 .allowsHitTesting(!model.tabBarHidden)
                 .accessibilityHidden(model.tabBarHidden)
         }
-        // The matching scroll margin for the pages' lists lives on each tab root (`tabRoot`), not
-        // here: applied to the whole tree it reached the chat thread as well and, on some phones,
-        // stacked onto the thread's own margin as a blank band under the last reply.
+        // Lists on every page (roots and the pages pushed over them) do not pick up the bar's
+        // inset on this iOS (their last rows ended under the bar), so their scroll content gets
+        // the bar's height plus a breath of room. Inside a chat the bar is hidden and this is 0;
+        // the thread measures its own margin against the composer.
+        .contentMargins(.bottom, model.tabBarHidden ? 0 : VoryTabBar.reservedHeight + 16, for: .scrollContent)
         .onChange(of: tabs) { _, now in
             // The selected tab was removed from the layout: fall back to Chats instead of a blank pane.
             if !now.contains(model.selectedTab) { model.selectedTab = .chats }

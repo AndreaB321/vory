@@ -14,7 +14,17 @@ struct TranscriptView: View {
     /// What to use until the dock has been measured.
     var fallbackInset: CGFloat = 60
     @State private var scrollBottom: CGFloat = 0
-    private var bottomInset: CGFloat { dockTop > 0 && scrollBottom > dockTop ? scrollBottom - dockTop : fallbackInset }
+    /// What the scroll view insets its content by on its own (safe area, ancestors' margins),
+    /// found by subtracting the margin this view set from the inset it reports. Without this,
+    /// on phones where the scroll view already inset the safe area, the last reply sat a home
+    /// indicator's height above the composer.
+    @State private var reportedInsetBottom: CGFloat = 0
+    @State private var appliedMargin: CGFloat = 0
+    private var autoInset: CGFloat { max(0, reportedInsetBottom - appliedMargin) }
+    /// How far the dock reaches up into the scroll view's frame: what the overlays clear.
+    private var dockReach: CGFloat { dockTop > 0 && scrollBottom > dockTop ? scrollBottom - dockTop : fallbackInset }
+    /// The margin to add so the last line ends 8 pt above the dock, given what is inset already.
+    private var bottomInset: CGFloat { max(0, dockReach - autoInset) }
     /// Height of the floating header (the nav bar is hidden in a chat).
     var topInset: CGFloat = 96
     /// Locked to the bottom: the thread follows every new token, tool call and card. Only the
@@ -47,7 +57,7 @@ struct TranscriptView: View {
     @AppStorage(ChatStyle.showReasoning) private var showReasoning = true
     @AppStorage(ChatStyle.showTurnStats) private var showTurnStats = true
     @AppStorage(ChatStyle.showSystemNotes) private var showSystemNotes = true
-    @AppStorage(ChatStyle.showBots) private var showBots = true
+    @AppStorage(ChatStyle.showBots) private var showBots = false
 
     private var visibleItems: [TranscriptItem] {
         chat.items.filter { item in
@@ -148,6 +158,11 @@ struct TranscriptView: View {
             // of vanishing under the composer; SwiftUI's own avoidance would then double the inset.
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { scrollBottom = $0 }
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentInsets.bottom } action: { _, v in
+                let applied = bottomInset + 8
+                reportedInsetBottom = v
+                appliedMargin = applied
+            }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { n in
                 guard let end = (n.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue else { return }
                 let covered = max(0, UIScreen.main.bounds.maxY - end.minY)
@@ -186,7 +201,7 @@ struct TranscriptView: View {
             .overlay(alignment: .bottomLeading) {
                 if showBots, chat.isRunning {
                     BotAvatar(profile: chat.profileName, size: 28, active: true, mood: BotFaceView.Mood(state: chat.botState))
-                        .padding(.leading, 16).padding(.bottom, bottomInset + 12)
+                        .padding(.leading, 16).padding(.bottom, dockReach + 12)
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
                         .allowsHitTesting(false)
                 }
@@ -202,7 +217,7 @@ struct TranscriptView: View {
             }
             .overlay(alignment: .bottomTrailing) {
                 JumpToBottomButton(visible: awayFromBottom) { jumpToBottom() }
-                .padding(.trailing, 16).padding(.bottom, bottomInset + 12)
+                .padding(.trailing, 16).padding(.bottom, dockReach + 12)
             }
             .sheet(item: Binding(get: { selectText.map { SelectTextItem(text: $0) } }, set: { selectText = $0?.text })) { SelectTextSheet(text: $0.text) }
             .ignoresSafeArea(.container, edges: .top)

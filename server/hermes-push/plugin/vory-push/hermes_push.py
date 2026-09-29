@@ -53,7 +53,7 @@ except ImportError as exc:  # pragma: no cover
 log = logging.getLogger("hermes-push")
 
 # Keep in step with plugin/vory-push/plugin.yaml; the app compares the two.
-VERSION = "1.0.30"
+VERSION = "1.0.31"
 USER_AGENT = f"Vory-Push/{VERSION} (Hermes companion)"
 try:
     # Fingerprint of the code actually running: the app compares it with the copy it ships, so a
@@ -791,7 +791,12 @@ class Relay:
                     self._note_la("mirror " + stored[:12], True)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("could not mirror %s: %s (updates will lag until the next poll)", stored[:12], describe_error(exc))
-                    self._note_la("mirror " + stored[:12], False, str(exc)[:80])
+                    if "not found" in str(exc).lower():
+                        # A one-off run the gateway never kept (a scheduled task): nothing to mirror,
+                        # and nothing wrong. Not shown as a failed push in the app.
+                        log.debug("mirror %s: session not kept by the gateway", stored[:12])
+                    else:
+                        self._note_la("mirror " + stored[:12], False, str(exc)[:80])
                 try:
                     pend = await asyncio.wait_for(self.gw.call("approval.pending", {**params, "session_id": sid}), timeout=3)
                 except Exception:  # noqa: BLE001

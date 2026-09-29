@@ -59,7 +59,7 @@ struct ProfileCardView: View {
     @AppStorage(ChatStyle.showReasoning) private var showReasoning = true
     @AppStorage(ChatStyle.showTurnStats) private var showTurnStats = true
     @AppStorage(ChatStyle.showSystemNotes) private var showSystemNotes = true
-    @AppStorage(ChatStyle.showBots) private var showBots = true
+    @AppStorage(ChatStyle.showBots) private var showBots = false
 
     private var rt: GatewayRuntime? { model.runtime }
     private var profile: ProfileInfo? { rt?.profiles.first { $0.name == profileName } }

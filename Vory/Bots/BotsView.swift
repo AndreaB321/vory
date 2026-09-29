@@ -10,11 +10,15 @@ struct BotsView: View {
     @State private var rooms: [Room] = []
     @State private var error: String?
     @State private var showNewBot = false
+    @State private var path = NavigationPath()
 
     private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
 
+    /// Press and hold a bot: its settings page (colour, look, description, model, instructions).
+    struct BotSettingsRoute: Hashable { var profile: String }
+
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 if let rt = model.runtime {
                     LazyVGrid(columns: columns, spacing: 22) {
@@ -25,6 +29,15 @@ struct BotsView: View {
                                         slot: i, slots: rt.profiles.count)
                             }
                             .buttonStyle(.plain)
+                            // Press and hold: what you would otherwise dig for.
+                            .contextMenu {
+                                Button { path.append(ChatRoute(storedID: nil, title: nil, profile: p.name)) } label: { Label("New chat", systemImage: "square.and.pencil") }
+                                Button { path.append(p) } label: { Label("Chats", systemImage: "bubble.left.and.bubble.right") }
+                                Button { path.append(BotSettingsRoute(profile: p.name)) } label: { Label("Bot settings", systemImage: "slider.horizontal.3") }
+                                if rt.selectedProfile != p.name {
+                                    Button { rt.selectedProfile = p.name } label: { Label("Make active", systemImage: "checkmark.circle") }
+                                }
+                            }
                         }
                     }
                     .padding(.horizontal, 16).padding(.top, 18)
@@ -70,6 +83,7 @@ struct BotsView: View {
             }
             .sheet(isPresented: $showNewBot) { if let rt = model.runtime { NewBotSheet(runtime: rt) } }
             .navigationDestination(for: ProfileInfo.self) { BotDetailView(profile: $0) }
+            .navigationDestination(for: BotSettingsRoute.self) { r in ProfileCardView(profileName: r.profile).navigationTitle("").navigationBarTitleDisplayMode(.inline) }
             .navigationDestination(for: Room.self) { RoomView(room: $0) }
             .navigationDestination(for: ChatRoute.self) { ConversationView(route: $0) }
             .refreshable { await load() }

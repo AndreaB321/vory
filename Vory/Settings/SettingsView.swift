@@ -114,6 +114,8 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .tabRoot(.settings)
+            // Pushed pages open with their header card right under the bar, not a blank band.
+            .contentMargins(.top, 0, for: .scrollContent)
             .background(InteractivePopEnabler())
             .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search settings")
         }
@@ -462,7 +464,7 @@ struct AppearanceView: View {
     @AppStorage(ChatStyle.showReasoning) private var showReasoning = true
     @AppStorage(ChatStyle.showTurnStats) private var showTurnStats = true
     @AppStorage(ChatStyle.showSystemNotes) private var showSystemNotes = true
-    @AppStorage(ChatStyle.showBots) private var showBots = true
+    @AppStorage(ChatStyle.showBots) private var showBots = false
     @AppStorage(ChatStyle.timeReveal) private var timeReveal = true
     @Environment(\.editMode) private var editMode
 
