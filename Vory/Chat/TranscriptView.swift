@@ -23,8 +23,13 @@ struct TranscriptView: View {
     private var autoInset: CGFloat { max(0, reportedInsetBottom - appliedMargin) }
     /// How far the dock reaches up into the scroll view's frame: what the overlays clear.
     private var dockReach: CGFloat { dockTop > 0 && scrollBottom > dockTop ? scrollBottom - dockTop : fallbackInset }
-    /// The margin to add so the last line ends 8 pt above the dock, given what is inset already.
-    private var bottomInset: CGFloat { max(0, dockReach - autoInset) }
+    /// Where the content's last line can actually sit: the frame's bottom, unless the frame runs
+    /// under the home indicator, in which case the automatic inset ends it above that. Two
+    /// layouts seen in the wild: a frame that stops at the safe area (the inset is virtual) and
+    /// one that runs to the screen edge (the inset is real). This reads the same in both.
+    private var visibleBottom: CGFloat { min(scrollBottom, UIScreen.main.bounds.height - autoInset) }
+    /// The margin to add so the last line ends 8 pt above the dock.
+    private var bottomInset: CGFloat { dockTop > 0 && visibleBottom > dockTop ? visibleBottom - dockTop : fallbackInset }
     /// Height of the floating header (the nav bar is hidden in a chat).
     var topInset: CGFloat = 96
     /// Locked to the bottom: the thread follows every new token, tool call and card. Only the
