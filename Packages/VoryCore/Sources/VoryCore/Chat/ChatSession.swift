@@ -424,7 +424,7 @@ public final class ChatSession: @MainActor Identifiable, ChatIdentity {
         try? (await runtime.rpc("commands.catalog", ["session_id": .string(runtimeID)])).decode()
     }
 
-    private func dispatchSlash(_ text: String) async -> String? {
+    private func dispatchSlash(_ text: String, depth: Int = 0) async -> String? {
         let body = text.dropFirst()
         let parts = body.split(separator: " ", maxSplits: 1)
         let name = parts.first.map(String.init) ?? ""
@@ -453,7 +453,13 @@ public final class ChatSession: @MainActor Identifiable, ChatIdentity {
             case "prefill":
                 return r.message
             case "alias":
-                if let t = r.target { return await dispatchSlash("/" + t + (arg.map { " " + $0 } ?? "")) }
+                // An alias that points at itself, or a ring of them, must not recurse without
+                // end (a stack overflow on the phone the moment the command was sent).
+                if let t = r.target, t != name, depth < 4 {
+                    return await dispatchSlash("/" + t + (arg.map { " " + $0 } ?? ""), depth: depth + 1)
+                }
+                banner = "/\(name) points at /\(r.target ?? name), which leads back to itself."
+                return nil
             default:
                 if let n = r.notice ?? r.display { items.append(TranscriptItem(id: UUID().uuidString, kind: .system(text: n, symbol: "info.circle"))) }
             }
