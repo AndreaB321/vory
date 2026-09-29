@@ -52,6 +52,8 @@ struct TranscriptView: View {
     @State private var openedAt = Date()
     private var settling: Bool { Date().timeIntervalSince(openedAt) < 1.5 }
     @State private var jumpTask: Task<Void, Never>?
+    @State private var revealTask: Task<Void, Never>?
+    @State private var overscrollTask: Task<Void, Never>?
     /// How much of the scroll view the keyboard covers (beyond the home-indicator safe area). The
     /// thread moves up with the keyboard and, when it was at the bottom, stays there.
     @State private var keyboardInset: CGFloat = 0
@@ -190,7 +192,24 @@ struct TranscriptView: View {
                 }
             }
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in
+                metrics.offsetY = new
                 if metrics.userScrolling { BotAmbient.shared.scrolled(dy: new - old) }
+            }
+            // A tool card or reasoning block that opened low on the screen grew under the
+            // composer; once its height has settled, the thread scrolls just enough to show
+            // its bottom edge. Collapsing posts nothing, so the thread stays put then.
+            .onReceive(NotificationCenter.default.publisher(for: .hermesRevealRow)) { n in
+                guard let bottom = n.userInfo?["bottom"] as? CGFloat else { return }
+                revealTask?.cancel()
+                revealTask = Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(80))
+                    guard !Task.isCancelled else { return }
+                    let limit = (dockTop > 0 ? dockTop : UIScreen.main.bounds.height - fallbackInset) - 8
+                    let overshoot = bottom - limit
+                    guard overshoot > 0 else { return }
+                    let maxOffset = max(0, metrics.contentHeight + metrics.reportedInsetBottom - metrics.containerHeight)
+                    withAnimation(.easeOut(duration: 0.25)) { scrollPosition.scrollTo(y: min(maxOffset, metrics.offsetY + overshoot)) }
+                }
             }
             // Insets included: the bottom margin (dock plus home indicator) is about the size of
             // the threshold, so without it a slightly taller dock showed the arrow at the very end.
@@ -198,6 +217,10 @@ struct TranscriptView: View {
                 g.contentSize.height + g.contentInsets.bottom - g.visibleRect.maxY
             } action: { _, distance in
                 metrics.distanceFromBottom = distance
+                // Past the end with no finger on it: a scroll-to-bottom that used the lazy stack's
+                // estimated height lands beyond the real content and the thread shows nothing
+                // until a drag bounces it back ("chats open blank until you scroll"). Land it.
+                if distance < -60, !metrics.userScrolling { scheduleOverscrollFix() }
                 let away = distance > 120
                 if away != awayFromBottom { withAnimation(.snappy) { awayFromBottom = away } }
                 // Content growing under a locked thread also reads as "away" for a frame; only a
@@ -249,6 +272,15 @@ struct TranscriptView: View {
                 else { withAnimation(.easeOut(duration: 0.28)) { scrollPosition.scrollTo(edge: .bottom) } }
             }
             .onAppear { openedAt = Date() }
+            // Once the history is in and laid out, make sure the end is really on screen.
+            .task(id: chat.isResuming) {
+                guard !chat.isResuming else { return }
+                for delay in [300, 900] {
+                    try? await Task.sleep(for: .milliseconds(delay))
+                    guard !Task.isCancelled, metrics.stickToBottom, !metrics.userScrolling else { return }
+                    if metrics.distanceFromBottom < -8 || metrics.distanceFromBottom > 8 { scrollPosition.scrollTo(edge: .bottom) }
+                }
+            }
             .onChange(of: chat.statusLine) { _, _ in
                 if metrics.stickToBottom, !metrics.userScrolling { withAnimation(.easeOut(duration: 0.2)) { scrollPosition.scrollTo(edge: .bottom) } }
             }
@@ -276,6 +308,17 @@ struct TranscriptView: View {
 }
 
 extension TranscriptView {
+    private func scheduleOverscrollFix() {
+        guard overscrollTask == nil else { return }
+        overscrollTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(120))
+            defer { overscrollTask = nil }
+            guard !Task.isCancelled, !metrics.userScrolling, metrics.distanceFromBottom < -8 else { return }
+            Perf.tick("overscrollFix")
+            scrollPosition.scrollTo(edge: .bottom)
+        }
+    }
+
     /// The jump arrow: a long animated scroll through a lazy thread laid rows out mid-flight and
     /// the bubbles glitched. From far away the thread first lands, unanimated, a screen short of
     /// the end, then the last stretch scrolls fast and smooth.
@@ -312,6 +355,7 @@ final class ScrollMetrics {
     var stickToBottom = true
     var userScrolling = false
     var distanceFromBottom: CGFloat = 0
+    var offsetY: CGFloat = 0
     var contentHeight: CGFloat = 0
     var containerHeight: CGFloat = 0
     var reportedInsetBottom: CGFloat = 0
@@ -623,10 +667,14 @@ struct TranscriptRow: View, Equatable {
 struct ReasoningDisclosure: View {
     var text: String
     @Binding var open: Bool
+    @State private var revealing = false
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             // One full-width hit target, edge to edge, rather than DisclosureGroup's label-only one.
-            Button { withAnimation(.snappy) { open.toggle() } } label: {
+            Button {
+                if !open { revealing = true; Task { try? await Task.sleep(for: .milliseconds(600)); revealing = false } }
+                withAnimation(.snappy) { open.toggle() }
+            } label: {
                 HStack {
                     Label("Reasoning", systemImage: "brain").font(.caption).foregroundStyle(.secondary)
                     Spacer(minLength: 0)
@@ -641,7 +689,15 @@ struct ReasoningDisclosure: View {
                 Text(text).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
             }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { _, y in
+            if revealing { NotificationCenter.default.post(name: .hermesRevealRow, object: nil, userInfo: ["bottom": y]) }
+        }
     }
+}
+
+extension Notification.Name {
+    /// A row that just expanded reports its bottom edge (global y) so the thread can show it.
+    static let hermesRevealRow = Notification.Name("hermesRevealRow")
 }
 
 /// Renders markdown blocks; inline styling from AttributedString(markdown:).
@@ -729,6 +785,8 @@ struct MarkdownView: View, Equatable {
 struct ToolCardView: View {
     var activity: ToolActivity
     @State private var expanded = false
+    /// Set while the card opens: its frame changes are reported so the thread can reveal it.
+    @State private var revealing = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -764,7 +822,13 @@ struct ToolCardView: View {
         .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
         .contentShape(.rect)
-        .onTapGesture { withAnimation(.snappy) { expanded.toggle() } }
+        .onTapGesture {
+            if !expanded { revealing = true; Task { try? await Task.sleep(for: .milliseconds(600)); revealing = false } }
+            withAnimation(.snappy) { expanded.toggle() }
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { _, y in
+            if revealing { NotificationCenter.default.post(name: .hermesRevealRow, object: nil, userInfo: ["bottom": y]) }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityHint("Double-tap to expand the tool log")
     }
