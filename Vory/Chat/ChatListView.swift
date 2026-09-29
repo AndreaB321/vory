@@ -104,8 +104,6 @@ struct ChatListView: View {
             .navigationDestination(for: RoomRoute.self) { r in RoomView(room: r.room, initialText: r.initialText) }
             // Room above the tab bar for the last row; only the list, not the chats pushed over it.
             .contentMargins(.bottom, model.tabBarHidden ? 0 : VoryTabBar.reservedHeight + 16, for: .scrollContent)
-            // Under the title, not docked at the bottom where our tab bar lives.
-            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search chats")
             .onChange(of: searchText) { _, q in Task { await search(q) } }
             .refreshable { await load() }
             .task(id: runtime?.connection.id) { await load() }
@@ -232,6 +230,25 @@ struct ChatListView: View {
         }
     }
 
+    /// The search field, our own rather than `.searchable`: the system's drawer sat where the
+    /// pull-to-refresh spinner draws, so the spinner appeared inside the field. Pinned under the
+    /// title by a safe-area inset; the list and its spinner scroll beneath it.
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Search chats", text: $searchText)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .submitLabel(.search)
+            if !searchText.isEmpty {
+                Button { searchText = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                    .buttonStyle(.plain).accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 9)
+        .glassEffect(.regular, in: .capsule)
+        .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 6)
+    }
+
     @ViewBuilder private func list(_ runtime: GatewayRuntime) -> some View {
         let rows = filtered(searchText.isEmpty ? sessions : searchResults, runtime: runtime)
         ScrollViewReader { proxy in
@@ -255,6 +272,7 @@ struct ChatListView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .safeAreaInset(edge: .top, spacing: 0) { searchField }
         // The grouped list otherwise leaves a section's worth of empty space under the search bar.
         .contentMargins(.top, 0, for: .scrollContent)
         // Wider rows: the card hugs the screen edges and the rows their card.
