@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import json
 import random
 import time
@@ -564,6 +565,13 @@ class Gateway:
                         {"role": "assistant", "text": REPLY_PART_1 + REPLY_PART_2 + "\n\n" + REPLY_PART_3,
                          "timestamp": row["last_active"], "row_id": 2},
                     ]
+                    # MOCK_LONG=n: the same exchange n times over, for scroll-performance checks.
+                    reps = int(os.environ.get("MOCK_LONG", "1") or 1)
+                    if reps > 1:
+                        base, live.history = live.history, []
+                        for i in range(reps):
+                            for m in base:
+                                live.history.append({**m, "timestamp": m["timestamp"] - (reps - i) * 600, "row_id": len(live.history) + 1})
                 LIVE[sid] = live
             live.members.add(self)
             self.sessions[live.sid] = live

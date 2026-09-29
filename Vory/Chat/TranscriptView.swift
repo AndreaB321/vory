@@ -18,7 +18,6 @@ struct TranscriptView: View {
     /// found by subtracting the margin this view set from the inset it reports. Without this,
     /// on phones where the scroll view already inset the safe area, the last reply sat a home
     /// indicator's height above the composer.
-    @State private var reportedInsetBottom: CGFloat = 0
     /// Measured once, from the first report, and quantised to 0 or the home indicator's height.
     /// Not re-derived on every report: while the dock resizes (the slash list opening, say) a
     /// report lags the margin by a frame, and a value fed straight back into the margin chased
@@ -38,24 +37,21 @@ struct TranscriptView: View {
     var topInset: CGFloat = 96
     /// Locked to the bottom: the thread follows every new token, tool call and card. Only the
     /// user's own drag releases it; the jump button (or scrolling back down) locks it again.
-    @State private var stickToBottom = true
     @State private var awayFromBottom = false
-    @State private var userScrolling = false
     /// Scrolling is by content edge, not by the "bottom" marker view: with the lazy stack a
     /// marker that is not yet laid out gets an estimated position, and the jump-to-bottom button
     /// overshot and bounced back up.
     @State private var scrollPosition = ScrollPosition(edge: .bottom)
     @State private var insetSettle: Task<Void, Never>?
-    /// How far the bottom of the content sits below the visible area, insets included; 0 at the end.
-    @State private var distanceFromBottom: CGFloat = 0
-    @State private var offsetY: CGFloat = 0
+    /// The scroll figures that change every frame (offset, distance to the end, sizes). A plain
+    /// object, not view state: writing view state per frame re-evaluated this whole body, and
+    /// every row with it, on every frame of a flick.
+    @State private var metrics = ScrollMetrics()
     /// While the chat is still settling after it opened (history arriving, header and dock
     /// measuring), every adjustment lands without animation; animated ones fought each other.
     @State private var openedAt = Date()
     private var settling: Bool { Date().timeIntervalSince(openedAt) < 1.5 }
     @State private var jumpTask: Task<Void, Never>?
-    @State private var contentHeight: CGFloat = 0
-    @State private var containerHeight: CGFloat = 0
     /// How much of the scroll view the keyboard covers (beyond the home-indicator safe area). The
     /// thread moves up with the keyboard and, when it was at the bottom, stays there.
     @State private var keyboardInset: CGFloat = 0
@@ -93,7 +89,8 @@ struct TranscriptView: View {
     }
 
     var body: some View {
-        Group {
+        let _ = Perf.tick("transcript")
+        return Group {
             ScrollView {
                 TimeRevealColumn {
                 // Lazy: a long session (hundreds of replies and tool rows) used to build every
@@ -118,6 +115,10 @@ struct TranscriptView: View {
                                       reasoningOpen: Binding(get: { openReasoning.contains(row.item.id) },
                                                              set: { if $0 { openReasoning.insert(row.item.id) } else { openReasoning.remove(row.item.id) } }),
                                       onSelectText: { selectText = $0 })
+                            // Equatable on what it draws (the closures and the binding are
+                            // compared by value): a row whose message did not change is not
+                            // rebuilt when the thread re-evaluates for a scroll or a token.
+                            .equatable()
                             .id(row.item.id)
                             .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
                             // The time waits just past the right edge; the column slides left to show it.
@@ -167,14 +168,14 @@ struct TranscriptView: View {
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { scrollBottom = $0 }
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentInsets.bottom } action: { _, v in
-                reportedInsetBottom = v
+                metrics.reportedInsetBottom = v
                 guard autoInsetFixed == nil, dockTop > 0 else { return }
                 let raw = max(0, v - (bottomInset + 8))
                 let safe = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow?.safeAreaInsets.bottom }.first ?? 0
                 autoInsetFixed = safe > 0 && raw > safe / 2 ? safe : 0
             }
             .onScrollGeometryChange(for: [CGFloat].self) { [$0.contentSize.height, $0.containerSize.height] } action: { _, v in
-                contentHeight = v[0]; containerHeight = v[1]
+                metrics.contentHeight = v[0]; metrics.containerHeight = v[1]
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { n in
                 guard let end = (n.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue else { return }
@@ -185,28 +186,27 @@ struct TranscriptView: View {
                 // thread and the composer arrive together instead of the composer overlapping.
                 withAnimation(.interpolatingSpring(mass: 3, stiffness: 1000, damping: 500, initialVelocity: 0)) {
                     keyboardInset = inset
-                    if stickToBottom { scrollPosition.scrollTo(edge: .bottom) }
+                    if metrics.stickToBottom { scrollPosition.scrollTo(edge: .bottom) }
                 }
             }
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in
-                offsetY = new
-                if userScrolling { BotAmbient.shared.scrolled(dy: new - old) }
+                if metrics.userScrolling { BotAmbient.shared.scrolled(dy: new - old) }
             }
             // Insets included: the bottom margin (dock plus home indicator) is about the size of
             // the threshold, so without it a slightly taller dock showed the arrow at the very end.
             .onScrollGeometryChange(for: CGFloat.self) { g in
                 g.contentSize.height + g.contentInsets.bottom - g.visibleRect.maxY
             } action: { _, distance in
-                distanceFromBottom = distance
+                metrics.distanceFromBottom = distance
                 let away = distance > 120
                 if away != awayFromBottom { withAnimation(.snappy) { awayFromBottom = away } }
                 // Content growing under a locked thread also reads as "away" for a frame; only a
                 // finger on the thread unlocks it. Scrolling back to the end locks it again.
-                if userScrolling, distance > 24 { stickToBottom = false }
-                if distance < 4 { stickToBottom = true }
+                if metrics.userScrolling, distance > 24 { metrics.stickToBottom = false }
+                if distance < 4 { metrics.stickToBottom = true }
             }
             .onScrollPhaseChange { _, phase in
-                userScrolling = phase == .interacting || phase == .decelerating
+                metrics.userScrolling = phase == .interacting || phase == .decelerating
             }
             // The working bot: one spot at the bottom-left of the thread for the whole turn, in
             // the same pose as the bot on the header pill, gone once the turn ends. It used to sit
@@ -223,7 +223,7 @@ struct TranscriptView: View {
             .overlay(alignment: .topLeading) {
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("-vory-geometry") {
-                    Text("dockTop \(Int(dockTop)) scrollBottom \(Int(scrollBottom)) inset \(Int(bottomInset)) dist \(Int(distanceFromBottom))")
+                    Text("dockTop \(Int(dockTop)) scrollBottom \(Int(scrollBottom)) inset \(Int(bottomInset)) dist \(Int(metrics.distanceFromBottom))")
                         .font(.caption2.monospacedDigit()).padding(4).background(.yellow).foregroundStyle(.black).padding(.top, 120)
                 }
                 #endif
@@ -241,28 +241,28 @@ struct TranscriptView: View {
             // Streaming text follows unanimated (tokens arrive faster than an animated scroll
             // settles); a new message glides: the bubble slides in and the thread eases up with it.
             .onChange(of: chat.items.last) { _, _ in
-                if stickToBottom, !userScrolling { scrollPosition.scrollTo(edge: .bottom) }
+                if metrics.stickToBottom, !metrics.userScrolling { scrollPosition.scrollTo(edge: .bottom) }
             }
             .onChange(of: chat.items.count) { _, _ in
-                guard stickToBottom, !userScrolling else { return }
+                guard metrics.stickToBottom, !metrics.userScrolling else { return }
                 if settling { scrollPosition.scrollTo(edge: .bottom) }
                 else { withAnimation(.easeOut(duration: 0.28)) { scrollPosition.scrollTo(edge: .bottom) } }
             }
             .onAppear { openedAt = Date() }
             .onChange(of: chat.statusLine) { _, _ in
-                if stickToBottom, !userScrolling { withAnimation(.easeOut(duration: 0.2)) { scrollPosition.scrollTo(edge: .bottom) } }
+                if metrics.stickToBottom, !metrics.userScrolling { withAnimation(.easeOut(duration: 0.2)) { scrollPosition.scrollTo(edge: .bottom) } }
             }
             // The turn ending takes the typing bubble and status line out from under the last
             // reply; a locked thread follows so no blank band is left there.
             .onChange(of: chat.isRunning) { _, _ in
-                if stickToBottom, !userScrolling { withAnimation(.easeOut(duration: 0.2)) { scrollPosition.scrollTo(edge: .bottom) } }
+                if metrics.stickToBottom, !metrics.userScrolling { withAnimation(.easeOut(duration: 0.2)) { scrollPosition.scrollTo(edge: .bottom) } }
             }
             // The dock changing height (an approval card arriving or leaving) moves the bottom
             // margin; a locked thread follows, so no blank band opens under the last row. Once
             // the height has settled, not per frame of the card's grow animation: a scroll per
             // frame against a moving margin overshot into blank space.
             .onChange(of: bottomInset) { _, _ in
-                guard stickToBottom else { return }
+                guard metrics.stickToBottom else { return }
                 insetSettle?.cancel()
                 insetSettle = Task {
                     try? await Task.sleep(for: .milliseconds(80))
@@ -280,15 +280,15 @@ extension TranscriptView {
     /// the bubbles glitched. From far away the thread first lands, unanimated, a screen short of
     /// the end, then the last stretch scrolls fast and smooth.
     private func jumpToBottom() {
-        stickToBottom = true
+        metrics.stickToBottom = true
         jumpTask?.cancel()
-        let far = distanceFromBottom > 900
+        let far = metrics.distanceFromBottom > 900
         jumpTask = Task { @MainActor in
             if far {
                 // A fast scroll, not a fade: from far away the thread first jumps (unanimated,
                 // before the next frame draws) to one screen short of the end, worked out from
                 // the geometry rather than by landing first, then scrolls the last stretch.
-                let end = contentHeight + reportedInsetBottom - containerHeight
+                let end = metrics.contentHeight + metrics.reportedInsetBottom - metrics.containerHeight
                 scrollPosition.scrollTo(y: max(0, end - 900))
                 try? await Task.sleep(for: .milliseconds(16))
                 guard !Task.isCancelled else { return }
@@ -296,13 +296,25 @@ extension TranscriptView {
             withAnimation(.easeOut(duration: 0.35)) { scrollPosition.scrollTo(edge: .bottom) }
             // If it did not land (a lazy row laid out late, an older iOS), finish the job flat.
             try? await Task.sleep(for: .milliseconds(500))
-            guard !Task.isCancelled, distanceFromBottom > 24 else { return }
+            guard !Task.isCancelled, metrics.distanceFromBottom > 24 else { return }
             scrollPosition.scrollTo(edge: .bottom)
             try? await Task.sleep(for: .milliseconds(60))
-            guard !Task.isCancelled, distanceFromBottom > 24 else { return }
+            guard !Task.isCancelled, metrics.distanceFromBottom > 24 else { return }
             scrollPosition.scrollTo(id: "bottom", anchor: .bottom)
         }
     }
+}
+
+/// The figures a scroll changes every frame. Not observable on purpose (see `TranscriptView.metrics`).
+final class ScrollMetrics {
+    /// Locked to the bottom: the thread follows every new token, tool call and card. Only the
+    /// user's own drag releases it; the jump button (or scrolling back down) locks it again.
+    var stickToBottom = true
+    var userScrolling = false
+    var distanceFromBottom: CGFloat = 0
+    var contentHeight: CGFloat = 0
+    var containerHeight: CGFloat = 0
+    var reportedInsetBottom: CGFloat = 0
 }
 
 /// Drag the thread left to peek at each message's time, as in Messages: one transform on the
@@ -464,7 +476,12 @@ struct TranscriptRowModel: Identifiable {
 
 struct SelectTextItem: Identifiable { let text: String; var id: String { text } }
 
-struct TranscriptRow: View {
+struct TranscriptRow: View, Equatable {
+    static func == (a: TranscriptRow, b: TranscriptRow) -> Bool {
+        a.item == b.item && a.profile == b.profile && a.botShown == b.botShown && a.typingTool == b.typingTool
+            && a.showReasoning == b.showReasoning && a.showStats == b.showStats
+            && a.reasoningOpen.wrappedValue == b.reasoningOpen.wrappedValue
+    }
     var item: TranscriptItem
     /// The bot beside its bubble, as in a group chat; nil for none. Only the last bubble of a
     /// run of replies gets the bot (`botShown`); the others keep the same left margin.
@@ -481,6 +498,7 @@ struct TranscriptRow: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
+        let _ = Perf.tick("row")
         switch item.kind {
         case .user(let text, let attachments):
             HStack {
@@ -537,7 +555,7 @@ struct TranscriptRow: View {
                 } else {
                 VStack(alignment: .leading, spacing: 6) {
                     if showReasoning, let reasoning, !reasoning.isEmpty { ReasoningDisclosure(text: reasoning, open: reasoningOpen) }
-                    MarkdownView(text: text)
+                    MarkdownView(text: text).equatable()
                     if showStats, let s = item.stats {
                         Text(s.label).font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
                             .accessibilityLabel("Turn statistics: \(s.label)")
@@ -627,11 +645,35 @@ struct ReasoningDisclosure: View {
 }
 
 /// Renders markdown blocks; inline styling from AttributedString(markdown:).
-struct MarkdownView: View {
+struct MarkdownView: View, Equatable {
     var text: String
 
+    /// Parsed blocks and inline styling, kept for the text they came from: a row that scrolls
+    /// off and back (the lazy stack rebuilds it) does not parse its markdown again, and a
+    /// finished reply is parsed once for as long as it is in the cache.
+    private static let blockCache = NSCache<NSString, BlocksBox>()
+    private static let inlineCache = NSCache<NSString, InlineBox>()
+    final class BlocksBox { let blocks: [MarkdownBlock]; init(_ b: [MarkdownBlock]) { blocks = b } }
+    final class InlineBox { let text: AttributedString; init(_ t: AttributedString) { text = t } }
+
+    static func blocks(_ text: String) -> [MarkdownBlock] {
+        let key = text as NSString
+        if let hit = blockCache.object(forKey: key) { return hit.blocks }
+        let b = MarkdownParser.blocks(from: text)
+        blockCache.setObject(BlocksBox(b), forKey: key, cost: text.utf8.count)
+        return b
+    }
+    static func inline(_ text: String) -> AttributedString {
+        let key = text as NSString
+        if let hit = inlineCache.object(forKey: key) { return hit.text }
+        let a = MarkdownParser.inline(text)
+        inlineCache.setObject(InlineBox(a), forKey: key, cost: text.utf8.count)
+        return a
+    }
+
     var body: some View {
-        let blocks = MarkdownParser.blocks(from: text)
+        let _ = Perf.tick("markdown")
+        let blocks = Self.blocks(text)
         VStack(alignment: .leading, spacing: 8) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 render(block)
@@ -643,9 +685,9 @@ struct MarkdownView: View {
     @ViewBuilder private func render(_ block: MarkdownBlock) -> some View {
         switch block {
         case .paragraph(let t):
-            Text(MarkdownParser.inline(t))
+            Text(Self.inline(t))
         case .heading(let level, let t):
-            Text(MarkdownParser.inline(t)).font(level <= 1 ? .title2.weight(.bold) : level == 2 ? .title3.weight(.semibold) : .headline)
+            Text(Self.inline(t)).font(level <= 1 ? .title2.weight(.bold) : level == 2 ? .title3.weight(.semibold) : .headline)
         case .code(let lang, let code, let closed):
             // Wrapped, not side-scrolling: a horizontal pan inside a bubble used to fight the
             // timestamp reveal. Long lines wrap; a copy button sits in the corner.
@@ -664,19 +706,19 @@ struct MarkdownView: View {
         case .bullets(let items):
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, it in
-                    HStack(alignment: .firstTextBaseline, spacing: 8) { Text("•"); Text(MarkdownParser.inline(it)) }
+                    HStack(alignment: .firstTextBaseline, spacing: 8) { Text("•"); Text(Self.inline(it)) }
                 }
             }
         case .numbered(let items):
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(Array(items.enumerated()), id: \.offset) { i, it in
-                    HStack(alignment: .firstTextBaseline, spacing: 8) { Text("\(i + 1).").monospacedDigit(); Text(MarkdownParser.inline(it)) }
+                    HStack(alignment: .firstTextBaseline, spacing: 8) { Text("\(i + 1).").monospacedDigit(); Text(Self.inline(it)) }
                 }
             }
         case .quote(let t):
             HStack(spacing: 10) {
                 RoundedRectangle(cornerRadius: 2).fill(.secondary).frame(width: 3)
-                Text(MarkdownParser.inline(t)).foregroundStyle(.secondary)
+                Text(Self.inline(t)).foregroundStyle(.secondary)
             }
         case .rule:
             Divider()

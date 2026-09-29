@@ -106,6 +106,11 @@ public final class ChatSession: @MainActor Identifiable, ChatIdentity {
 
     private var assembler = StreamAssembler()
     private var streamingItemID: String?
+    /// Tokens arrive faster than the screen can usefully show them; each one used to replace the
+    /// streaming row and re-lay out the thread. They are gathered and shown about 25 times a
+    /// second instead, which reads the same and leaves the main thread free to scroll.
+    private var streamFlush: Task<Void, Never>?
+    private var lastStatsUpdate = Date.distantPast
     /// Assistant text already sealed into earlier bubbles of the current turn, because tool calls
     /// split the stream. `message.complete` carries the WHOLE turn, so it must be reconciled
     /// against this instead of being appended again.
@@ -567,13 +572,13 @@ public final class ChatSession: @MainActor Identifiable, ChatIdentity {
             let delta = p["text"]?.stringValue ?? ""
             streamedCharactersThisTurn += delta.count
             assembler.appendDelta(delta)
-            updateStreamingItem()
+            scheduleStreamingUpdate()
             if !delta.isEmpty { NotificationCenter.default.post(name: .hermesStreamDelta, object: nil, userInfo: ["storedID": storedID, "count": delta.count]) }
         case "reasoning.delta", "thinking.delta":
             if streamingItemID == nil { beginStreaming() }
             if statusLine != "Thinking…" { statusLine = "Thinking…" }
             assembler.appendReasoning(p["text"]?.stringValue ?? "")
-            updateStreamingItem()
+            scheduleStreamingUpdate()
         case "reasoning.available":
             if streamingItemID == nil { beginStreaming() }
             assembler.appendReasoning(p["text"]?.stringValue ?? "")
@@ -700,10 +705,22 @@ public final class ChatSession: @MainActor Identifiable, ChatIdentity {
         activity.start(for: self)
     }
 
+    private func scheduleStreamingUpdate() {
+        guard streamFlush == nil else { return }
+        streamFlush = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(40))
+            guard let self, !Task.isCancelled else { return }
+            self.streamFlush = nil
+            self.updateStreamingItem()
+        }
+    }
+
     private func updateStreamingItem() {
+        streamFlush?.cancel(); streamFlush = nil
         guard let id = streamingItemID, let idx = items.firstIndex(where: { $0.id == id }) else { return }
         items[idx].kind = .assistant(text: assembler.text, reasoning: assembler.reasoning.isEmpty ? nil : assembler.reasoning, streaming: true)
-        if let started = turnStartedAt, assembler.deltaCount % 8 == 0 {
+        if let started = turnStartedAt, Date().timeIntervalSince(lastStatsUpdate) > 0.5 {
+            lastStatsUpdate = Date()
             items[idx].stats = TurnStats.make(outputBefore: nil, outputAfter: nil, streamedCharacters: streamedCharactersThisTurn, seconds: Date().timeIntervalSince(started))
         }
         // Keep the Live Activity's token count and elapsed state fresh: about once a second while streaming.
