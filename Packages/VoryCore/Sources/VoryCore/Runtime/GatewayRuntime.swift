@@ -306,6 +306,8 @@ public final class GatewayRuntime {
 
 public extension Notification.Name {
     public static let hermesSessionsChanged = Notification.Name("hermesSessionsChanged")
+    /// A piece of reply text arrived for a chat (`storedID`, `count` characters).
+    public static let hermesStreamDelta = Notification.Name("hermesStreamDelta")
     public static let hermesCronChanged = Notification.Name("hermesCronChanged")
     public static let hermesOpenSession = Notification.Name("hermesOpenSession")
 }

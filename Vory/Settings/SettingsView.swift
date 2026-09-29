@@ -284,6 +284,7 @@ struct NotificationsView: View {
     @Environment(AppModel.self) private var model
     @AppStorage("liveActivitiesEnabled") private var liveActivities = true
     @AppStorage("hapticsEnabled") private var haptics = true
+    @AppStorage(TypingHaptics.key) private var typingHaptics = false
     @AppStorage(PushRegistrar.enabledKey) private var notificationsOn = true
 
     var body: some View {
@@ -302,7 +303,7 @@ struct NotificationsView: View {
             } footer: {
                 Text(notificationsOn ? "This phone is registered with the gateway for approvals, questions, finished turns and errors while Vory is closed." : "Off: this phone is removed from the gateway's device list, so the Companion sends it nothing. Turn it on to register again.")
             }
-            Section("Permission") {
+            Section {
                 LabeledContent("Status", value: statusText(push.authorization))
                 if push.authorization == .notDetermined {
                     Button("Allow Notifications") { Task { _ = await push.requestAuthorization() } }
@@ -311,6 +312,16 @@ struct NotificationsView: View {
                 }
                 Toggle("Live Activity", isOn: $liveActivities)
                 Toggle("Haptics", isOn: $haptics)
+                Toggle(isOn: $typingHaptics) {
+                    HStack(spacing: 6) {
+                        Text("Typing haptics")
+                        Text("BETA").font(.caption2.weight(.bold)).padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Capsule().fill(Color.accentColor.opacity(0.15))).foregroundStyle(Color.accentColor)
+                    }
+                }
+                .disabled(!haptics)
+            } header: { Text("Permission") } footer: {
+                Text("Typing haptics: a soft tick under your thumb as the reply's text arrives, for the chat on screen. Beta.")
             }
             Section {
                 NavigationLink { CompanionView() } label: { Label("Companion", systemImage: "puzzlepiece.extension") }

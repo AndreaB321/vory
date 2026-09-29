@@ -379,7 +379,13 @@ public final class ChatSession: @MainActor Identifiable, ChatIdentity {
         }
     }
 
+    /// Set by the app: turns an image the gateway cannot take (HEIC from the photo library, say)
+    /// into one it can, returning the new bytes and file name. Nil leaves the image as it is.
+    nonisolated(unsafe) public static var imageTranscoder: (@Sendable (Data, String) -> (Data, String)?)?
+
     public func stageAttachment(data: Data, name: String, kind: AttachmentPreview.Kind) {
+        var data = data, name = name
+        if kind == .image, let t = Self.imageTranscoder?(data, name) { data = t.0; name = t.1 }
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("staged-\(runtimeID)", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent(UUID().uuidString + "-" + name)
@@ -562,6 +568,7 @@ public final class ChatSession: @MainActor Identifiable, ChatIdentity {
             streamedCharactersThisTurn += delta.count
             assembler.appendDelta(delta)
             updateStreamingItem()
+            if !delta.isEmpty { NotificationCenter.default.post(name: .hermesStreamDelta, object: nil, userInfo: ["storedID": storedID, "count": delta.count]) }
         case "reasoning.delta", "thinking.delta":
             if streamingItemID == nil { beginStreaming() }
             if statusLine != "Thinking…" { statusLine = "Thinking…" }

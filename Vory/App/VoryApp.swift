@@ -11,6 +11,8 @@ struct VoryApp: App {
         Keychain.accessGroup = Keychain.sharedGroupFromBundle()
         Keychain.migrateToAccessGroupIfNeeded()
         WatchSync.shared.start()
+        ImageTranscode.install()
+        TypingHaptics.shared.start()
         BotFace.liveGlass = true
         _model = State(initialValue: AppModel.shared)
     }
