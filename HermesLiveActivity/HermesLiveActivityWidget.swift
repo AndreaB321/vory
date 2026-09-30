@@ -47,9 +47,11 @@ struct HermesTurnLiveActivity: Widget {
                     .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    if context.state.needsAttention {
+                    if context.state.needsAttention, context.state.attentionKind != "input" {
                         ApprovalButtons(attributes: context.attributes)
                             .padding(.trailing, 2)
+                    } else if context.state.needsAttention {
+                        Image(systemName: "keyboard").font(.title3).foregroundStyle(.yellow).padding(.trailing, 6)
                     } else {
                         ElapsedTimer(state: context.state)
                             .font(.headline.monospacedDigit())
@@ -63,7 +65,7 @@ struct HermesTurnLiveActivity: Widget {
                         if context.state.needsAttention {
                             HStack(spacing: 6) {
                                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
-                                Text("Needs Approval").font(.title3.weight(.bold))
+                                Text(context.state.attentionKind == "input" ? "Needs Your Input" : "Needs Approval").font(.title3.weight(.bold))
                             }
                             Text(context.state.detail).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                         } else {
@@ -146,7 +148,7 @@ extension Color {
 
 enum PhaseText {
     static func headline(for s: HermesTurnAttributes.ContentState) -> String {
-        if s.needsAttention { return "Approval needed" }
+        if s.needsAttention { return s.attentionKind == "input" ? "Input needed" : "Approval needed" }
         switch s.phase {
         case "tool": return "Running a tool"
         case "thinking": return "Thinking"
@@ -321,7 +323,7 @@ struct LockScreenTurnView: View {
                     if state.needsAttention {
                         HStack(spacing: 5) {
                             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
-                            Text("Needs Approval").font(.title3.weight(.bold))
+                            Text(state.attentionKind == "input" ? "Needs Your Input" : "Needs Approval").font(.title3.weight(.bold))
                         }
                     } else {
                         Text(attributes.sessionTitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -330,7 +332,7 @@ struct LockScreenTurnView: View {
                 }
                 Spacer(minLength: 4)
                 if state.needsAttention {
-                    ApprovalButtons(attributes: attributes)
+                    if state.attentionKind != "input" { ApprovalButtons(attributes: attributes) }
                 } else {
                     // A fixed width: the ticking timer text otherwise claims the whole row and
                     // squeezes the title down to a few letters.

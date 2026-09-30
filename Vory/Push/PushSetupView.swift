@@ -138,6 +138,12 @@ struct PushSetupView: View {
             if setup.teamID.isEmpty { setup.teamID = ProvisioningProfile.teamID ?? "" }
             guard let rt else { return }
             await setup.prepare(runtime: rt)
+            // The check needs the profile's folder, known once the socket is up: a second
+            // phone opening the wizard right after connecting would otherwise see nothing installed.
+            if rt.profileHome == nil {
+                for _ in 0..<6 where rt.profileHome == nil { try? await Task.sleep(for: .seconds(1)) }
+                if rt.profileHome != nil { await setup.checkCompanion(runtime: rt) }
+            }
             // Always from the first step: done steps show their green state and Continue moves on.
         }
         .onChange(of: isDone(.overview)) { _, now in
@@ -172,8 +178,8 @@ struct PushSetupView: View {
         switch s {
         case .apple: return setup.appleReady(push: model.push)
         case .address: return setup.addressValid
-        case .signIn: if case .needsSignIn = setup.credential(for: rt) { return false } else { return true }
-        case .install: return setup.installedOnGateway && !setup.restartPending
+        case .signIn: if setup.alreadyServing { return true }; if case .needsSignIn = setup.credential(for: rt) { return false } else { return true }
+        case .install: return (setup.installedOnGateway || setup.alreadyServing) && !setup.restartPending
         case .start: return setup.companionHealthy
         case .overview: return setup.companionHealthy && setup.testPassed
         }
@@ -354,11 +360,15 @@ struct PushSetupView: View {
 
     @ViewBuilder private func installStep(_ rt: GatewayRuntime) -> some View {
         Section {
+            if setup.alreadyServing, !setup.installedOnGateway, let v = setup.installedVersion {
+                Label("Already on the gateway: companion v\(v) is running and connected. Nothing to install and no restart; this phone only needs to register (step 1).", systemImage: "checkmark.circle.fill")
+                    .font(.footnote).foregroundStyle(Color.readableGreen)
+            }
             Button {
                 Task { await setup.installOnGateway(runtime: rt) }
             } label: {
                 if setup.installing { Label { Text("Installing…") } icon: { ProgressView() } }
-                else { Label(setup.installedOnGateway ? "Install again" : "Install on the gateway", systemImage: "arrow.up.doc") }
+                else { Label(setup.installedOnGateway || setup.alreadyServing ? "Install again" : "Install on the gateway", systemImage: "arrow.up.doc") }
             }
             .disabled(setup.installing)
             if !setup.installedFiles.isEmpty {
@@ -379,7 +389,7 @@ struct PushSetupView: View {
             Section {
                 RestartCountdownRows(setup: setup, runtime: rt)
             } header: { sectionHeader("Restart") }
-        } else if !setup.installedOnGateway {
+        } else if !setup.installedOnGateway, !setup.alreadyServing {
             Section {
                 Label("A Gateway restart finishes the install — you'll get a 90-second countdown. Running turns pause for a few seconds.", systemImage: "info.circle")
                     .font(.footnote).foregroundStyle(.secondary)
@@ -975,6 +985,10 @@ final class PushSetupModel {
         return scheme == "http" || scheme == "https"
     }
     var installedOnGateway: Bool { uploadedAt != nil && pluginInstalledAt != nil && error == nil }
+    /// This build's companion is already on the gateway, running and connected (installed from
+    /// another phone, or before a reinstall of the app): nothing to upload, nothing to restart;
+    /// this phone only registers itself.
+    var alreadyServing: Bool { installedVersion == Self.bundledPluginVersion && installedScriptMatches && companionHealthy && !needsRestart }
     /// Heartbeat fresh, connected, and running exactly the code this build ships.
     var companionHealthy: Bool {
         guard let hb = heartbeat, hb.connected == true, !runningOlderCode, installedScriptMatches else { return false }
@@ -991,9 +1005,12 @@ final class PushSetupModel {
         registering = true; registerOutcome = nil
         defer { registering = false }
         _ = await push.requestAuthorization()
+        // The APNs token lands a moment after the permission; without it the publish is skipped.
+        for _ in 0..<10 where push.deviceToken == nil { try? await Task.sleep(for: .milliseconds(500)) }
         await push.syncRegistration(runtime: rt)
         await push.registerWithRelay()
         if let e = push.lastError ?? push.relayError { registerOutcome = "Failed: \(e)" }
+        else if push.registeredAt == nil { registerOutcome = "Failed: the phone has no push token yet. Try again in a moment." }
         else { registerOutcome = "Registered \(Date().formatted(date: .omitted, time: .shortened)): device file published to the gateway" + (PushRelay.isConfigured ? " and the phone registered with the relay." : ".") }
     }
 
@@ -1006,11 +1023,22 @@ final class PushSetupModel {
     func installOnGateway(runtime rt: GatewayRuntime) async {
         installing = true; defer { installing = false }
         installedAt = nil; pluginInstalledAt = nil; pluginResult = nil; installedFiles = []
+        // A companion already running (from another phone) reloads new files by itself
+        // (1.0.12 and later); it must not be told to restart the gateway for nothing.
+        let selfReloads = runningCanSelfReload && heartbeat?.connected == true
         await upload(runtime: rt)
         guard error == nil else { return }
         await installPlugin(runtime: rt)
-        if pluginResult?.hasPrefix("Installed") == true { pluginInstalledAt = Date(); installedAt = Date(); urlInUse = gatewayURL; scheduleRestartCountdown(runtime: rt) }
-        else { error = pluginResult ?? "The plugin could not be installed." }
+        guard pluginResult?.hasPrefix("Installed") == true else { error = pluginResult ?? "The plugin could not be installed."; return }
+        pluginInstalledAt = Date(); installedAt = Date(); urlInUse = gatewayURL
+        if selfReloads {
+            for _ in 0..<10 {
+                try? await Task.sleep(for: .seconds(3))
+                await checkCompanion(runtime: rt)
+                if companionHealthy { return }   // picked the files up in place; no restart
+            }
+        }
+        scheduleRestartCountdown(runtime: rt)
     }
     struct InstalledFile: Hashable {
         var name: String

@@ -39,7 +39,9 @@ public struct PendingCard: Identifiable, Hashable, Sendable {
 @MainActor
 @Observable
 public final class ChatSession: @MainActor Identifiable, ChatIdentity {
-    public unowned let runtime: GatewayRuntime
+    /// Strong on purpose: a chat kept by a screen must outlive a gateway switch (an unowned
+    /// reference trapped when the old runtime went away under an open conversation).
+    public let runtime: GatewayRuntime
     private let log = Logger(subsystem: "Vory", category: "chat")
 
     public private(set) var runtimeID = ""
@@ -521,6 +523,9 @@ public final class ChatSession: @MainActor Identifiable, ChatIdentity {
         guard ["approval", "clarify", "sudo", "secret", "vault.unlock_prompt", "vault.save_login", "vault.code"].contains(req.method) else { return nil }
         let card = PendingCard(id: req.id, method: req.method, params: req.params)
         addCard(card)
+        // The same request id asked twice (a gateway retry): the first waiter is answered
+        // empty rather than left hanging under the new one.
+        inlineAnswers.removeValue(forKey: req.id)?.resume(returning: nil)
         return await withCheckedContinuation { (c: CheckedContinuation<JSONValue?, Never>) in
             inlineAnswers[req.id] = c
         }

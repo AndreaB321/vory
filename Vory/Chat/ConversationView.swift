@@ -164,17 +164,22 @@ struct BottomDock: View {
                 }
                 if !chat.queue.isEmpty { QueueStrip(chat: chat) }
                 if let card = chat.firstCard {
-                    PendingCardView(chat: chat, card: card)
-                        .glassEffectID("dock", in: namespace)
-                        .contextMenu {
-                            if card.method == "approval" {
+                    if card.method == "approval" {
+                        PendingCardView(chat: chat, card: card)
+                            .glassEffectID("dock", in: namespace)
+                            .contextMenu {
                                 Button { Task { await chat.respond(card: card, result: ["choice": "once"]) } } label: { Label("Allow once", systemImage: "checkmark") }
                                 Button { Task { await chat.respond(card: card, result: ["choice": "session"]) } } label: { Label("Allow for this session", systemImage: "checkmark.circle") }
                                 Button { Task { await chat.respond(card: card, result: ["choice": "always"]) } } label: { Label("Always allow", systemImage: "checkmark.seal") }
                                 Divider()
                                 Button(role: .destructive) { Task { await chat.respond(card: card, result: ["choice": "deny"]) } } label: { Label("Deny", systemImage: "xmark") }
                             }
-                        }
+                    } else {
+                        // No context menu on a password or question card: a long press on the
+                        // secure field inside an empty menu was one more thing to go wrong.
+                        PendingCardView(chat: chat, card: card)
+                            .glassEffectID("dock", in: namespace)
+                    }
                 } else {
                     ComposerView(chat: chat, text: $text, namespace: namespace)
                 }
