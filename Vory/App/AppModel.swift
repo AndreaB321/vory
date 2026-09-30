@@ -53,7 +53,7 @@ final class AppModel {
     }
 
     enum AppTab: String, Hashable, CaseIterable, Sendable {
-        case chats, bots, files, sessions, cron, approvals, system, settings
+        case chats, bots, files, sessions, cron, approvals, system, projects, status, settings
 
         var title: String {
             switch self {
@@ -64,6 +64,8 @@ final class AppModel {
             case .cron: return "Tasks"
             case .approvals: return "Approvals"
             case .system: return "System"
+            case .projects: return "Projects"
+            case .status: return "Status"
             case .settings: return "Settings"
             }
         }
@@ -77,6 +79,8 @@ final class AppModel {
             case .cron: return "calendar.badge.clock"
             case .approvals: return "checkmark.shield"
             case .system: return "server.rack"
+            case .projects: return "folder.fill"
+            case .status: return "waveform.path.ecg"
             case .settings: return "gear"
             }
         }

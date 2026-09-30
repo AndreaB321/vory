@@ -170,6 +170,8 @@ struct MainTabView: View {
         case .cron: NavigationStack { CronView().navigationTitle("Scheduled Tasks").tabRoot(.cron) }
         case .approvals: NavigationStack { ApprovalsView().navigationTitle("Approvals").tabRoot(.approvals) }
         case .system: NavigationStack { SystemView().navigationTitle("System").tabRoot(.system) }
+        case .projects: NavigationStack { ProjectsView().tabRoot(.projects) }
+        case .status: NavigationStack { StatusView().tabRoot(.status) }
         }
     }
 }
