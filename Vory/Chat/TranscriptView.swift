@@ -66,15 +66,30 @@ struct TranscriptView: View {
     @AppStorage(ChatStyle.showTurnStats) private var showTurnStats = true
     @AppStorage(ChatStyle.showSystemNotes) private var showSystemNotes = true
     @AppStorage(ChatStyle.showBots) private var showBots = false
+    @AppStorage(ChatStyle.collapseAfterTurn) private var collapseAfterTurn = false
+    @AppStorage(ChatStyle.showToolOutput) private var showToolOutput = true
+    @AppStorage(ChatStyle.compactTools) private var compactTools = false
+    @AppStorage(ChatStyle.currentStepOnly) private var currentStepOnly = false
+    @AppStorage(ChatStyle.wideReplies) private var wideReplies = false
+    @AppStorage(ChatStyle.textSize) private var textSize = "default"
+    @Environment(\.dynamicTypeSize) private var phoneTypeSize
+    /// Tool cards that are open, keyed by item id: lifted out of the card so a recycled row
+    /// keeps it and the turn's end can fold them all.
+    @State private var openTools: Set<String> = []
 
     private var visibleItems: [TranscriptItem] {
         chat.items.filter { item in
             switch item.kind {
-            case .tool, .subagent: return showToolCalls
+            case .tool(let act): return showToolCalls && (!currentStepOnly || act.status == .running)
+            case .subagent: return showToolCalls
             case .system: return showSystemNotes
             default: return true
             }
         }
+    }
+    private static func isStreaming(_ item: TranscriptItem) -> Bool {
+        if case .assistant(_, _, let streaming) = item.kind { return streaming }
+        return false
     }
 
     private var rows: [TranscriptRowModel] { TranscriptRowModel.build(visibleItems) }
@@ -113,10 +128,13 @@ struct TranscriptView: View {
                         }
                         TranscriptRow(item: row.item, profile: showBots ? chat.profileName : nil, botShown: row.lastOfRun,
                                       typingTool: typingTool,
-                                      showReasoning: showReasoning, showStats: showTurnStats, onEdit: onEditMessage,
+                                      showReasoning: showReasoning && (!currentStepOnly || Self.isStreaming(row.item)), showStats: showTurnStats, onEdit: onEditMessage,
                                       reasoningOpen: Binding(get: { openReasoning.contains(row.item.id) },
                                                              set: { if $0 { openReasoning.insert(row.item.id) } else { openReasoning.remove(row.item.id) } }),
-                                      onSelectText: { selectText = $0 })
+                                      onSelectText: { selectText = $0 },
+                                      toolOpen: Binding(get: { openTools.contains(row.item.id) },
+                                                        set: { if $0 { openTools.insert(row.item.id) } else { openTools.remove(row.item.id) } }),
+                                      showToolOutput: showToolOutput, compactTools: compactTools, wide: wideReplies)
                             // Equatable on what it draws (the closures and the binding are
                             // compared by value): a row whose message did not change is not
                             // rebuilt when the thread re-evaluates for a scroll or a token.
@@ -155,8 +173,9 @@ struct TranscriptView: View {
                     }
                     Color.clear.frame(height: 0).id("bottom")
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, wideReplies ? 10 : 16)
                 .padding(.top, 8)
+                .dynamicTypeSize(ChatStyle.stepped(phoneTypeSize, textSize))
                 .animation(.snappy(duration: 0.28), value: chat.items.count)
                 .background(ScrollViewProbe(metrics: metrics))
                 }
@@ -294,7 +313,8 @@ struct TranscriptView: View {
             }
             // The turn ending takes the typing bubble and status line out from under the last
             // reply; a locked thread follows so no blank band is left there.
-            .onChange(of: chat.isRunning) { _, _ in
+            .onChange(of: chat.isRunning) { _, running in
+                if !running, collapseAfterTurn { withAnimation(.snappy) { openReasoning = []; openTools = [] } }
                 if metrics.stickToBottom, !metrics.userScrolling { withAnimation(.easeOut(duration: 0.2)) { scrollPosition.scrollTo(edge: .bottom) } }
             }
             // The dock changing height (an approval card arriving or leaving) moves the bottom
@@ -497,6 +517,29 @@ enum ChatStyle {
     static let showBots = "chat.showBots"
     /// Pull the thread left to see message times.
     static let timeReveal = "chat.timeReveal"
+    /// Tool cards and reasoning fold up when the turn ends.
+    static let collapseAfterTurn = "chat.collapseAfterTurn"
+    /// The Output block inside an opened tool card.
+    static let showToolOutput = "chat.showToolOutput"
+    /// One-line tool cards.
+    static let compactTools = "chat.compactTools"
+    /// Only the step running now: finished tool cards and the reasoning of finished replies are hidden.
+    static let currentStepOnly = "chat.currentStepOnly"
+    /// Reply bubbles run to the edge instead of leaving a margin on the right.
+    static let wideReplies = "chat.wideReplies"
+    /// "small", "default" or "large": one Dynamic Type step down or up for the thread only.
+    static let textSize = "chat.textSize"
+
+    /// The thread's type size for a `textSize` choice, relative to the phone's own setting.
+    static func stepped(_ base: DynamicTypeSize, _ choice: String) -> DynamicTypeSize {
+        let all = DynamicTypeSize.allCases
+        guard let i = all.firstIndex(of: base) else { return base }
+        switch choice {
+        case "small": return all[max(0, i - 1)]
+        case "large": return all[min(all.count - 1, i + 1)]
+        default: return base
+        }
+    }
 }
 
 /// A transcript item plus the "Tue, Sep 22 at 6:30 PM" separator that precedes it when the
@@ -552,6 +595,8 @@ struct TranscriptRow: View, Equatable {
         a.item == b.item && a.profile == b.profile && a.botShown == b.botShown && a.typingTool == b.typingTool
             && a.showReasoning == b.showReasoning && a.showStats == b.showStats
             && a.reasoningOpen.wrappedValue == b.reasoningOpen.wrappedValue
+            && a.toolOpen.wrappedValue == b.toolOpen.wrappedValue
+            && a.showToolOutput == b.showToolOutput && a.compactTools == b.compactTools && a.wide == b.wide
     }
     var item: TranscriptItem
     /// The bot beside its bubble, as in a group chat; nil for none. Only the last bubble of a
@@ -566,6 +611,11 @@ struct TranscriptRow: View, Equatable {
     var onEdit: (String) -> Void = { _ in }
     var reasoningOpen: Binding<Bool> = .constant(false)
     var onSelectText: (String) -> Void = { _ in }
+    var toolOpen: Binding<Bool> = .constant(false)
+    var showToolOutput = true
+    var compactTools = false
+    /// Reply bubbles run to the right edge.
+    var wide = false
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
@@ -622,7 +672,7 @@ struct TranscriptRow: View, Equatable {
                                 .accessibilityLabel("Turn statistics: \(s.label)")
                         }
                     }
-                    Spacer(minLength: 40)
+                    Spacer(minLength: wide ? 0 : 40)
                 } else {
                 VStack(alignment: .leading, spacing: 6) {
                     if showReasoning, let reasoning, !reasoning.isEmpty { ReasoningDisclosure(text: reasoning, open: reasoningOpen, itemID: item.id) }
@@ -639,7 +689,7 @@ struct TranscriptRow: View, Equatable {
                     Button { onSelectText(text) } label: { Label("Select Text", systemImage: "selection.pin.in.out") }
                     ShareLink(item: text) { Label("Share", systemImage: "square.and.arrow.up") }
                 }
-                Spacer(minLength: 24)
+                Spacer(minLength: wide ? 0 : 24)
                 }
             }
         case .steer(let text, let status):
@@ -660,7 +710,7 @@ struct TranscriptRow: View, Equatable {
                 }
             }
         case .tool(let act):
-            ToolCardView(activity: act, itemID: item.id)
+            ToolCardView(activity: act, itemID: item.id, open: toolOpen, showOutput: showToolOutput, compact: compactTools)
         case .system(let text, let symbol):
             HStack(spacing: 6) {
                 Image(systemName: symbol)
@@ -814,47 +864,57 @@ struct ToolCardView: View {
     var activity: ToolActivity
     /// The transcript row this card is, for the reveal after it opens.
     var itemID: String? = nil
-    @State private var expanded = false
+    /// Open state owned by the thread (so a recycled row keeps it and the turn's end can fold it).
+    var open: Binding<Bool> = .constant(false)
+    /// The Output block when open (Appearance › Chat).
+    var showOutput = true
+    /// One line: name, time and chevron; the context and summary lines only when open.
+    var compact = false
     /// Set while the card opens: its frame changes are reported so the thread can reveal it.
     @State private var revealing = false
+    private var expanded: Bool { open.wrappedValue }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: compact ? 4 : 6) {
             HStack(spacing: 8) {
                 statusIcon
-                Text(activity.displayName).font(.subheadline.weight(.medium))
+                Text(activity.displayName).font(compact ? .caption.weight(.medium) : .subheadline.weight(.medium))
                 if let risk = activity.risk { Text(risk).font(.caption2).padding(.horizontal, 6).padding(.vertical, 2).background(.orange.opacity(0.2), in: .capsule) }
+                if compact, !expanded, let c = activity.context, !c.isEmpty {
+                    Text(c).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
                 Spacer()
                 if let d = activity.durationSeconds { Text(String(format: "%.1fs", d)).font(.caption2).foregroundStyle(.secondary) }
                 Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption).foregroundStyle(.secondary)
             }
-            if let c = activity.context, !c.isEmpty, !expanded {
+            if let c = activity.context, !c.isEmpty, !expanded, !compact {
                 Text(c).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
-            if let s = activity.summary, !s.isEmpty, !expanded {
+            if let s = activity.summary, !s.isEmpty, !expanded, !compact {
                 Text(s).font(.caption).lineLimit(2)
             }
             if expanded {
+                if compact, let s = activity.summary, !s.isEmpty { Text(s).font(.caption).lineLimit(3) }
                 if let a = activity.argsText, !a.isEmpty {
                     Text(activity.name == "terminal" || activity.name == "bash" ? "Command" : "Arguments").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
                     CodeBlock(text: a, lineCap: 40)
                 }
-                if let r = activity.resultText, !r.isEmpty {
+                if showOutput, let r = activity.resultText, !r.isEmpty {
                     Text("Output").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
                     CodeBlock(text: r, lineCap: 30)
                 }
             }
         }
-        .padding(12)
+        .padding(compact ? 8 : 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         // A painted card, not glass: a thread can hold dozens of these, and each live glass
         // layer is composited every frame while the thread scrolls (the stutter on device).
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: compact ? 10 : 14))
+        .overlay(RoundedRectangle(cornerRadius: compact ? 10 : 14, style: .continuous).strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
         .contentShape(.rect)
         .onTapGesture {
             if !expanded { revealing = true; Task { try? await Task.sleep(for: .milliseconds(600)); revealing = false } }
-            withAnimation(.snappy) { expanded.toggle() }
+            withAnimation(.snappy) { open.wrappedValue.toggle() }
         }
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { _, y in
             if revealing, let itemID { NotificationCenter.default.post(name: .hermesRevealRow, object: nil, userInfo: ["bottom": y, "id": itemID]) }

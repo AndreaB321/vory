@@ -476,6 +476,12 @@ struct AppearanceView: View {
     @AppStorage(ChatStyle.showSystemNotes) private var showSystemNotes = true
     @AppStorage(ChatStyle.showBots) private var showBots = false
     @AppStorage(ChatStyle.timeReveal) private var timeReveal = true
+    @AppStorage(ChatStyle.collapseAfterTurn) private var collapseAfterTurn = false
+    @AppStorage(ChatStyle.showToolOutput) private var showToolOutput = true
+    @AppStorage(ChatStyle.compactTools) private var compactTools = false
+    @AppStorage(ChatStyle.currentStepOnly) private var currentStepOnly = false
+    @AppStorage(ChatStyle.wideReplies) private var wideReplies = false
+    @AppStorage(ChatStyle.textSize) private var textSize = "default"
     @Environment(\.editMode) private var editMode
 
     private var layout: TabLayout { TabLayout.parse(layoutRaw) }
@@ -558,8 +564,26 @@ struct AppearanceView: View {
                 Text("Hidden rows are still received and kept; this only changes what the transcript draws. Approval cards are always shown. Pull left for times slides the thread aside to show when each message arrived; off, the thread never moves sideways.")
             }
             Section {
+                Toggle("Fold tool cards and reasoning after the turn", isOn: $collapseAfterTurn)
+                Toggle("Show tool output", isOn: $showToolOutput)
+                Toggle("Compact tool cards", isOn: $compactTools)
+                Toggle("Only the current step", isOn: $currentStepOnly)
+            } header: { Text("Tool calls and reasoning") } footer: {
+                Text("Only the current step keeps just the tool running now and the reasoning of the reply being written; finished steps disappear from the thread, as in ChatGPT. Everything is still kept, and turning it off brings it all back.")
+            }
+            Section {
+                Toggle("Wide replies", isOn: $wideReplies)
+                Picker("Text size", selection: $textSize) {
+                    Text("Small").tag("small")
+                    Text("Default").tag("default")
+                    Text("Large").tag("large")
+                }
+            } header: { Text("Reading") } footer: {
+                Text("Wide replies let a reply run to the right edge instead of leaving a margin. Text size is one step down or up from your iPhone's own text size, in chats only.")
+            }
+            Section {
                 Button("Clear chat list cache") { SessionCache.clearAll() }
-                Button("Reset to default") { layoutRaw = ""; scheme = "system"; showToolCalls = true; showReasoning = true; showTurnStats = true; showSystemNotes = true }
+                Button("Reset to default") { layoutRaw = ""; scheme = "system"; showToolCalls = true; showReasoning = true; showTurnStats = true; showSystemNotes = true; collapseAfterTurn = false; showToolOutput = true; compactTools = false; currentStepOnly = false; wideReplies = false; textSize = "default" }
             } footer: { Text("The Chats tab remembers its last list so it opens instantly; clearing it just forces a fresh fetch.") }
         }
     }
