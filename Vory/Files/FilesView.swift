@@ -13,6 +13,12 @@ struct FilesView: View {
     @State private var previewURL: URL?
     @State private var downloading: String?
     @State private var showImporter = false
+    /// Dotfiles and dot-folders are noise most of the time (.git, .DS_Store, .env); hidden by
+    /// default, shown with the eye in the toolbar. The choice is kept across launches.
+    @AppStorage("files.showHidden") private var showHidden = false
+
+    private var visibleEntries: [FileEntry] { showHidden ? (listing?.entries ?? []) : (listing?.entries ?? []).filter { !$0.name.hasPrefix(".") } }
+    private var hiddenCount: Int { (listing?.entries ?? []).filter { $0.name.hasPrefix(".") }.count }
 
     var body: some View {
         NavigationStack {
@@ -24,7 +30,7 @@ struct FilesView: View {
                     }
                     Section {
                         if let parent = l.parent { Button { path = parent } label: { Label("Up", systemImage: "arrow.up.doc") } }
-                        ForEach(l.entries) { e in
+                        ForEach(visibleEntries) { e in
                             if e.isDirectory {
                                 Button { path = e.path } label: { Label(e.name, systemImage: "folder") }
                             } else {
@@ -42,6 +48,10 @@ struct FilesView: View {
                                 }
                             }
                         }
+                    } footer: {
+                        if !showHidden, hiddenCount > 0 {
+                            Text("\(hiddenCount) hidden \(hiddenCount == 1 ? "item" : "items") not shown. The eye above shows them.")
+                        }
                     }
                 }
             }
@@ -51,6 +61,10 @@ struct FilesView: View {
             .background(InteractivePopEnabler())
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button { path = nil } label: { Label("Home", systemImage: "house") } }
+                ToolbarItem(placement: .primaryAction) {
+                    Button { withAnimation { showHidden.toggle() } } label: { Label(showHidden ? "Hide hidden files" : "Show hidden files", systemImage: showHidden ? "eye" : "eye.slash") }
+                        .accessibilityValue(showHidden ? "Hidden files shown" : "Hidden files not shown")
+                }
                 ToolbarItem(placement: .primaryAction) { Button { showImporter = true } label: { Label("Upload", systemImage: "square.and.arrow.up") } }
             }
             .refreshable { await load() }

@@ -263,6 +263,8 @@ def rest(path: str, query: dict) -> tuple[int, object] | None:
             {"id": "discord", "label": "Discord", "status": "not configured", "enabled": False}]}
     if base == "/api/files":
         return 200, {"path": "/home/hermes", "parent": None, "root": None, "locked_root": None, "entries": [
+            {"name": ".git", "path": "/home/hermes/.git", "is_directory": True, "modified_at": time.time() - 9000},
+            {"name": ".env", "path": "/home/hermes/.env", "is_directory": False, "size": 212, "modified_at": time.time() - 9000, "mime_type": "text/plain"},
             {"name": "projects", "path": "/home/hermes/projects", "is_directory": True, "modified_at": time.time() - 400},
             {"name": "reports", "path": "/home/hermes/reports", "is_directory": True, "modified_at": time.time() - 8000},
             {"name": "disk-report.md", "path": "/home/hermes/disk-report.md", "is_directory": False, "size": 4_120, "modified_at": time.time() - 300, "mime_type": "text/markdown"},
