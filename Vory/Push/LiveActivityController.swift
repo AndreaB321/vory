@@ -102,18 +102,47 @@ final class LiveActivityController: TurnActivityReporting {
         }
         startedByPushTask = Task.detached {
             for await a in Activity<HermesTurnAttributes>.activityUpdates {
-                let id = a.id
-                guard adoptedTokenTasks[id] == nil else { continue }
-                note("activity \(id.prefix(6)) appeared (push start or relaunch)")
-                let h = ActivityHandle(a)
-                adoptedTokenTasks[id] = h.observePushTokens(storedID: a.attributes.storedSessionID, startedAt: a.content.state.startedAt)
-                if let token = a.pushToken {
-                    let hex = token.map { String(format: "%02x", $0) }.joined()
-                    NotificationCenter.default.post(name: .hermesLiveActivityToken, object: nil,
-                                                    userInfo: ["token": hex, "storedID": a.attributes.storedSessionID, "startedAt": a.content.state.startedAt.timeIntervalSince1970])
-                }
+                Self.adopt(a, why: "push start")
+                // The system launched the app in the background for this one: nothing else opens
+                // the gateway connection, and until it is open the token stays on the phone, the
+                // companion never learns it, and the card sits in the Dynamic Island "Thinking…"
+                // long after the turn ended.
+                await Self.connectToPublishTokens()
             }
         }
+        // After a relaunch the system may still show activities this process knows nothing about:
+        // their tokens must reach the gateway again, or the companion cannot end them.
+        for a in Activity<HermesTurnAttributes>.activities where a.activityState == .active && a.content.state.endedAt == nil {
+            Self.adopt(a, why: "showing at launch")
+        }
+    }
+
+    /// Observes one activity's token and publishes the token it already holds (`pushTokenUpdates`
+    /// only reports changes). Once per activity.
+    nonisolated private static func adopt(_ a: Activity<HermesTurnAttributes>, why: String) {
+        let id = a.id
+        guard adoptedTokenTasks[id] == nil else { return }
+        note("activity \(id.prefix(6)) appeared (\(why))")
+        let h = ActivityHandle(a)
+        adoptedTokenTasks[id] = h.observePushTokens(storedID: a.attributes.storedSessionID, startedAt: a.content.state.startedAt)
+        if let token = a.pushToken {
+            let hex = token.map { String(format: "%02x", $0) }.joined()
+            NotificationCenter.default.post(name: .hermesLiveActivityToken, object: nil,
+                                            userInfo: ["token": hex, "storedID": a.attributes.storedSessionID, "startedAt": a.content.state.startedAt.timeIntervalSince1970])
+        }
+    }
+
+    /// Background launch for a push-started activity: open the saved gateway connection so the
+    /// device file (with the new token) is published before the system suspends the app. The
+    /// runtime's start returns once that publish has run. In the foreground the runtime is
+    /// already there and the registration sync publishes it on its own.
+    @MainActor private static func connectToPublishTokens() async {
+        let model = AppModel.shared
+        guard model.runtime == nil else { return }
+        note("connecting to publish the token (launched in the background)")
+        let task = UIApplication.shared.beginBackgroundTask(withName: "vory.live-activity.token") {}
+        await model.activateSavedConnection()
+        UIApplication.shared.endBackgroundTask(task)
     }
 
     /// Ends activities nobody is driving any more: ones whose turn already ended, or that belong to

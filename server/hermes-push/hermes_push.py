@@ -53,7 +53,7 @@ except ImportError as exc:  # pragma: no cover
 log = logging.getLogger("hermes-push")
 
 # Keep in step with plugin/vory-push/plugin.yaml; the app compares the two.
-VERSION = "1.0.31"
+VERSION = "1.0.32"
 USER_AGENT = f"Vory-Push/{VERSION} (Hermes companion)"
 try:
     # Fingerprint of the code actually running: the app compares it with the copy it ships, so a
@@ -654,6 +654,49 @@ class Relay:
         except RuntimeError:
             send_end()
 
+    #: activity token → when this companion ended it for a turn that was already over.
+    _la_reaped: dict[str, float] = {}
+
+    def reap_live_activities(self) -> int:
+        """Ends the activities whose turn is over. The finish push needs the activity's own token,
+        which the phone files only once it is awake and connected: a turn that started and ended
+        while the app was closed (the companion started the activity by push) can file it late,
+        after the finish went out to nobody. Runs after each discovery poll: any filed activity for
+        a session that is not running now, older than two minutes, gets one end push."""
+        now = time.time()
+        running: set[str] = set()
+        for sid, a in self.attached.items():
+            if (a.get("status") or "idle") not in ("idle", "", "done", "finished"):
+                running |= {sid, a.get("stored") or sid}   # the phone files under the stored id, older ones under the runtime id
+        ended = 0
+        for d in load_devices(self.gw.url):
+            if d.get("platform") != "ios":
+                continue
+            entries = d.get("live_activities")
+            if not isinstance(entries, list):
+                entries = [{"session_id": d.get("live_activity_session_id"), "token": d.get("live_activity_token"),
+                            "started_at": d.get("live_activity_started_at")}] if d.get("live_activity_token") else []
+            for e in entries:
+                if not isinstance(e, dict) or not e.get("token") or e["token"] in self._la_reaped:
+                    continue
+                stored = e.get("session_id") or ""
+                started = float(e.get("started_at") or 0)
+                if stored in running or now - started < 120 or now - self._la_push_started.get(stored, 0) < 120:
+                    continue
+                if now - started > 3 * 3600:
+                    continue   # the app ends those itself, and the token is likely dead
+                state = {"phase": "done", "detail": "Turn finished", "outputTokens": 0, "contextPercent": None, "needsAttention": False,
+                         "startedAtUnix": started or float(now), "endedAtUnix": float(now)}
+                ok = self.apns.send(d, {"aps": {"timestamp": int(now), "event": "end", "content-state": state, "dismissal-date": int(now) + 60}},
+                                    push_type="liveactivity", token_override=e["token"])
+                self._note_la("end (turn already over)", ok)
+                self._la_reaped[e["token"]] = now
+                ended += 1
+                log.info("ended a Live Activity for %s whose turn was already over", stored[:12])
+        if len(self._la_reaped) > 200:
+            self._la_reaped = {t: at for t, at in self._la_reaped.items() if now - at < 86400}
+        return ended
+
     #: stored session id → when a push-to-start went out for it (one per turn, not per event).
     _la_push_started: dict[str, float] = {}
 
@@ -854,6 +897,10 @@ class Relay:
                         if conf_mtime() != self._conf_loaded:
                             raise ConfigChanged()
                         await self.discover()
+                        try:
+                            self.reap_live_activities()
+                        except Exception as exc:  # noqa: BLE001
+                            log.debug("reap: %s", exc)
                         self._maybe_send_test()
                         last_poll = time.time()
                         self._status(connected=True, gateway=self.gw.public_url, transport=self.gw.transport, attached=len(self.attached), devices=len(load_devices(self.gw.url)))
