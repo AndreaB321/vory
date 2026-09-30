@@ -16,6 +16,10 @@ struct FilesView: View {
     /// Dotfiles and dot-folders are noise most of the time (.git, .DS_Store, .env); hidden by
     /// default, shown with the eye in the toolbar. The choice is kept across launches.
     @AppStorage("files.showHidden") private var showHidden = false
+    /// Typed path for when the gateway cannot list the current folder (a broken symlink under
+    /// the home folder made the whole tab a red line with nowhere to go).
+    @State private var goTo = ""
+    @State private var triedHomeFallback = false
 
     private var visibleEntries: [FileEntry] { showHidden ? (listing?.entries ?? []) : (listing?.entries ?? []).filter { !$0.name.hasPrefix(".") } }
     private var hiddenCount: Int { (listing?.entries ?? []).filter { $0.name.hasPrefix(".") }.count }
@@ -23,7 +27,19 @@ struct FilesView: View {
     var body: some View {
         NavigationStack {
             List {
-                if let error { Text(error).foregroundStyle(.red).font(.footnote) }
+                if let error {
+                    Section {
+                        Text(error).foregroundStyle(.red).font(.footnote)
+                        HStack(spacing: 8) {
+                            TextField("Open folder, for example /home/user/projects", text: $goTo)
+                                .font(.body.monospaced()).textInputAutocapitalization(.never).autocorrectionDisabled()
+                                .onSubmit { open(path: goTo) }
+                            Button("Go") { open(path: goTo) }.disabled(goTo.trimmingCharacters(in: .whitespaces).isEmpty)
+                        }
+                    } footer: {
+                        Text("The gateway could not list that folder. Open another one by path, or use Up and Home. A broken link inside the folder is the usual cause.")
+                    }
+                }
                 if let l = listing {
                     Section {
                         Text(l.path).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
@@ -95,7 +111,21 @@ struct FilesView: View {
             if let path { q.append(URLQueryItem(name: "path", value: path)) }
             listing = try await rt.api.get("/api/files", query: q)
             error = nil
-        } catch { self.error = error.localizedDescription }
+        } catch {
+            self.error = error.localizedDescription
+            // The default root failed (the home folder, say): land in the profile's own
+            // folder instead of a dead tab, once.
+            if path == nil, !triedHomeFallback, let home = rt.profileHome {
+                triedHomeFallback = true
+                path = home
+            }
+        }
+    }
+
+    private func open(path p: String) {
+        let t = p.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        path = t
     }
 
     private func open(_ e: FileEntry) async {

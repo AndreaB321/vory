@@ -148,7 +148,7 @@ struct TranscriptView: View {
                     if let s = chat.statusLine, chat.isRunning {
                         HStack(spacing: 8) {
                             ProgressView().controlSize(.small)
-                            Text(s).font(.caption).foregroundStyle(.secondary)
+                            Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(3).fixedSize(horizontal: false, vertical: true)
                         }
                         // Clear of the bot column when the pinned working bot sits there.
                         .padding(.leading, showBots ? 38 : 4).padding(.trailing, 4)

@@ -264,7 +264,10 @@ struct ChatHeader: View {
                             Text(headline.count > 26 ? String(headline.prefix(25)) + "…" : headline).font(.caption.weight(.semibold)).lineLimit(1)
                             Image(systemName: "chevron.right").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
                         }
-                        Text(chat.isRunning ? (chat.statusLine ?? "Thinking…") : (chat.isResuming ? "Syncing…" : idleLine))
+                        // Shortened in code like the title: a compaction notice runs to a full
+                        // sentence and the pill (fixedSize) stretched past the screen.
+                        let status = chat.isRunning ? (chat.statusLine ?? "Thinking…") : (chat.isResuming ? "Syncing…" : idleLine)
+                        Text(status.count > 42 ? String(status.prefix(41)).trimmingCharacters(in: .whitespaces) + "…" : status)
                             .font(.caption2).lineLimit(1)
                             .foregroundStyle(.secondary)
                             .contentTransition(.numericText())

@@ -262,6 +262,10 @@ def rest(path: str, query: dict) -> tuple[int, object] | None:
             {"id": "telegram", "label": "Telegram", "status": "not configured", "enabled": False},
             {"id": "discord", "label": "Discord", "status": "not configured", "enabled": False}]}
     if base == "/api/files":
+        # MOCK_FILES_FAIL=1: the home listing fails the way a broken symlink makes the real
+        # gateway fail (a tester's report); folders opened by path still list.
+        if os.environ.get("MOCK_FILES_FAIL") and not query.get("path"):
+            return 500, {"detail": "Could not stat path: [Errno 2] No such file or directory: '~/.local/share/Steam/linux32/steam'"}
         return 200, {"path": "/home/hermes", "parent": None, "root": None, "locked_root": None, "entries": [
             {"name": ".git", "path": "/home/hermes/.git", "is_directory": True, "modified_at": time.time() - 9000},
             {"name": ".env", "path": "/home/hermes/.env", "is_directory": False, "size": 212, "modified_at": time.time() - 9000, "mime_type": "text/plain"},
