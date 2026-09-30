@@ -134,12 +134,13 @@ CONFIG_SCHEMA = {
 }
 
 ENV_VARS = {
-    "ANTHROPIC_API_KEY": {"set": True, "redacted": "sk-ant-…9f2c", "description": "Anthropic API key", "category": "LLM Providers"},
-    "OPENAI_API_KEY": {"set": False, "description": "OpenAI API key", "category": "LLM Providers"},
-    "OPENROUTER_API_KEY": {"set": False, "description": "OpenRouter API key", "category": "LLM Providers"},
-    "TAVILY_API_KEY": {"set": True, "redacted": "tvly-…a13b", "description": "Tavily search API key", "category": "Tool API Keys"},
-    "BRAVE_API_KEY": {"set": False, "description": "Brave Search API key", "category": "Tool API Keys"},
-    "TELEGRAM_BOT_TOKEN": {"set": False, "description": "Telegram bot token", "category": "Messaging"},
+    # The real gateway's row shape (is_set, redacted_value with the «redacted:…» wrapper).
+    "ANTHROPIC_API_KEY": {"is_set": True, "redacted_value": "«redacted:sk-a...9f2c»", "description": "Anthropic API key", "category": "LLM Providers", "is_password": True, "provider": "anthropic"},
+    "OPENAI_API_KEY": {"is_set": False, "redacted_value": None, "description": "OpenAI API key", "category": "LLM Providers", "is_password": True, "provider": "openai"},
+    "OPENROUTER_API_KEY": {"is_set": False, "redacted_value": None, "description": "OpenRouter API key", "category": "LLM Providers", "is_password": True, "provider": "openrouter"},
+    "TAVILY_API_KEY": {"is_set": True, "redacted_value": "«redacted:tvly...a13b»", "description": "Tavily search API key", "category": "Tool API Keys", "is_password": True},
+    "BRAVE_API_KEY": {"is_set": False, "redacted_value": None, "description": "Brave Search API key", "category": "Tool API Keys"},
+    "TELEGRAM_BOT_TOKEN": {"is_set": False, "redacted_value": None, "description": "Telegram bot token", "category": "Messaging"},
 }
 
 TOOLSETS = [

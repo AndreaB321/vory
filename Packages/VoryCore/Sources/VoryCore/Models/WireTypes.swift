@@ -518,12 +518,31 @@ public struct SkillInfo: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
+/// One row of `GET /api/env`. The gateway sends `is_set` and `redacted_value` (snake case, so
+/// `isSet` / `redactedValue` after the shared decoder); the older names stay for any gateway
+/// that still sends them.
 public struct EnvVarInfo: Codable, Hashable, Sendable {
+    public var isSet: Bool?
+    public var redactedValue: String?
     public var set: Bool?
     public var redacted: String?
     public var description: String?
     public var category: String?
     public var docsUrl: String?
+    public var url: String?
+    public var isPassword: Bool?
+    public var provider: String?
+    public var providerLabel: String?
+
+    /// Whether the gateway has a value, whichever field it used.
+    public var hasValue: Bool { isSet ?? set ?? false }
+    /// The preview without the gateway's `«redacted:…»` wrapper.
+    public var preview: String? {
+        guard var p = redactedValue ?? redacted, !p.isEmpty else { return nil }
+        if p.hasPrefix("«redacted:") { p = String(p.dropFirst("«redacted:".count)) }
+        if p.hasSuffix("»") { p = String(p.dropLast()) }
+        return p
+    }
 
     public init(set: Bool? = nil, redacted: String? = nil, description: String? = nil, category: String? = nil, docsUrl: String? = nil) {
         self.set = set

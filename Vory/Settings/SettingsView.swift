@@ -231,6 +231,8 @@ struct ProfileView: View {
     @State private var newName = ""
     @State private var cloneFrom = ""
     @State private var error: String?
+    @State private var pendingDelete: ProfileInfo?
+    @State private var deleting = false
 
     var body: some View {
         List {
@@ -250,6 +252,17 @@ struct ProfileView: View {
                             }
                         }
                         .tint(.primary)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            // The default profile is the gateway's own home; Hermes refuses to delete it.
+                            if p.isDefault != true, p.name != "default" {
+                                Button(role: .destructive) { pendingDelete = p } label: { Label("Delete", systemImage: "trash") }
+                            }
+                        }
+                        .contextMenu {
+                            if p.isDefault != true, p.name != "default" {
+                                Button(role: .destructive) { pendingDelete = p } label: { Label("Delete profile…", systemImage: "trash") }
+                            }
+                        }
                     }
                 }
                 Section {
@@ -259,12 +272,32 @@ struct ProfileView: View {
             }
         }
         .refreshable { await model.runtime?.loadProfiles() }
+        .alert("Delete \(pendingDelete?.label ?? "profile")?", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })) {
+            Button(deleting ? "Deleting…" : "Delete", role: .destructive) { if let p = pendingDelete { Task { await delete(p) } } }.disabled(deleting)
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        } message: {
+            Text("This removes the profile's folder on the gateway: its config, skills, chats and API keys. Its gateway and bots are stopped first. This cannot be undone.")
+        }
         .alert("New profile", isPresented: $showCreate) {
             TextField("Name", text: $newName)
             TextField("Clone from (optional)", text: $cloneFrom)
             Button("Create") { Task { await create() } }
             Button("Cancel", role: .cancel) {}
         }
+    }
+
+    private func delete(_ p: ProfileInfo) async {
+        guard let rt = model.runtime else { return }
+        deleting = true; defer { deleting = false; pendingDelete = nil }
+        do {
+            // Stopping the profile's gateway and backends can take ten seconds or more.
+            let r: JSONValue = try await rt.api.send("DELETE", "/api/profiles/\(p.name)", json: .object([:]))
+            if r["ok"]?.boolValue == false { throw HermesAPIError.transport(r["error"]?.stringValue ?? "The gateway refused") }
+            for chat in rt.chats where chat.profileName == p.name { rt.closeChat(chat) }
+            if rt.selectedProfile == p.name { rt.selectedProfile = "default" }
+            await rt.loadProfiles()
+            error = nil
+        } catch { self.error = "Could not delete \(p.label): \(error.localizedDescription)" }
     }
 
     private func create() async {
