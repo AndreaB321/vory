@@ -3,7 +3,8 @@
 
     xpost.py <build> <notes.txt> [--icon icon.png] [--out dir] [--version 1.1]
 
-Reads the What-to-Test notes (the "Fixed in this build" / "Changed in this build" groups), draws a
+Reads the What-to-Test notes (the "Fixed in this build" / "Changed in this build" groups, plus an
+optional "Coming next" group written for the card), draws a
 1600x900 card with the Vory cloud, "TestFlight build N" and the bullets, and prints a post for X:
 a short one that fits 280 characters and a longer one. Needs Pillow and numpy. The icon is a 2048 px render
 of Shared/AppIcon.icon (ictool --rendition Default / Dark); pass --icon to use another.
@@ -116,18 +117,23 @@ def render(build, version, groups, icon_path, out_path, theme="light", scale=1.5
     centred(f"Public beta {version}", F(28), 592, muted)
     # one column of bullets
     x, y, colw = 110, 700, 1200 - 220
-    hf, bf = F(28, True), F(34)
+    # Many bullets (a "Coming next" group on top of the fixes): a tighter setting so the last
+    # group is not cut off above the site line.
+    total = sum(len(v) for v in groups.values())
+    compact = total >= 8
+    hf, bf = F(26 if compact else 28, True), F(30 if compact else 34)
+    lh, gap, ggap, hh = (40, 6, 22, 44) if compact else (46, 10, 30, 50)
     for title, items in groups.items():
         if not items or y > 1300: continue
-        d.text((x * S, y * S), title.upper(), font=hf, fill=accent); y += 50
+        d.text((x * S, y * S), title.upper(), font=hf, fill=accent); y += hh
         for b in items:
             lines = wrap(d, short(b), bf, (colw - 40) * S)
-            if y + 46 * len(lines) > 1360: break
+            if y + lh * len(lines) > 1370: break
             for i, line in enumerate(lines):
-                if i == 0: d.ellipse(((x + 4) * S, (y + 16) * S, (x + 15) * S, (y + 27) * S), fill=accent)
-                d.text(((x + 38) * S, y * S), line, font=bf, fill=body); y += 46
-            y += 10
-        y += 30
+                if i == 0: d.ellipse(((x + 4) * S, (y + 14) * S, (x + 15) * S, (y + 25) * S), fill=accent)
+                d.text(((x + 38) * S, y * S), line, font=bf, fill=body); y += lh
+            y += gap
+        y += ggap
     centred(SITE, F(34, True), 1408, accent)
     img.save(out_path, optimize=True)
     # The one to post: X re-encodes to JPEG anyway, and the dither makes the PNG several MB.
@@ -158,7 +164,7 @@ if __name__ == "__main__":
     ap.add_argument("--out", default="."); ap.add_argument("--version", default="1.1")
     ap.add_argument("--theme", choices=("light", "dark"), default="light", help="light (the default, with the light icon) or dark")
     a = ap.parse_args()
-    groups = {k: v for k, v in sections(open(a.notes).read()).items() if k in ("Fixed in this build", "Changed in this build")}
+    groups = {k: v for k, v in sections(open(a.notes).read()).items() if k in ("Fixed in this build", "Changed in this build", "Coming next")}
     if not groups: sys.exit("no 'Fixed in this build' / 'Changed in this build' bullets found")
     os.makedirs(a.out, exist_ok=True)
     out = os.path.join(a.out, f"vory-build-{a.build}.png")
