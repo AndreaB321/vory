@@ -31,7 +31,7 @@ struct FilesView: View {
                     Section {
                         Text(error).foregroundStyle(.red).font(.footnote)
                         HStack(spacing: 8) {
-                            TextField("Open folder, for example /home/user/projects", text: $goTo)
+                            TextField("Folder path", text: $goTo)
                                 .font(.body.monospaced()).textInputAutocapitalization(.never).autocorrectionDisabled()
                                 .onSubmit { open(path: goTo) }
                             Button("Go") { open(path: goTo) }.disabled(goTo.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -115,9 +115,17 @@ struct FilesView: View {
             self.error = error.localizedDescription
             // The default root failed (the home folder, say): land in the profile's own
             // folder instead of a dead tab, once.
-            if path == nil, !triedHomeFallback, let home = rt.profileHome {
-                triedHomeFallback = true
-                path = home
+            if path == nil, !triedHomeFallback {
+                var home = rt.profileHome
+                if home == nil {
+                    // The profile's folder is learned once the socket is up; give it a moment.
+                    try? await Task.sleep(for: .seconds(2))
+                    home = rt.profileHome
+                }
+                if let home {
+                    triedHomeFallback = true
+                    path = home
+                }
             }
         }
     }
