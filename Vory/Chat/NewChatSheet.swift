@@ -9,10 +9,11 @@ import VoryCore
 /// more than one starts a group chat with all of them.
 struct NewChatSheet: View {
     enum Start {
-        case chat(profile: String, text: String, attachments: [AttachmentPreview])
+        case chat(profile: String, text: String, attachments: [AttachmentPreview], cwd: String?)
         case group(room: Room, text: String)
     }
     var runtime: GatewayRuntime
+    var initialProjectID: String? = nil
     var onStart: (Start) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
@@ -31,6 +32,9 @@ struct NewChatSheet: View {
     @State private var messageFocused = false
     /// Files picked before the chat exists; staged into the chat as soon as it opens.
     @State private var staged: [AttachmentPreview] = []
+    /// The project the chat starts in ("" for none): the Chats filter's project, else the
+    /// gateway's active one. Only shown when the gateway has projects.
+    @State private var projectID = ""
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var showPhotos = false
     @State private var showCamera = false
@@ -134,7 +138,29 @@ struct NewChatSheet: View {
                 .padding(.top, 6)
             }
             .scrollDismissesKeyboard(.interactively)
+            .onAppear { if let initialProjectID, projectID.isEmpty { projectID = initialProjectID } }
 
+            if chosen.count <= 1, runtime.projects.available == true, !runtime.projects.open.isEmpty {
+                HStack(spacing: 8) {
+                    Text("In:").foregroundStyle(.secondary)
+                    Menu {
+                        Picker("Project", selection: $projectID) {
+                            Label("No project", systemImage: "folder.badge.questionmark").tag("")
+                            ForEach(runtime.projects.open) { p in Label(p.name, systemImage: "folder.fill").tag(p.id) }
+                        }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: projectID.isEmpty ? "folder" : "folder.fill")
+                            Text(runtime.projects.project(id: projectID)?.name ?? "No project")
+                            Image(systemName: "chevron.up.chevron.down").font(.caption2)
+                        }
+                        .font(.subheadline)
+                    }
+                    .accessibilityLabel("Project: \(runtime.projects.project(id: projectID)?.name ?? "none")")
+                    Spacer()
+                }
+                .padding(.horizontal, 16).padding(.bottom, 8)
+            }
             // The first message, with the same attach button as a chat's composer.
             VStack(spacing: 8) {
                 if !staged.isEmpty {
@@ -270,7 +296,7 @@ struct NewChatSheet: View {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !chosen.isEmpty, canSend else { return }
         if chosen.count == 1 {
-            onStart(.chat(profile: chosen[0].name, text: t, attachments: staged))
+            onStart(.chat(profile: chosen[0].name, text: t, attachments: staged, cwd: runtime.projects.project(id: projectID)?.startPath))
             dismiss()
             return
         }

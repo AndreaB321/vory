@@ -12,6 +12,7 @@ struct SettingsView: View {
     private var hermesRows: [Row] {
         [
             Row(id: "profile", title: "Profile", symbol: "person.crop.circle", color: .indigo, destination: AnyView(ProfileView())),
+            Row(id: "projects", title: "Projects", symbol: "folder.fill", color: .indigo, destination: AnyView(ProjectsView())),
             Row(id: "model", title: "Model", symbol: "cpu", color: .blue, destination: AnyView(ModelSettingsView())),
             Row(id: "config", title: "Config", symbol: "slider.horizontal.3", color: .gray, destination: AnyView(ConfigFormView())),
             Row(id: "env", title: "API Keys & Environment", symbol: "key.fill", color: .orange, destination: AnyView(EnvView())),

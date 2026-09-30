@@ -41,6 +41,9 @@ public final class GatewayRuntime {
     /// rather than discovered by surprise when the model picker opens.
     public var restartRequired: String?
 
+    /// The gateway's projects for the selected bot, and which chat is in which.
+    public let projects = ProjectsStore()
+
     public init(connection: GatewayConnection, store: ConnectionStore) {
         self.connection = connection
         self.store = store
@@ -110,6 +113,7 @@ public final class GatewayRuntime {
     // MARK: Lifecycle
 
     public func start() async {
+        projects.attach(self)
         await socket.connect()
         await loadProfiles()
         await refreshCapabilities()
@@ -181,6 +185,7 @@ public final class GatewayRuntime {
             if let cfg = try? await socket.call("config.get", params: profileParams(["key": "profile"])) {
                 profileHome = cfg["home"]?.stringValue
             }
+            await projects.refresh()
             await pushRegistrar?.syncRegistration(runtime: self)
             await probeCodeSkew()
         } catch {
@@ -220,9 +225,10 @@ public final class GatewayRuntime {
         return session
     }
 
-    public func newChat() async throws -> ChatSession {
+    /// `cwd`: a folder on the gateway the chat works in, so it belongs to that project.
+    public func newChat(cwd: String? = nil) async throws -> ChatSession {
         let session = ChatSession(runtime: self, storedID: nil, title: nil)
-        try await session.create()
+        try await session.create(cwd: cwd)
         registry.add(session)
         return session
     }
@@ -245,6 +251,9 @@ public final class GatewayRuntime {
         case "sessions.changed":
             NotificationCenter.default.post(name: .hermesSessionsChanged, object: nil)
             publishSnapshot(refreshSessions: true)
+            Task { await projects.refreshTree() }
+        case "projects.changed":
+            Task { await projects.refresh() }
         case "cron.changed":
             NotificationCenter.default.post(name: .hermesCronChanged, object: nil)
         default:

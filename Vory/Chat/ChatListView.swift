@@ -10,6 +10,8 @@ struct ChatRoute: Hashable {
     var initialText: String? = nil
     /// Files picked in the compose sheet; staged into the chat and sent with the first message.
     var initialAttachments: [AttachmentPreview] = []
+    /// A new chat's working folder on the gateway: the project it starts in.
+    var cwd: String? = nil
 }
 
 struct ChatListView: View {
@@ -44,11 +46,14 @@ struct ChatListView: View {
     @AppStorage("chats.filter.archived") private var showArchived = true
     @AppStorage("chats.sort") private var sortKey = "recent"
     @AppStorage("chats.filter.groups") private var groupsOnly = false
+    /// "" for every chat, a project id, or "__none__" for chats in no project.
+    @AppStorage("chats.filter.project") private var projectFilter = ""
+    @State private var showProjects = false
     /// Rooms have no archive on the gateway; archived ones are remembered here.
     @AppStorage("chats.archivedRooms") private var archivedRoomsRaw = ""
     @State private var pendingRoomDelete: Room?
     private var archivedRooms: Set<String> { Set(archivedRoomsRaw.split(separator: ",").map(String.init)) }
-    private var filtering: Bool { pinnedOnly || needsYouOnly || liveOnly || groupsOnly || !showArchived || sortKey != "recent" }
+    private var filtering: Bool { pinnedOnly || needsYouOnly || liveOnly || groupsOnly || !showArchived || sortKey != "recent" || !projectFilter.isEmpty }
     /// The profile menu's icons are rendered images; UIKit keeps the built menu, so it is given a
     /// new identity whenever a bot's colour or look changes.
     @AppStorage(BotColors.storageKey) private var botColorsRaw = ""
@@ -90,11 +95,12 @@ struct ChatListView: View {
                 showNewChat = true
             }
             .sheet(isPresented: $showNewBot) { if let runtime { NewBotSheet(runtime: runtime) } }
+            .sheet(isPresented: $showProjects) { NavigationStack { ProjectsView().toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { showProjects = false } } } } }
             .sheet(isPresented: $showNewChat) {
                 if let runtime {
-                    NewChatSheet(runtime: runtime) { start in
+                    NewChatSheet(runtime: runtime, initialProjectID: projectFilter.isEmpty || projectFilter == "__none__" ? runtime.projects.activeID : projectFilter) { start in
                         switch start {
-                        case .chat(let profile, let text, let attachments): path.append(ChatRoute(storedID: nil, title: nil, profile: profile, initialText: text, initialAttachments: attachments))
+                        case .chat(let profile, let text, let attachments, let cwd): path.append(ChatRoute(storedID: nil, title: nil, profile: profile, initialText: text, initialAttachments: attachments, cwd: cwd))
                         case .group(let room, let text): rooms.insert(room, at: 0); path.append(RoomRoute(room: room, initialText: text))
                         }
                     }
@@ -175,6 +181,16 @@ struct ChatListView: View {
                 Toggle(isOn: $showArchived) { Label("Archived", systemImage: "archivebox") }
                 Toggle(isOn: $groupsOnly) { Label("Group chats", systemImage: "person.3") }
             }
+            if let runtime, runtime.projects.available == true {
+                Section("Project") {
+                    Picker("Project", selection: $projectFilter) {
+                        Label("All projects", systemImage: "folder").tag("")
+                        ForEach(runtime.projects.open) { p in Label(p.name, systemImage: "folder.fill").tag(p.id) }
+                        Label("No project", systemImage: "folder.badge.questionmark").tag("__none__")
+                    }
+                    Button { showProjects = true } label: { Label("Manage projects…", systemImage: "folder.badge.gearshape") }
+                }
+            }
             Picker("Sort by", selection: $sortKey) {
                 Label("Recent", systemImage: "clock").tag("recent")
                 Label("Title", systemImage: "textformat").tag("title")
@@ -182,7 +198,7 @@ struct ChatListView: View {
                 Label("Model", systemImage: "cpu").tag("model")
             }
             if filtering {
-                Button { pinnedOnly = false; needsYouOnly = false; liveOnly = false; groupsOnly = false; showArchived = true; sortKey = "recent" } label: { Label("Clear filters", systemImage: "xmark.circle") }
+                Button { pinnedOnly = false; needsYouOnly = false; liveOnly = false; groupsOnly = false; showArchived = true; sortKey = "recent"; projectFilter = "" } label: { Label("Clear filters", systemImage: "xmark.circle") }
             }
         } label: {
             Image(systemName: filtering ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
@@ -198,6 +214,10 @@ struct ChatListView: View {
         if needsYouOnly { out = out.filter { runtime.needsAttention.contains($0.id) } }
         if liveOnly { out = out.filter { runtime.chatForStored($0.id)?.isRunning ?? false } }
         if !showArchived { out = out.filter { $0.archived != true } }
+        if !projectFilter.isEmpty {
+            let m = runtime.projects.membership
+            out = out.filter { projectFilter == "__none__" ? m[$0.id] == nil : m[$0.id] == projectFilter }
+        }
         // Every order keeps pinned chats first; within each half the chosen key decides, and
         // equal keys fall back to most recent (the sort is not stable on its own).
         func recent(_ a: StoredSession, _ b: StoredSession) -> Bool { (a.lastActive ?? a.startedAt ?? 0) > (b.lastActive ?? b.startedAt ?? 0) }
@@ -252,6 +272,17 @@ struct ChatListView: View {
         ScrollViewReader { proxy in
         List {
             if let errorText { Text(errorText).foregroundStyle(.red).font(.footnote) }
+            // Which project the list is narrowed to, since the rows' own chips are hidden then.
+            if !projectFilter.isEmpty {
+                HStack(spacing: 8) {
+                    if let p = runtime.projects.project(id: projectFilter) { ProjectIcon(project: p, size: 22); Text(p.name).font(.subheadline.weight(.medium)) }
+                    else { Image(systemName: "folder.badge.questionmark").foregroundStyle(.secondary); Text("Chats in no project").font(.subheadline.weight(.medium)) }
+                    Spacer()
+                    Button("Show all") { withAnimation { projectFilter = "" } }.font(.subheadline).buttonStyle(.borderless)
+                }
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 2, leading: 20, bottom: 6, trailing: 16))
+            }
             // With the "Group chats" filter on, rooms sit among the chats by recency, as chats.
             let visibleRooms = groupsOnly
                 ? rooms.filter { (showArchived || !archivedRooms.contains($0.roomId)) && (searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(searchText)) }
@@ -302,6 +333,7 @@ struct ChatListView: View {
             if sessions.isEmpty { sessions = SessionCache.loadAny(connection: runtime.connection.id) }
         }
         loading = sessions.isEmpty; defer { loading = false }
+        Task { await runtime.projects.refresh() }
         do {
             var all: [StoredSession] = []
             if allBots {
@@ -410,6 +442,7 @@ struct ChatListView: View {
                 NavigationLink(value: ChatRoute(storedID: s.id, title: s.displayTitle, profile: allBots ? s.profile : nil)) {
                     SessionRow(session: s, needsYou: runtime.needsAttention.contains(s.id), live: runtime.chatForStored(s.id)?.isRunning ?? false, showBot: allBots,
                                thinking: runtime.chatForStored(s.id).map { $0.isRunning && ($0.statusLine ?? "Thinking…") == "Thinking…" } ?? false,
+                               project: projectFilter.isEmpty ? runtime.projects.project(forSession: s.id) : nil,
                                summary: summarizer.shown(summarizer.summary(for: s), title: s.displayTitle, preview: s.preview ?? ""))
                         .task(id: "\(s.id)-\(s.lastActive ?? 0)-\(aiSummaries)") { if aiSummaries { summarizer.refresh(s, runtime: runtime, profile: allBots ? s.profile : nil) } }
                 }
@@ -539,6 +572,7 @@ struct SessionRow: View {
     var live: Bool
     var showBot = false
     var thinking = false
+    var project: Project? = nil
     /// The on-device summary, when Vory Summaries is on and one is ready for this chat.
     var summary: ChatSummarizer.Summary? = nil
 
@@ -554,6 +588,7 @@ struct SessionRow: View {
                 }
                 Text(summary?.summary ?? session.preview ?? "").font(.subheadline).foregroundStyle(.secondary).lineLimit(ChatRowStyle.previewLines)
                 HStack(spacing: 8) {
+                    if let project { ProjectChip(project: project) }
                     if let m = session.model, !m.isEmpty { Text(m).font(.caption2).foregroundStyle(.tertiary).lineLimit(1) }
                     if let d = session.lastDate { Text(d, format: .relative(presentation: .named)).font(.caption2).foregroundStyle(.tertiary) }
                 }

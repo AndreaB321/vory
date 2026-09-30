@@ -144,8 +144,10 @@ public final class ChatSession: @MainActor Identifiable, ChatIdentity {
 
     // MARK: Lifecycle
 
-    public func create() async throws {
-        let r = try await runtime.rpc("session.create", ["cols": 80])
+    public func create(cwd: String? = nil) async throws {
+        var params: [String: JSONValue] = ["cols": 80]
+        if let cwd, !cwd.isEmpty { params["cwd"] = .string(cwd); params["cwd_explicit"] = .bool(true) }
+        let r = try await runtime.rpc("session.create", params)
         runtimeID = r["session_id"]?.stringValue ?? ""
         storedID = r["stored_session_id"]?.stringValue ?? runtimeID
         info = try? r["info"]?.decode(SessionLiveInfo.self)

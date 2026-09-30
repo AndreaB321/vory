@@ -333,6 +333,18 @@ class Session:
         self.open_frames: dict[str, dict] = {}         # their frames, replayed on resume
 
 
+PROJECTS: list[dict] = [
+    {"id": "p_1a2b3c4d", "slug": "acme", "name": "Acme", "description": None, "icon": "rocket", "color": "hsl(30 70% 50%)",
+     "board_slug": None, "primary_path": "/srv/app", "archived": False, "created_at": int(time.time()) - 86400,
+     "folders": [{"path": "/srv/app", "label": None, "is_primary": True, "added_at": int(time.time()) - 86400}]},
+    {"id": "p_5e6f7a8b", "slug": "homelab", "name": "Homelab", "description": None, "icon": None, "color": "hsl(210 70% 50%)",
+     "board_slug": None, "primary_path": "/home/hermes/homelab", "archived": False, "created_at": int(time.time()) - 3600,
+     "folders": [{"path": "/home/hermes/homelab", "label": None, "is_primary": True, "added_at": int(time.time()) - 3600}]},
+]
+PROJECT_META: dict = {"active_id": None}
+if len(STORED_SESSIONS) > 1:
+    STORED_SESSIONS[1]["cwd"] = "/home/hermes/homelab"
+
 LIVE: dict[str, Session] = {}   # by runtime id
 
 
@@ -551,6 +563,12 @@ class Gateway:
             sid, stored = uuid.uuid4().hex[:8], time.strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:6]
             s = Session(sid, stored, "New chat", profile)
             self.sessions[sid] = s
+            if p.get("cwd"):
+                # The real gateway writes the stored row on the first prompt; the mock files it now so
+                # the project grouping can be seen at once.
+                STORED_SESSIONS.insert(0, {"id": stored, "title": "New chat", "preview": "", "source": "ios", "model": MODEL,
+                                           "started_at": time.time(), "last_active": time.time(), "message_count": 0, "is_active": True,
+                                           "archived": False, "pinned": False, "profile": profile, "cwd": p["cwd"]})
             return ok({"session_id": sid, "stored_session_id": stored, "message_count": 0,
                        "messages": [], "info": session_info(s.title, False, profile)})
         if method in ("session.resume", "session.activate"):
@@ -603,6 +621,55 @@ class Gateway:
                 "context_max": CONTEXT_MAX, "context_percent": int(used / CONTEXT_MAX * 100),
                 "context_used": used, "estimated_total": used, "context_estimated": False,
                 "context_source": "models.dev", "model": MODEL, "context_files": []})
+        if method == "projects.list":
+            return ok({"projects": PROJECTS, "active_id": PROJECT_META["active_id"]})
+        if method == "projects.tree":
+            nodes = [{"id": "__no_project__", "label": "Home", "isAuto": False, "isNoProject": True, "sessionCount": 0, "sessionIds": []}]
+            for pr in PROJECTS:
+                if pr["archived"]:
+                    continue
+                paths = [f["path"] for f in pr["folders"]]
+                ids = [s["id"] for s in STORED_SESSIONS if any((s.get("cwd") or "").startswith(pth) for pth in paths)]
+                nodes.append({"id": pr["id"], "label": pr["name"], "path": pr["primary_path"], "color": pr["color"], "isAuto": False,
+                              "isNoProject": False, "sessionCount": len(ids), "sessionIds": ids})
+            placed = {i for n in nodes[1:] for i in n["sessionIds"]}
+            nodes[0]["sessionIds"] = [s["id"] for s in STORED_SESSIONS if s["id"] not in placed]
+            return ok({"projects": nodes, "active_id": PROJECT_META["active_id"], "scoped_session_ids": []})
+        if method == "projects.create":
+            name = (p.get("name") or "").strip(); folders = p.get("folders") or []
+            if not name or not folders:
+                return err(5063, "name and at least one folder are required")
+            if any(f["path"] == folders[0] for pr in PROJECTS for f in pr["folders"]):
+                return err(5063, f"{folders[0]} already belongs to a project")
+            pr = {"id": "p_" + uuid.uuid4().hex[:8], "slug": name.lower().replace(" ", "-"), "name": name, "description": p.get("description"),
+                  "icon": p.get("icon"), "color": p.get("color"), "board_slug": None, "primary_path": folders[0], "archived": False,
+                  "created_at": int(time.time()),
+                  "folders": [{"path": f, "label": None, "is_primary": i == 0, "added_at": int(time.time())} for i, f in enumerate(folders)]}
+            PROJECTS.append(pr)
+            if p.get("use"):
+                PROJECT_META["active_id"] = pr["id"]
+            return ok({"project": pr})
+        if method in ("projects.update", "projects.archive", "projects.delete", "projects.set_active", "projects.get"):
+            pr = next((x for x in PROJECTS if x["id"] == p.get("id") or x["slug"] == p.get("id")), None)
+            if method == "projects.set_active":
+                PROJECT_META["active_id"] = pr["id"] if pr else None
+                return ok({"active_id": PROJECT_META["active_id"]})
+            if pr is None:
+                return err(5062, "no such project")
+            if method == "projects.get":
+                return ok({"project": pr})
+            if method == "projects.update":
+                for k in ("name", "description", "icon", "color", "board_slug"):
+                    if k in p:
+                        pr[k] = p[k] or None
+                return ok({"project": pr})
+            if method == "projects.archive":
+                pr["archived"] = not p.get("restore", False)
+            else:
+                PROJECTS.remove(pr)
+                if PROJECT_META["active_id"] == pr["id"]:
+                    PROJECT_META["active_id"] = None
+            return ok({"projects": PROJECTS, "active_id": PROJECT_META["active_id"]})
         if method == "session.list":
             return ok({"sessions": [{"id": r["id"], "title": r["title"], "preview": r["preview"],
                                      "started_at": r["started_at"], "message_count": r["message_count"],

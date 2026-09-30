@@ -111,7 +111,7 @@ struct ConversationView: View {
             if let p = route.profile, !p.isEmpty, runtime.selectedProfile != p { runtime.selectedProfile = p }
             // Stored chats return at once with the cached transcript and sync behind the header.
             if let sid = route.storedID { chat = try await runtime.openChat(storedID: sid, title: route.title) }
-            else { chat = try await runtime.newChat() }
+            else { chat = try await runtime.newChat(cwd: route.cwd) }
             if let chat, composerText.isEmpty, let draft = ComposerDrafts.load(for: chat) { composerText = draft }
             // The first message from the compose sheet goes out as soon as the chat exists.
             if let chat, !sentInitial, let t = route.initialText, !t.isEmpty || !route.initialAttachments.isEmpty {
