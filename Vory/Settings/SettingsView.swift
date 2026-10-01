@@ -515,6 +515,8 @@ struct AppearanceView: View {
     @AppStorage(ChatStyle.currentStepOnly) private var currentStepOnly = false
     @AppStorage(ChatStyle.wideReplies) private var wideReplies = false
     @AppStorage(ChatStyle.textSize) private var textSize = "default"
+    @AppStorage("user.name") private var userName = ""
+    @AppStorage("launchTab") private var launchTab = "chats"
     @Environment(\.editMode) private var editMode
 
     private var layout: TabLayout { TabLayout.parse(layoutRaw) }
@@ -523,6 +525,16 @@ struct AppearanceView: View {
     var body: some View {
         List {
             SettingsHeaderSection(title: "Appearance", symbol: "circle.lefthalf.filled", color: .black, description: "Theme, tabs, the chat header and what the transcript shows.")
+
+            Section {
+                TextField("Your name", text: $userName).textContentType(.givenName)
+            } header: { Text("You") } footer: { Text("Home greets you by name. Stays on this phone.") }
+            Section {
+                Toggle("Open Vory on Home", isOn: Binding(get: { launchTab == "dashboard" }, set: { on in
+                    launchTab = on ? "dashboard" : "chats"
+                    if on { var l = TabLayout.parse(layoutRaw); l.set(.dashboard, enabled: true); layoutRaw = l.visible().map(\.rawValue).joined(separator: ",") }
+                }))
+            } header: { Text("Home") } footer: { Text("Home is the dashboard: a greeting, the month in numbers, your bots, the chats to pick back up, and what changed since your last visit. On puts it on the tab bar and opens the app there.") }
             Section {
                 Picker("Chat header shows", selection: $headerShowsTitle) {
                     Text("Bot name").tag(false)

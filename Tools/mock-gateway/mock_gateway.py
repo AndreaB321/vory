@@ -246,6 +246,26 @@ def rest(path: str, query: dict) -> tuple[int, object] | None:
         return 200, {"config": CONFIG}
     if base == "/api/config/schema":
         return 200, CONFIG_SCHEMA
+    if base == "/api/analytics/usage":
+        days = int(query.get("days") or 30)
+        import datetime, random
+        rnd = random.Random(7)
+        daily = []
+        for i in range(days - 1, -1, -1):
+            d = datetime.date.today() - datetime.timedelta(days=i)
+            if d.weekday() == 6 and rnd.random() < 0.7:
+                continue
+            n = rnd.randint(1, 6)
+            daily.append({"day": d.isoformat(), "input_tokens": n * rnd.randint(9000, 40000), "output_tokens": n * rnd.randint(1500, 6000),
+                          "cache_read_tokens": n * rnd.randint(40000, 120000), "reasoning_tokens": 0, "estimated_cost": round(n * 0.31, 2),
+                          "actual_cost": 0, "sessions": n, "api_calls": n * rnd.randint(4, 15)})
+        tot = lambda k: sum(x[k] for x in daily)
+        return 200, {"daily": daily, "period_days": days,
+                     "by_model": [{"model": MODEL, "input_tokens": tot("input_tokens"), "output_tokens": tot("output_tokens"), "estimated_cost": tot("estimated_cost"), "sessions": tot("sessions"), "api_calls": tot("api_calls")},
+                                  {"model": "openai/gpt-5.5", "input_tokens": 120000, "output_tokens": 9000, "estimated_cost": 1.2, "sessions": 3, "api_calls": 20}],
+                     "totals": {"total_input": tot("input_tokens"), "total_output": tot("output_tokens"), "total_cache_read": tot("cache_read_tokens"), "total_reasoning": 0,
+                                "total_estimated_cost": tot("estimated_cost"), "total_actual_cost": 0, "total_sessions": tot("sessions"), "total_api_calls": tot("api_calls")},
+                     "skills": {}, "tools": {}}
     if base == "/api/env":
         return 200, ENV_VARS
     if base == "/api/tools/toolsets":

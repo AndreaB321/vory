@@ -53,11 +53,12 @@ final class AppModel {
     }
 
     enum AppTab: String, Hashable, CaseIterable, Sendable {
-        case chats, bots, files, sessions, cron, approvals, system, projects, status, settings
+        case chats, dashboard, bots, files, sessions, cron, approvals, system, projects, status, settings
 
         var title: String {
             switch self {
             case .chats: return "Chats"
+            case .dashboard: return "Home"
             case .bots: return "Bots"
             case .files: return "Files"
             case .sessions: return "Sessions"
@@ -73,6 +74,7 @@ final class AppModel {
         var symbol: String {
             switch self {
             case .chats: return "bubble.left.and.bubble.right"
+            case .dashboard: return "house.fill"
             case .bots: return "person.2.wave.2"
             case .files: return "folder"
             case .sessions: return "list.bullet.rectangle"

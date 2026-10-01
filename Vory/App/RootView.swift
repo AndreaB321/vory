@@ -13,6 +13,8 @@ struct RootView: View {
     }()
     /// Shown once, right after the first gateway is saved: install the Companion now or later.
     @AppStorage("companionPromptShown") private var companionPromptShown = false
+    @AppStorage("launchTab") private var launchTab = "chats"
+    @AppStorage(TabLayout.storageKey) private var rootLayoutRaw = ""
     @AppStorage("notificationsSetupCardDone") private var setupCardDone = false
     @State private var showCompanionPrompt = false
     @State private var showInstaller = false
@@ -31,6 +33,8 @@ struct RootView: View {
         }
         .animation(.default, value: model.lock.isLocked)
         .onAppear {
+            // Home as the first screen, when asked for in Appearance and still on the bar.
+            if launchTab == "dashboard", TabLayout.parse(rootLayoutRaw).visible().contains(.dashboard) { model.selectedTab = .dashboard }
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-vory-show-companion-prompt") { showCompanionPrompt = true }
             if ProcessInfo.processInfo.arguments.contains("-vory-show-setup") { showInstaller = true }
@@ -170,6 +174,7 @@ struct MainTabView: View {
         case .cron: NavigationStack { CronView().navigationTitle("Scheduled Tasks").tabRoot(.cron) }
         case .approvals: NavigationStack { ApprovalsView().navigationTitle("Approvals").tabRoot(.approvals) }
         case .system: NavigationStack { SystemView().navigationTitle("System").tabRoot(.system) }
+        case .dashboard: NavigationStack { DashboardView().tabRoot(.dashboard) }
         case .projects: NavigationStack { ProjectsView().tabRoot(.projects) }
         case .status: NavigationStack { StatusView().tabRoot(.status) }
         }

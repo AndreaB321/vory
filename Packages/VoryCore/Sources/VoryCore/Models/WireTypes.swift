@@ -825,3 +825,41 @@ public extension Usage {
         return contextPercent ?? Int(Double(contextUsed ?? total ?? 0) / Double(max) * 100)
     }
 }
+
+
+/// `GET /api/analytics/usage?days=N`: the gateway's own usage numbers for one bot.
+public struct UsageAnalytics: Codable, Sendable {
+    public struct Day: Codable, Sendable, Hashable {
+        public var day: String
+        public var inputTokens: Int?
+        public var outputTokens: Int?
+        public var cacheReadTokens: Int?
+        public var reasoningTokens: Int?
+        public var estimatedCost: Double?
+        public var actualCost: Double?
+        public var sessions: Int?
+        public var apiCalls: Int?
+    }
+    public struct Model: Codable, Sendable, Hashable {
+        public var model: String?
+        public var inputTokens: Int?
+        public var outputTokens: Int?
+        public var estimatedCost: Double?
+        public var sessions: Int?
+        public var apiCalls: Int?
+    }
+    public struct Totals: Codable, Sendable, Hashable {
+        public var totalInput: Int?
+        public var totalOutput: Int?
+        public var totalCacheRead: Int?
+        public var totalReasoning: Int?
+        public var totalEstimatedCost: Double?
+        public var totalActualCost: Double?
+        public var totalSessions: Int?
+        public var totalApiCalls: Int?
+    }
+    public var daily: [Day]?
+    public var byModel: [Model]?
+    public var totals: Totals?
+    public var periodDays: Int?
+}

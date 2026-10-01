@@ -1,0 +1,389 @@
+import FoundationModels
+import SwiftUI
+import VoryCore
+
+/// Home: a greeting, the month in numbers and blocks, which bots are busy, the chats to pick
+/// back up, and what changed since the last visit (summed up on the phone by the on-device
+/// model when there is one). The numbers come from the gateway's analytics endpoint; the
+/// sessions from its chat list.
+struct DashboardView: View {
+    @Environment(AppModel.self) private var model
+    @AppStorage("user.name") private var userName = ""
+    @AppStorage("dashboard.range") private var rangeDays = 30
+    @AppStorage("dashboard.lastVisit") private var lastVisit: Double = 0
+    @AppStorage("dashboard.greeting") private var cachedGreeting = ""
+    @AppStorage("dashboard.greetingKey") private var cachedGreetingKey = ""
+    @AppStorage(ChatSummarizer.titlesKey) private var aiOn = ChatSummarizer.titlesOn
+    @State private var usage: UsageAnalytics?
+    @State private var sessions: [StoredSession] = []
+    @State private var error: String?
+    @State private var loading = false
+    @State private var sinceSummary: String?
+    @State private var summarizing = false
+    @State private var visitStart: Double = 0
+
+    private var runtime: GatewayRuntime? { model.runtime }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                header
+                if let runtime, !runtime.needsAttention.isEmpty { needsYou(runtime) }
+                overviewCard
+                botsCard
+                pickUpCard
+                sinceCard
+                if let error { Text(error).font(.footnote).foregroundStyle(.red).padding(.horizontal, 4) }
+            }
+            .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 24)
+        }
+        .navigationTitle("").navigationBarTitleDisplayMode(.inline)
+        .refreshable { await load() }
+        .task(id: "\(runtime?.connection.id.uuidString ?? "")|\(runtime?.selectedProfile ?? "")|\(rangeDays)") { await load() }
+        .onAppear { visitStart = Date().timeIntervalSince1970 }
+        .onDisappear { lastVisit = max(lastVisit, visitStart) }
+        .navigationDestination(for: ChatRoute.self) { route in ConversationView(route: route) }
+    }
+
+    // MARK: Greeting
+
+    private var dayPart: String {
+        let h = Calendar.current.component(.hour, from: Date())
+        switch h {
+        case 5..<12: return "morning"
+        case 12..<17: return "afternoon"
+        case 17..<22: return "evening"
+        default: return "night"
+        }
+    }
+
+    private var plainGreeting: String {
+        let who = userName.trimmingCharacters(in: .whitespaces)
+        let name = who.isEmpty ? "" : ", \(who)"
+        switch dayPart {
+        case "morning": return "Good morning\(name)"
+        case "afternoon": return "Good afternoon\(name)"
+        case "evening": return "Good evening\(name)"
+        default: return who.isEmpty ? "Still up?" : "Still up, \(who)?"
+        }
+    }
+
+    private var greeting: String {
+        let key = "\(dayPart)|\(userName)|\(Calendar.current.component(.day, from: Date()))"
+        return cachedGreetingKey == key && !cachedGreeting.isEmpty ? cachedGreeting : plainGreeting
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                BotFaceView(spec: AboutView.voryBot, size: 34, active: true)
+                Text(greeting).font(.title.weight(.bold)).lineLimit(2).minimumScaleFactor(0.8)
+            }
+            Text(Date(), format: .dateTime.weekday(.wide).month(.wide).day()).font(.subheadline).foregroundStyle(.secondary)
+        }
+        .padding(.top, 4)
+        .task(id: "\(dayPart)|\(userName)") { await freshenGreeting() }
+    }
+
+    /// A one-line greeting from the on-device model, once per part of the day; the plain one otherwise.
+    private func freshenGreeting() async {
+        let key = "\(dayPart)|\(userName)|\(Calendar.current.component(.day, from: Date()))"
+        guard cachedGreetingKey != key, aiOn, ChatSummarizer.isAvailable else { return }
+        let who = userName.trimmingCharacters(in: .whitespaces)
+        do {
+            let ai = LanguageModelSession(instructions: "You write one short, warm greeting for the home screen of an app. At most eight words. No emoji, no exclamation marks, no quotes. Use the person's name if given.")
+            let line = try await ai.respond(to: "It is \(dayPart). \(who.isEmpty ? "No name is known." : "The person's name is \(who).") Write the greeting.").content
+                .trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "\"'."))
+            if (3...60).contains(line.count), !line.contains("\n") { cachedGreeting = line; cachedGreetingKey = key }
+        } catch {}
+    }
+
+    // MARK: Needs you
+
+    private func needsYou(_ rt: GatewayRuntime) -> some View {
+        let n = rt.needsAttention.count
+        return Button { model.selectedTab = .chats } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.bubble.fill").foregroundStyle(.red)
+                Text(n == 1 ? "One chat needs you" : "\(n) chats need you").font(.subheadline.weight(.semibold))
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption.weight(.bold)).foregroundStyle(.secondary)
+            }
+            .padding(14)
+            .background(Color.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: Overview
+
+    private var periodSessions: [StoredSession] {
+        let cutoff = Date().timeIntervalSince1970 - Double(rangeDays) * 86400
+        return sessions.filter { ($0.startedAt ?? $0.lastActive ?? 0) >= cutoff }
+    }
+
+    private var overviewCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Overview").font(.headline)
+                Spacer()
+                Picker("Range", selection: $rangeDays) {
+                    Text("7d").tag(7); Text("30d").tag(30); Text("90d").tag(90)
+                }
+                .pickerStyle(.segmented).frame(width: 150)
+            }
+            let t = usage?.totals
+            let tokens = (t?.totalInput ?? 0) + (t?.totalOutput ?? 0) + (t?.totalCacheRead ?? 0)
+            let messages = periodSessions.reduce(0) { $0 + ($1.messageCount ?? 0) }
+            let activeDays = Set((usage?.daily ?? []).filter { ($0.sessions ?? 0) > 0 }.map(\.day)).count
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                tile("Sessions", t.map { Format.count($0.totalSessions ?? 0) } ?? Format.count(periodSessions.count))
+                tile("Messages", Format.count(messages))
+                tile("Tokens", tokens > 0 ? Format.tokens(tokens) : "–")
+                tile("Active days", "\(activeDays > 0 ? activeDays : Set(periodSessions.compactMap { $0.startedAt.map { Calendar.current.startOfDay(for: Date(timeIntervalSince1970: $0)) } }).count)")
+                tile("Peak hour", peakHour ?? "–")
+                tile("Top model", favoriteModel ?? "–")
+            }
+            ActivityGrid(daily: usage?.daily ?? [], sessions: sessions, weeks: 13)
+            if let cost = t?.totalEstimatedCost, cost > 0.005 {
+                Text("About \(cost, format: .currency(code: "USD").precision(.fractionLength(2))) estimated for the period, as the gateway counts it.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if usage == nil, !loading {
+                Text("Token counts need a gateway with the analytics API; sessions and messages come from the chat list.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(16)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private func tile(_ title: String, _ value: String) -> some View {
+        // A number sits on one line; a name (the model) may take two, in a smaller face.
+        let isText = value.rangeOfCharacter(from: .letters) != nil && value.count > 6
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Text(value).font(isText ? .subheadline.weight(.semibold) : .title3.weight(.semibold).monospacedDigit())
+                .lineLimit(isText ? 2 : 1).minimumScaleFactor(0.6).fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(minHeight: 58, alignment: .top)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var peakHour: String? {
+        let hours = periodSessions.compactMap { $0.startedAt.map { Calendar.current.component(.hour, from: Date(timeIntervalSince1970: $0)) } }
+        guard !hours.isEmpty else { return nil }
+        let counts = Dictionary(grouping: hours) { $0 }.mapValues(\.count)
+        guard let best = counts.max(by: { $0.value < $1.value })?.key else { return nil }
+        var c = DateComponents(); c.hour = best
+        return Calendar.current.date(from: c).map { $0.formatted(.dateTime.hour()) }
+    }
+
+    private var favoriteModel: String? {
+        if let m = usage?.byModel?.max(by: { ($0.inputTokens ?? 0) + ($0.outputTokens ?? 0) < ($1.inputTokens ?? 0) + ($1.outputTokens ?? 0) })?.model, !m.isEmpty {
+            return m.split(separator: "/").last.map(String.init)
+        }
+        let models = periodSessions.compactMap(\.model).filter { !$0.isEmpty }
+        guard !models.isEmpty else { return nil }
+        let counts = Dictionary(grouping: models) { $0 }.mapValues(\.count)
+        return counts.max(by: { $0.value < $1.value })?.key.split(separator: "/").last.map(String.init)
+    }
+
+    // MARK: Bots
+
+    private var botsCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Bots").font(.headline)
+            if let rt = runtime, !rt.profiles.isEmpty {
+                ForEach(rt.profiles) { p in
+                    let chats = rt.chats.filter { $0.profileName == p.name }
+                    let working = chats.first { $0.isRunning }
+                    let waiting = chats.contains { $0.needsAttention }
+                    Button {
+                        rt.selectedProfile = p.name
+                        model.selectedTab = .chats
+                    } label: {
+                        HStack(spacing: 12) {
+                            BotAvatar(profile: p.name, size: 36, active: working != nil)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(p.label).font(.body.weight(.medium))
+                                Text(waiting ? "Needs you" : (working.map { $0.statusLine ?? "Working…" } ?? "Idle"))
+                                    .font(.caption).foregroundStyle(waiting ? .red : (working != nil ? .blue : .secondary)).lineLimit(1)
+                            }
+                            Spacer()
+                            Circle().fill(waiting ? Color.red : (working != nil ? Color.blue : Color.secondary.opacity(0.4))).frame(width: 8, height: 8)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            } else {
+                Text("Connect a gateway to see your bots.").font(.subheadline).foregroundStyle(.secondary)
+            }
+        }
+        .padding(16)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    // MARK: Pick up
+
+    private var recent: [StoredSession] {
+        Array(sessions.filter { $0.archived != true }.sorted { ($0.lastActive ?? 0) > ($1.lastActive ?? 0) }.prefix(5))
+    }
+
+    private var pickUpCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Pick up where you left off").font(.headline)
+            if recent.isEmpty {
+                Text(loading ? "Loading…" : "No chats yet. Start one from the Chats tab.").font(.subheadline).foregroundStyle(.secondary)
+            }
+            ForEach(recent) { s in
+                NavigationLink(value: ChatRoute(storedID: s.id, title: s.displayTitle, profile: s.profile)) {
+                    HStack(spacing: 10) {
+                        BotAvatar(profile: s.profile ?? runtime?.selectedProfile ?? "default", size: 28)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(s.displayTitle).font(.subheadline.weight(.medium)).lineLimit(1)
+                            Text(s.preview ?? "").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer()
+                        if let d = s.lastDate { Text(d, format: .relative(presentation: .named)).font(.caption2).foregroundStyle(.tertiary) }
+                        Image(systemName: "chevron.right").font(.caption2.weight(.bold)).foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(16)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    // MARK: Since you were here
+
+    private var changedSinceVisit: [StoredSession] {
+        guard lastVisit > 0 else { return [] }
+        return sessions.filter { ($0.lastActive ?? 0) > lastVisit }.sorted { ($0.lastActive ?? 0) > ($1.lastActive ?? 0) }
+    }
+
+    private var sinceCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Since you were here").font(.headline)
+                Spacer()
+                if summarizing { ProgressView().controlSize(.small) }
+                else { Button { Task { await summarizeSince(force: true) } } label: { Image(systemName: "arrow.clockwise") }.buttonStyle(.plain).foregroundStyle(.secondary) }
+            }
+            if lastVisit == 0 {
+                Text("First visit. From now on this sums up what your bots did while you were away.").font(.subheadline).foregroundStyle(.secondary)
+            } else if let sinceSummary {
+                Text(sinceSummary).font(.subheadline)
+                Text("Summed up on this iPhone.").font(.caption2).foregroundStyle(.tertiary)
+            } else if changedSinceVisit.isEmpty, !loading {
+                Text("Nothing new since \(Date(timeIntervalSince1970: lastVisit), format: .relative(presentation: .named)).").font(.subheadline).foregroundStyle(.secondary)
+            } else {
+                ForEach(changedSinceVisit.prefix(5)) { s in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Circle().fill(.secondary).frame(width: 5, height: 5).padding(.top, 6)
+                        Text("\(s.displayTitle): \(s.preview ?? "updated")").font(.subheadline).lineLimit(2)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .task(id: changedSinceVisit.map(\.id).joined()) { await summarizeSince(force: false) }
+    }
+
+    private func summarizeSince(force: Bool) async {
+        let changed = changedSinceVisit
+        guard !changed.isEmpty, aiOn, ChatSummarizer.isAvailable, !summarizing else { if changed.isEmpty { sinceSummary = nil }; return }
+        if !force, sinceSummary != nil { return }
+        summarizing = true; defer { summarizing = false }
+        let lines = changed.prefix(8).map { "- \($0.displayTitle) (\($0.profile ?? "bot")): \(($0.preview ?? "").prefix(200))" }
+        let running = runtime?.chats.filter { $0.isRunning }.map { "- \($0.title) is still working: \($0.statusLine ?? "thinking")" } ?? []
+        do {
+            let ai = LanguageModelSession(instructions: "You sum up, for the owner of some AI assistants, what the assistants did while the owner was away. Two or three short sentences, plain words, no bullet points, no greeting. Name the chats. Do not say it is a summary.")
+            let text = try await ai.respond(to: "Chats that changed since the last visit:\n" + (lines + running).joined(separator: "\n")).content.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty { sinceSummary = text }
+        } catch {}
+    }
+
+    // MARK: Data
+
+    private func load() async {
+        guard let rt = runtime else { return }
+        loading = true; defer { loading = false }
+        async let u: UsageAnalytics? = try? rt.api.get("/api/analytics/usage", query: [URLQueryItem(name: "days", value: String(rangeDays))], profile: rt.selectedProfile)
+        async let s: SessionListResponse? = try? rt.api.get("/api/sessions", query: [URLQueryItem(name: "order", value: "recent"), URLQueryItem(name: "limit", value: "200")], profile: rt.selectedProfile)
+        let (usageResult, list) = await (u, s)
+        usage = usageResult
+        if let list { sessions = list.sessions; error = nil }
+        else if sessions.isEmpty { error = "Could not load the chat list." }
+    }
+}
+
+/// The last `weeks` weeks as blocks, one column per week, one row per weekday, darker for busier
+/// days (sessions started that day). Like the usage blocks in a coding terminal.
+struct ActivityGrid: View {
+    var daily: [UsageAnalytics.Day]
+    var sessions: [StoredSession]
+    var weeks: Int
+
+    private var counts: [Date: Int] {
+        let cal = Calendar.current
+        var out: [Date: Int] = [:]
+        if !daily.isEmpty {
+            let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = .current
+            for d in daily { if let date = f.date(from: d.day) { out[cal.startOfDay(for: date), default: 0] += d.sessions ?? 0 } }
+        } else {
+            for s in sessions { if let t = s.startedAt { out[cal.startOfDay(for: Date(timeIntervalSince1970: t)), default: 0] += 1 } }
+        }
+        return out
+    }
+
+    var body: some View {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let weekday = cal.component(.weekday, from: today)   // 1 = Sunday
+        let daysBack = weeks * 7 - (7 - weekday)             // the grid ends on today's column
+        let start = cal.date(byAdding: .day, value: -(daysBack - 1), to: today)!
+        let counts = counts
+        let peak = max(1, counts.values.max() ?? 1)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 3) {
+                ForEach(0..<weeks, id: \.self) { w in
+                    VStack(spacing: 3) {
+                        ForEach(0..<7, id: \.self) { d in
+                            let day = cal.date(byAdding: .day, value: w * 7 + d, to: start)!
+                            let n = counts[day] ?? 0
+                            let future = day > today
+                            RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                                .fill(future ? Color.clear : (n == 0 ? Color.primary.opacity(0.07) : Color.accentColor.opacity(0.25 + 0.75 * min(1, Double(n) / Double(peak)))))
+                                .aspectRatio(1, contentMode: .fit)
+                                .accessibilityLabel(future ? "" : "\(day.formatted(date: .abbreviated, time: .omitted)): \(n) sessions")
+                        }
+                    }
+                }
+            }
+            HStack {
+                Text(start, format: .dateTime.month(.abbreviated).day()).font(.caption2).foregroundStyle(.tertiary)
+                Spacer()
+                Text("Today").font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.top, 4)
+    }
+}
+
+enum Format {
+    static func count(_ n: Int) -> String { n.formatted(.number) }
+    static func tokens(_ n: Int) -> String {
+        switch n {
+        case ..<1000: return "\(n)"
+        case ..<1_000_000: return String(format: "%.1fk", Double(n) / 1000)
+        case ..<1_000_000_000: return String(format: "%.1fM", Double(n) / 1_000_000)
+        default: return String(format: "%.2fB", Double(n) / 1_000_000_000)
+        }
+    }
+}
