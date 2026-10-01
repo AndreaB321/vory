@@ -445,6 +445,17 @@ class Gateway:
             "result_text": "2.1G\t/var/log/nginx\n1.4G\t/var/log/postgres\n0.7G\t/var/log/app\n"
                            "12M\t/var/log/syslog\n4.0M\t/var/log/auth.log\n"})
 
+        # A todo list, as the todo tool files one: the app draws it as a checklist.
+        todo_id = f"t-{uuid.uuid4().hex[:8]}"
+        todos = {"todos": [{"id": "1", "content": "Measure /var/log and find the big rotated files", "status": "completed"},
+                           {"id": "2", "content": "Propose the cleanup command and wait for approval", "status": "in_progress"},
+                           {"id": "3", "content": "Run the cleanup and confirm the space is back", "status": "pending"},
+                           {"id": "4", "content": "Add a logrotate rule so it does not grow again", "status": "pending"},
+                           {"id": "5", "content": "Write the summary", "status": "pending"}]}
+        await self.event("tool.start", s.sid, {"tool_id": todo_id, "name": "todo_list", "context": "5 items", "args": todos})
+        await asyncio.sleep(0.3)
+        await self.event("tool.complete", s.sid, {"tool_id": todo_id, "name": "todo_list", "duration_s": 0.0, "summary": "1 of 5 done", "result_text": ""})
+
         await self.stream_words(s, REPLY_PART_2)
         await self.event("session.usage", s.sid, {"usage": usage(s.output_tokens)})
         await asyncio.sleep(0.3)
@@ -688,8 +699,16 @@ class Gateway:
             return ok({"pairs": [["new", "Start a new chat"], ["model", "Switch the model"],
                                  ["approve", "Approve the waiting command"], ["compress", "Compress the context"],
                                  ["status", "Show session status"], ["usage", "Show token usage"],
-                                 ["agents", "Show the delegation tree"], ["rollback", "Restore a checkpoint"]],
-                       "categories": [], "canon": {}, "commands": {}, "skills": {}, "skill_count": 3, "warning": ""})
+                                 ["agents", "Show the delegation tree"], ["rollback", "Restore a checkpoint"], ["cron", "Scheduled jobs"], ["academic-paper-acquisition", "Find and fetch papers"]],
+                       "categories": [], "canon": {}, "commands": {"/cron": {"argument_mode": "text", "desktop": "terminal"}, "/usage": {"argument_mode": "text", "desktop": None}}, "skills": {"/academic-paper-acquisition": {"usage": 2}}, "skill_count": 3, "warning": ""})
+        if method == "slash.exec":
+            cmd = (p.get("command") or "").lstrip("/")
+            name = cmd.split(" ", 1)[0]
+            if name == "usage":
+                return ok({"output": "Session Token Usage\n  input   12,480\n  output   3,112\n  cache    9,004\n  context  21.3k / 200k (10.6%)"})
+            if name in ("my-skill", "academic-paper-acquisition"):
+                return err(4018, f"skill command: use command.dispatch for /{name}")
+            return ok({"output": f"(mock) /{cmd} ran on the gateway", "warning": "" if name != "personality" else "mirrored onto the live session"})
         if method == "command.dispatch":
             return ok({"type": "exec", "output": f"(mock) ran /{p.get('name', '')}"})
         if method == "prompt.submit":
