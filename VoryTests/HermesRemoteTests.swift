@@ -338,8 +338,16 @@ private final class StubChat: ChatIdentity {
         l.set(.system, enabled: true)
         #expect(l.tabs.last == .settings)
         #expect(l.tabs.contains(.system))
-        #expect(l.visible(hasBotMode: true) == [.chats, .files, .system, .settings])
+        #expect(l.visible(hasBotMode: true) == [.dashboard, .chats, .system, .settings])
         #expect(TabLayout.parse(l.encoded) == l)
+    }
+
+    @Test func chatsAndSettingsCanMoveButNotGo() {
+        // Any order is kept, Chats included; only the two required tabs are forced back in.
+        let moved = TabLayout.parse("bots,settings,chats,dashboard")
+        #expect(moved.tabs == [.bots, .settings, .chats, .dashboard])
+        let missing = TabLayout.parse("bots,files")
+        #expect(missing.contains(.chats) && missing.contains(.settings))
     }
 
     @Test func tabBarCapsAtFour() {
@@ -353,7 +361,7 @@ private final class StubChat: ChatIdentity {
     }
 
     @Test func botsAlwaysVisible() {
-        #expect(TabLayout.default.visible(hasBotMode: false) == [.chats, .bots, .files, .settings])
+        #expect(TabLayout.default.visible(hasBotMode: false) == [.dashboard, .chats, .bots, .settings])
     }
 
     @Test func storedFiveTabLayoutIsTrimmedToFour() {
