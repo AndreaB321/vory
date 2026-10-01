@@ -532,7 +532,7 @@ struct AppearanceView: View {
             Section {
                 Toggle("Open Vory on Home", isOn: Binding(get: { launchTab == "dashboard" }, set: { on in
                     launchTab = on ? "dashboard" : "chats"
-                    if on { var l = TabLayout.parse(layoutRaw); l.set(.dashboard, enabled: true); layoutRaw = l.visible().map(\.rawValue).joined(separator: ",") }
+                    if on { var l = TabLayout.parse(layoutRaw); l.set(.dashboard, enabled: true); layoutRaw = l.encoded }
                 }))
             } header: { Text("Home") } footer: { Text("Home is the dashboard: a greeting, the month in numbers, your bots, the chats to pick back up, and what changed since your last visit. On puts it on the tab bar and opens the app there.") }
             Section {
@@ -553,11 +553,9 @@ struct AppearanceView: View {
             }
             Section {
                 ForEach(layout.tabs, id: \.self) { tab in
-                    HStack {
-                        Label(tab.title, systemImage: tab.symbol)
-                        if TabLayout.required.contains(tab) { Spacer(); Image(systemName: "lock.fill").font(.caption2).foregroundStyle(.tertiary) }
-                    }
-                    .deleteDisabled(TabLayout.required.contains(tab))
+                    // Chats and Settings stay: no delete control, and no lock badge either.
+                    Label(tab.title, systemImage: tab.symbol)
+                        .deleteDisabled(TabLayout.required.contains(tab))
                 }
                 .onMove { from, to in var l = layout; l.move(fromOffsets: from, toOffset: to); layoutRaw = l.encoded }
                 .onDelete { offsets in
