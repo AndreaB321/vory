@@ -144,6 +144,11 @@ final class AppModel {
     /// complication; `vory://chats` just lands on the list.
     func open(_ url: URL) {
         guard url.scheme == "vory" else { return }
+        if url.host == "home" {
+            // From the Overview widget: Home when it is on the bar, else Chats.
+            selectedTab = TabLayout.parse(UserDefaults.standard.string(forKey: TabLayout.storageKey)).visible().contains(.dashboard) ? .dashboard : .chats
+            return
+        }
         selectedTab = .chats
         if url.host == "chat", let id = url.pathComponents.dropFirst().first {
             let profile = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "profile" }?.value

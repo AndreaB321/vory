@@ -10,6 +10,7 @@ struct HermesLiveActivityBundle: WidgetBundle {
         AttentionWidget()
         ActivityWidget()
         ContextWidget()
+        OverviewWidget()
     }
 }
 

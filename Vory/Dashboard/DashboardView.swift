@@ -1,6 +1,7 @@
 import FoundationModels
 import SwiftUI
 import VoryCore
+import WidgetKit
 
 /// Home: a greeting, the month in numbers and blocks, which bots are busy, the chats to pick
 /// back up, and what changed since the last visit (summed up on the phone by the on-device
@@ -320,6 +321,12 @@ struct DashboardView: View {
         usage = usageResult
         if let list { sessions = list.sessions; error = nil }
         else if sessions.isEmpty { error = "Could not load the chat list." }
+        // The Overview widget and complications draw from the shared snapshot.
+        if let usageResult, var snap = WidgetSnapshot.load() {
+            snap.usage = WidgetSnapshot.Usage.make(analytics: usageResult, sessions: list?.sessions, previous: snap.usage)
+            snap.save()
+            WidgetCenter.shared.reloadTimelines(ofKind: "vory.overview")
+        }
     }
 }
 

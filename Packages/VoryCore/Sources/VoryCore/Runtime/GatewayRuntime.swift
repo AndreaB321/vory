@@ -305,8 +305,10 @@ public final class GatewayRuntime {
                                     running: chatForStored(s.id)?.isRunning ?? false, needsYou: needsAttention.contains(s.id))
             }
             let ctx = registry.all.first { $0.isRunning }?.usage?.computedContextPercent ?? registry.all.last?.usage?.computedContextPercent
+            // The overview numbers are written by Home or the widget; a rewrite here keeps them.
+            let kept = WidgetSnapshot.load()?.usage
             let snap = WidgetSnapshot(gatewayName: connection.name, connectionID: connection.id.uuidString, profile: selectedProfile ?? "default",
-                                      needsAttention: needsAttention.count, chats: chats, contextPercent: ctx, connected: socketState.isOpen)
+                                      needsAttention: needsAttention.count, chats: chats, contextPercent: ctx, connected: socketState.isOpen, usage: kept)
             snap.save()
             onSnapshotPublished?(snap)
         }
