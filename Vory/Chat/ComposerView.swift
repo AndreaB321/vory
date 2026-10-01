@@ -54,9 +54,17 @@ struct ComposerView: View {
     }
 
     /// Every command the gateway lists, narrowed by what follows the "/" (a bare "/" shows all).
+    /// The word being typed, when it starts with "/": the first word, or a later one (a skill
+    /// that takes another command as its argument, say). Nil otherwise.
+    private var slashWord: Substring? {
+        guard text.hasPrefix("/") else { return nil }
+        let last = text.split(separator: " ", omittingEmptySubsequences: false).last ?? ""
+        return last.hasPrefix("/") ? last : nil
+    }
+
     private var slashSuggestions: [(name: String, description: String)] {
-        guard text.hasPrefix("/"), !text.contains(" "), let catalog else { return [] }
-        let q = text.dropFirst().lowercased()
+        guard let word = slashWord, let catalog else { return [] }
+        let q = word.dropFirst().lowercased()
         // Some gateways list the names with their slash already.
         return catalog.allPairs
             .map { (name: $0.name.hasPrefix("/") ? String($0.name.dropFirst()) : $0.name, description: $0.description) }
@@ -74,7 +82,13 @@ struct ComposerView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(slashSuggestions, id: \.name) { s in
-                            Button { text = "/" + s.name + " " } label: {
+                            Button {
+                                // Replace the word being typed, not the whole line.
+                                var words = text.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+                                if words.isEmpty { words = [""] }
+                                words[words.count - 1] = "/" + s.name
+                                text = words.joined(separator: " ") + " "
+                            } label: {
                                 HStack(spacing: 10) {
                                     Text("/" + s.name).font(.subheadline.monospaced().weight(.medium)).lineLimit(1)
                                     Text(s.description).font(.caption).foregroundStyle(.secondary).lineLimit(1)

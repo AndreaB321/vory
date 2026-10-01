@@ -774,9 +774,16 @@ public struct GroupsCapabilities: Codable, Sendable { public var driver: Bool?; 
 
 public struct CommandCategory: Codable, Hashable, Sendable { public var name: String; public var pairs: [[String]]? }
 public struct CommandsCatalog: Codable, Hashable, Sendable {
+    /// Per command ("/name"): how it takes arguments and whether a non-terminal client may run
+    /// it (`desktop` nil = yes, "hidden" = yes but not listed, anything else = the reason not).
+    public struct Meta: Codable, Hashable, Sendable {
+        public var argumentMode: String?
+        public var desktop: String?
+    }
     public var pairs: [[String]]?
     public var categories: [CommandCategory]?
     public var canon: [String: String]?
+    public var commands: [String: Meta]?
     public var warning: String?
     public var allPairs: [(name: String, description: String)] {
         var out: [(String, String)] = []

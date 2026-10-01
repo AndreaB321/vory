@@ -435,15 +435,30 @@ public final class ChatSession: @MainActor Identifiable, ChatIdentity {
 
     // MARK: Slash commands
 
+    /// The last catalog fetched for this chat (the composer asks for it); tells which commands a
+    /// phone may run.
+    public private(set) var catalogCache: CommandsCatalog?
+
     public func commandsCatalog() async -> CommandsCatalog? {
-        try? (await runtime.rpc("commands.catalog", ["session_id": .string(runtimeID)])).decode()
+        let c: CommandsCatalog? = try? (await runtime.rpc("commands.catalog", ["session_id": .string(runtimeID)])).decode()
+        if let c { catalogCache = c }
+        return c
     }
 
+    private func systemLine(_ text: String, symbol: String = "terminal") {
+        items.append(TranscriptItem(id: UUID().uuidString, kind: .system(text: text, symbol: symbol)))
+    }
+
+    /// Slash commands, the way the terminal and the desktop run them: a few are the app's own
+    /// (approve, stop, title, model…), the rest go to `slash.exec`, the gateway's general
+    /// runner for built-ins, plugins and quick commands. `command.dispatch` only knows quick,
+    /// plugin, bundle and skill commands, so it is the fallback the gateway asks for (skills)
+    /// and the whole path on a gateway too old to have `slash.exec`.
     private func dispatchSlash(_ text: String, depth: Int = 0) async -> String? {
-        let body = text.dropFirst()
+        let body = String(text.dropFirst())
         let parts = body.split(separator: " ", maxSplits: 1)
-        let name = parts.first.map(String.init) ?? ""
-        let arg = parts.count > 1 ? String(parts[1]) : nil
+        let name = parts.first.map { String($0).lowercased() } ?? ""
+        let arg = parts.count > 1 ? String(parts[1]).trimmingCharacters(in: .whitespaces) : nil
         switch name {
         case "approve":
             if let card = cards.first(where: { $0.method == "approval" }) { await respond(card: card, result: ["choice": "once"]) }
@@ -454,12 +469,80 @@ public final class ChatSession: @MainActor Identifiable, ChatIdentity {
             return nil
         case "stop":
             await stop(); return nil
+        case "title", "rename":
+            if let arg, !arg.isEmpty { await rename(arg); systemLine("Renamed to \(arg)", symbol: "pencil"); return nil }
+        case "model":
+            if let arg, !arg.isEmpty {
+                do { try await setModel(provider: nil, model: arg); systemLine("Model set to \(arg)", symbol: "cpu") }
+                catch { items.append(TranscriptItem(id: UUID().uuidString, kind: .error(text: "/model: \(error.localizedDescription)"))) }
+                return nil
+            }
+        case "reasoning", "effort":
+            if let arg, !arg.isEmpty {
+                do { try await setReasoning(arg); systemLine("Reasoning set to \(arg)", symbol: "brain") }
+                catch { items.append(TranscriptItem(id: UUID().uuidString, kind: .error(text: "/\(name): \(error.localizedDescription)"))) }
+                return nil
+            }
+        case "new", "reset", "clear":
+            banner = "Start a new chat from the Chats tab; this one stays as it is."
+            return nil
+        case "help", "commands":
+            var cat = catalogCache
+            if cat == nil { cat = await commandsCatalog() }
+            if let c = cat {
+                let lines = (c.categories ?? []).map { cat in "\(cat.name ?? "Commands")\n" + (cat.pairs ?? []).map { "  " + $0.joined(separator: "  ") }.joined(separator: "\n") }
+                systemLine(lines.isEmpty ? c.allPairs.map { "/\($0.name)  \($0.description)" }.joined(separator: "\n") : lines.joined(separator: "\n\n"), symbol: "questionmark.circle")
+            }
+            return nil
         default: break
         }
+        // Commands the gateway marks as terminal-only (or Settings-only) are said so, not run.
+        if let meta = catalogCache?.commands?["/" + name], let why = meta.desktop, why != "hidden" {
+            let reason: String
+            switch why {
+            case "terminal": reason = "it needs the terminal"
+            case "settings": reason = "use Settings instead"
+            case "composer-voice": reason = "use the mic button instead"
+            case "messaging": reason = "it belongs to the messaging setup"
+            default: reason = "it is not available in the app"
+            }
+            systemLine("/\(name): \(reason).", symbol: "info.circle")
+            return nil
+        }
+        do {
+            let r = try await runtime.rpc("slash.exec", ["session_id": .string(runtimeID), "command": .string(body)], timeout: 120)
+            if r["type"]?.stringValue != nil, let d = try? r.decode(CommandDispatchResult.self) {
+                return await apply(d, name: name, arg: arg, depth: depth)
+            }
+            var out = r["output"]?.stringValue ?? ""
+            if let w = r["warning"]?.stringValue, !w.isEmpty { out = out.isEmpty ? w : w + "\n\n" + out }
+            systemLine(out.isEmpty ? "/\(name) done" : out)
+            return nil
+        } catch let e as RPCError where e.code == 4018 && (e.message.hasPrefix("skill command: use command.dispatch") || e.message.contains("use command.dispatch for /snapshot restore")) {
+            return await dispatchViaCommand(name: name, arg: arg, depth: depth)
+        } catch let e as RPCError where e.code == RPCError.methodNotFound {
+            return await dispatchViaCommand(name: name, arg: arg, depth: depth)
+        } catch {
+            items.append(TranscriptItem(id: UUID().uuidString, kind: .error(text: "/\(name): \(error.localizedDescription)")))
+            return nil
+        }
+    }
+
+    private func dispatchViaCommand(name: String, arg: String?, depth: Int) async -> String? {
         do {
             var params: [String: JSONValue] = ["name": .string(name), "session_id": .string(runtimeID)]
             if let arg { params["arg"] = .string(arg) }
             let r: CommandDispatchResult = try await runtime.rpc("command.dispatch", params).decode()
+            return await apply(r, name: name, arg: arg, depth: depth)
+        } catch {
+            items.append(TranscriptItem(id: UUID().uuidString, kind: .error(text: "/\(name): \(error.localizedDescription)")))
+        }
+        return nil
+    }
+
+    /// A typed dispatch result (from either runner) applied to the chat.
+    private func apply(_ r: CommandDispatchResult, name: String, arg: String?, depth: Int) async -> String? {
+        do {
             switch r.type {
             case "exec", "plugin":
                 items.append(TranscriptItem(id: UUID().uuidString, kind: .system(text: r.display ?? r.output ?? r.notice ?? "/\(name) done", symbol: "terminal")))
@@ -479,8 +562,6 @@ public final class ChatSession: @MainActor Identifiable, ChatIdentity {
                 if let n = r.notice ?? r.display { items.append(TranscriptItem(id: UUID().uuidString, kind: .system(text: n, symbol: "info.circle"))) }
             }
             if let notice = r.notice, r.type != "exec" { banner = notice }
-        } catch {
-            items.append(TranscriptItem(id: UUID().uuidString, kind: .error(text: "/\(name): \(error.localizedDescription)")))
         }
         return nil
     }

@@ -873,6 +873,8 @@ struct ToolCardView: View {
     /// Set while the card opens: its frame changes are reported so the thread can reveal it.
     @State private var revealing = false
     private var expanded: Bool { open.wrappedValue }
+    /// The todo tool's items, when this card is one: drawn as a checklist, not as JSON.
+    private var todos: [TodoItem]? { TodoItem.parse(name: activity.name, argsText: activity.argsText) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 4 : 6) {
@@ -887,15 +889,18 @@ struct ToolCardView: View {
                 if let d = activity.durationSeconds { Text(String(format: "%.1fs", d)).font(.caption2).foregroundStyle(.secondary) }
                 Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption).foregroundStyle(.secondary)
             }
-            if let c = activity.context, !c.isEmpty, !expanded, !compact {
+            if let todos {
+                TodoChecklist(items: todos, all: expanded || compact == false && todos.count <= 4)
+            }
+            if todos == nil, let c = activity.context, !c.isEmpty, !expanded, !compact {
                 Text(c).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
-            if let s = activity.summary, !s.isEmpty, !expanded, !compact {
+            if todos == nil, let s = activity.summary, !s.isEmpty, !expanded, !compact {
                 Text(s).font(.caption).lineLimit(2)
             }
             if expanded {
-                if compact, let s = activity.summary, !s.isEmpty { Text(s).font(.caption).lineLimit(3) }
-                if let a = activity.argsText, !a.isEmpty {
+                if compact, todos == nil, let s = activity.summary, !s.isEmpty { Text(s).font(.caption).lineLimit(3) }
+                if todos == nil, let a = activity.argsText, !a.isEmpty {
                     Text(activity.name == "terminal" || activity.name == "bash" ? "Command" : "Arguments").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
                     CodeBlock(text: a, lineCap: 40)
                 }
@@ -999,5 +1004,62 @@ struct CopyButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(copied ? "Copied" : "Copy code")
+    }
+}
+
+
+/// One line of the todo tool's list.
+struct TodoItem: Identifiable, Hashable {
+    var id: String
+    var content: String
+    var status: String
+
+    /// The tool's arguments as items, for the todo tool only ({"todos": [{content, id, status}]}).
+    static func parse(name: String, argsText: String?) -> [TodoItem]? {
+        guard name.lowercased().hasPrefix("todo"), let a = argsText, let data = a.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let list = obj["todos"] as? [[String: Any]], !list.isEmpty else { return nil }
+        return list.enumerated().map { i, t in
+            TodoItem(id: (t["id"] as? String) ?? String(describing: t["id"] ?? i), content: (t["content"] as? String) ?? (t["title"] as? String) ?? "",
+                     status: ((t["status"] as? String) ?? "pending").lowercased())
+        }
+    }
+}
+
+/// The todo tool as a checklist: done, in progress, pending. Collapsed, the first four and a count.
+struct TodoChecklist: View {
+    var items: [TodoItem]
+    var all: Bool
+
+    private func symbol(_ s: String) -> (String, Color) {
+        switch s {
+        case "completed", "done": return ("checkmark.circle.fill", .green)
+        case "in_progress", "in-progress", "active", "doing": return ("arrow.right.circle.fill", .blue)
+        case "cancelled", "canceled", "skipped": return ("xmark.circle", .secondary)
+        default: return ("circle", .secondary)
+        }
+    }
+
+    var body: some View {
+        let shown = all ? items : Array(items.prefix(4))
+        let done = items.filter { ["completed", "done"].contains($0.status) }.count
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(shown) { t in
+                let (sym, color) = symbol(t.status)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: sym).foregroundStyle(color).font(.caption)
+                    Text(t.content).font(.caption)
+                        .strikethrough(["completed", "done"].contains(t.status), color: .secondary)
+                        .foregroundStyle(["completed", "done"].contains(t.status) ? .secondary : .primary)
+                        .lineLimit(all ? nil : 2)
+                }
+            }
+            if items.count > shown.count || !all {
+                Text("\(done) of \(items.count) done" + (items.count > shown.count ? ", \(items.count - shown.count) more" : ""))
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Todo list, \(done) of \(items.count) done")
     }
 }
