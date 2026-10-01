@@ -190,6 +190,9 @@ def rest(path: str, query: dict) -> tuple[int, object] | None:
     if base == "/api/profiles/active":
         return 200, {"active": "default", "current": "default"}
     if base == "/api/sessions":
+        # The real gateway refuses a page over 100 (FastAPI le=100 → 422), as a tester's Home found out.
+        if int(query.get("limit") or 20) > 100:
+            return 422, {"detail": [{"loc": ["query", "limit"], "msg": "Input should be less than or equal to 100", "type": "less_than_equal"}]}
         return 200, {"sessions": STORED_SESSIONS, "total": len(STORED_SESSIONS), "limit": 100, "offset": 0}
     if base == "/api/sessions/search":
         q = (query.get("q") or "").lower()

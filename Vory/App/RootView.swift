@@ -32,9 +32,17 @@ struct RootView: View {
             }
         }
         .animation(.default, value: model.lock.isLocked)
+        // The bar steps aside for the keyboard (a name field in Settings had it floating on top).
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in model.keyboardUp = true }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in model.keyboardUp = false }
         .onAppear {
-            // Home as the first screen, when asked for in Appearance and still on the bar.
-            if launchTab == "dashboard", TabLayout.parse(rootLayoutRaw).visible().contains(.dashboard) { model.selectedTab = .dashboard }
+            // Once per phone: the bar becomes Home, Chats, Bots, Settings. It can be changed after.
+            if !UserDefaults.standard.bool(forKey: TabLayout.homeFirstAppliedKey) {
+                rootLayoutRaw = TabLayout.default.encoded
+                UserDefaults.standard.set(true, forKey: TabLayout.homeFirstAppliedKey)
+            }
+            // The chosen first screen (Settings › Home), when it is still on the bar.
+            if let tab = AppModel.AppTab(rawValue: launchTab), TabLayout.parse(rootLayoutRaw).visible().contains(tab) { model.selectedTab = tab }
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-vory-show-companion-prompt") { showCompanionPrompt = true }
             if ProcessInfo.processInfo.arguments.contains("-vory-show-setup") { showInstaller = true }

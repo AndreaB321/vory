@@ -33,6 +33,7 @@ struct SettingsView: View {
             Row(id: "security", title: "Security", symbol: "faceid", color: .green, destination: AnyView(SecurityView())),
             Row(id: "bots", title: "Bots", symbol: "cloud.fill", color: .indigo, destination: AnyView(BotsSettingsView())),
             Row(id: "appearance", title: "Appearance", symbol: "circle.lefthalf.filled", color: .black, destination: AnyView(AppearanceView())),
+            Row(id: "home", title: "Home", symbol: "house.fill", color: .blue, destination: AnyView(HomeSettingsView())),
             Row(id: "summaries", title: "Vory Summaries", symbol: "sparkles", color: .purple, destination: AnyView(SummariesSettingsView())),
             Row(id: "companion", title: "Companion", symbol: "puzzlepiece.fill", color: .blue, destination: AnyView(CompanionView())),
             Row(id: "troubleshooting", title: "Troubleshooting", symbol: "wrench.and.screwdriver", color: .orange, destination: AnyView(TroubleshootingView())),
@@ -515,8 +516,6 @@ struct AppearanceView: View {
     @AppStorage(ChatStyle.currentStepOnly) private var currentStepOnly = false
     @AppStorage(ChatStyle.wideReplies) private var wideReplies = false
     @AppStorage(ChatStyle.textSize) private var textSize = "default"
-    @AppStorage("user.name") private var userName = ""
-    @AppStorage("launchTab") private var launchTab = "chats"
     @Environment(\.editMode) private var editMode
 
     private var layout: TabLayout { TabLayout.parse(layoutRaw) }
@@ -526,15 +525,6 @@ struct AppearanceView: View {
         List {
             SettingsHeaderSection(title: "Appearance", symbol: "circle.lefthalf.filled", color: .black, description: "Theme, tabs, the chat header and what the transcript shows.")
 
-            Section {
-                TextField("Your name", text: $userName).textContentType(.givenName)
-            } header: { Text("You") } footer: { Text("Home greets you by name. Stays on this phone.") }
-            Section {
-                Toggle("Open Vory on Home", isOn: Binding(get: { launchTab == "dashboard" }, set: { on in
-                    launchTab = on ? "dashboard" : "chats"
-                    if on { var l = TabLayout.parse(layoutRaw); l.set(.dashboard, enabled: true); layoutRaw = l.encoded }
-                }))
-            } header: { Text("Home") } footer: { Text("Home is the dashboard: a greeting, the month in numbers, your bots, the chats to pick back up, and what changed since your last visit. On puts it on the tab bar and opens the app there.") }
             Section {
                 Picker("Chat header shows", selection: $headerShowsTitle) {
                     Text("Bot name").tag(false)
@@ -567,7 +557,7 @@ struct AppearanceView: View {
                 HStack { Text("Tab bar · \(layout.tabs.count) of \(TabLayout.maxTabs)"); Spacer(); EditButton().font(.caption) }
             } footer: {
                 Text(editMode?.wrappedValue.isEditing == true
-                     ? "Drag to reorder, swipe or − to remove. Chats and Settings stay."
+                     ? "Drag to reorder, swipe or − to remove. Chats and Settings can move but not go."
                      : "Tap Edit to reorder or add tabs. Four fit on the bar; New Chat floats beside it.")
             }
             // Hidden tabs only appear while editing, like the Messages/Music tab editors.

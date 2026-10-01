@@ -5,8 +5,8 @@ import WidgetKit
 
 /// Home: a greeting, the month in numbers and blocks, which bots are busy, the chats to pick
 /// back up, and what changed since the last visit (summed up on the phone by the on-device
-/// model when there is one). The numbers come from the gateway's analytics endpoint; the
-/// sessions from its chat list.
+/// model when there is one). The cards, their order and their size come from `HomeLayout`;
+/// the numbers from the gateway's analytics endpoint; the sessions from its chat list.
 struct DashboardView: View {
     @Environment(AppModel.self) private var model
     @AppStorage("user.name") private var userName = ""
@@ -15,6 +15,7 @@ struct DashboardView: View {
     @AppStorage("dashboard.greeting") private var cachedGreeting = ""
     @AppStorage("dashboard.greetingKey") private var cachedGreetingKey = ""
     @AppStorage(ChatSummarizer.titlesKey) private var aiOn = ChatSummarizer.titlesOn
+    @AppStorage(HomeLayout.storageKey) private var layoutRaw = ""
     @State private var usage: UsageAnalytics?
     @State private var sessions: [StoredSession] = []
     @State private var error: String?
@@ -24,19 +25,35 @@ struct DashboardView: View {
     @State private var visitStart: Double = 0
 
     private var runtime: GatewayRuntime? { model.runtime }
+    private var layout: HomeLayout { HomeLayout.parse(layoutRaw) }
+    private func update(_ change: (inout HomeLayout) -> Void) { var l = layout; change(&l); layoutRaw = l.encoded }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 header
                 if let runtime, !runtime.needsAttention.isEmpty { needsYou(runtime) }
-                overviewCard
-                botsCard
-                pickUpCard
-                sinceCard
+                ForEach(layout.items) { item in
+                    card(item)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contextMenu {
+                            Section("Size") {
+                                Button { update { $0.set(item.card, size: .compact) } } label: { Label(item.card.sizeWords.compact, systemImage: item.size == .compact ? "checkmark" : "rectangle.compress.vertical") }
+                                Button { update { $0.set(item.card, size: .full) } } label: { Label(item.card.sizeWords.full, systemImage: item.size == .full ? "checkmark" : "rectangle.expand.vertical") }
+                            }
+                            Button(role: .destructive) { withAnimation(.snappy) { update { $0.remove(item.card) } } } label: { Label("Hide from Home", systemImage: "eye.slash") }
+                        }
+                }
                 if let error { Text(error).font(.footnote).foregroundStyle(.red).padding(.horizontal, 4) }
+                NavigationLink { HomeSettingsView() } label: {
+                    Label("Edit Home", systemImage: "slider.horizontal.3").font(.subheadline.weight(.medium))
+                        .frame(maxWidth: .infinity).padding(.vertical, 10)
+                }
+                .buttonStyle(.bordered).tint(.secondary)
+                .padding(.top, 4)
             }
             .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 24)
+            .animation(.snappy, value: layoutRaw)
         }
         .navigationTitle("").navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
@@ -44,6 +61,21 @@ struct DashboardView: View {
         .onAppear { visitStart = Date().timeIntervalSince1970 }
         .onDisappear { lastVisit = max(lastVisit, visitStart) }
         .navigationDestination(for: ChatRoute.self) { route in ConversationView(route: route) }
+    }
+
+    @ViewBuilder private func card(_ item: HomeLayout.Item) -> some View {
+        switch item.card {
+        case .overview: overviewCard(full: item.size == .full)
+        case .bots: botsCard(full: item.size == .full)
+        case .pickUp: pickUpCard(full: item.size == .full)
+        case .since: sinceCard(full: item.size == .full)
+        }
+    }
+
+    private func cardBackground<V: View>(_ v: V) -> some View {
+        v.padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
     // MARK: Greeting
@@ -123,8 +155,8 @@ struct DashboardView: View {
         return sessions.filter { ($0.startedAt ?? $0.lastActive ?? 0) >= cutoff }
     }
 
-    private var overviewCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
+    private func overviewCard(full: Bool) -> some View {
+        cardBackground(VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Overview").font(.headline)
                 Spacer()
@@ -145,17 +177,17 @@ struct DashboardView: View {
                 tile("Peak hour", peakHour ?? "–")
                 tile("Top model", favoriteModel ?? "–")
             }
-            ActivityGrid(daily: usage?.daily ?? [], sessions: sessions, weeks: 13)
-            if let cost = t?.totalEstimatedCost, cost > 0.005 {
-                Text("About \(cost, format: .currency(code: "USD").precision(.fractionLength(2))) estimated for the period, as the gateway counts it.")
-                    .font(.caption).foregroundStyle(.secondary)
-            } else if usage == nil, !loading {
-                Text("Token counts need a gateway with the analytics API; sessions and messages come from the chat list.")
-                    .font(.caption).foregroundStyle(.secondary)
+            if full {
+                ActivityGrid(daily: usage?.daily ?? [], sessions: sessions, weeks: 13)
+                if let cost = t?.totalEstimatedCost, cost > 0.005 {
+                    Text("About \(cost, format: .currency(code: "USD").precision(.fractionLength(2))) estimated for the period, as the gateway counts it.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if usage == nil, !loading {
+                    Text("Token counts need a gateway with the analytics API; sessions and messages come from the chat list.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
-        }
-        .padding(16)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        })
     }
 
     private func tile(_ title: String, _ value: String) -> some View {
@@ -193,53 +225,76 @@ struct DashboardView: View {
 
     // MARK: Bots
 
-    private var botsCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private func botStatus(_ rt: GatewayRuntime, _ p: ProfileInfo) -> (working: ChatSession?, waiting: Bool) {
+        let chats = rt.chats.filter { $0.profileName == p.name }
+        return (chats.first { $0.isRunning }, chats.contains { $0.needsAttention })
+    }
+
+    private func botsCard(full: Bool) -> some View {
+        cardBackground(VStack(alignment: .leading, spacing: 10) {
             Text("Bots").font(.headline)
             if let rt = runtime, !rt.profiles.isEmpty {
-                ForEach(rt.profiles) { p in
-                    let chats = rt.chats.filter { $0.profileName == p.name }
-                    let working = chats.first { $0.isRunning }
-                    let waiting = chats.contains { $0.needsAttention }
-                    Button {
-                        rt.selectedProfile = p.name
-                        model.selectedTab = .chats
-                    } label: {
-                        HStack(spacing: 12) {
-                            BotAvatar(profile: p.name, size: 36, active: working != nil)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(p.label).font(.body.weight(.medium))
-                                Text(waiting ? "Needs you" : (working.map { $0.statusLine ?? "Working…" } ?? "Idle"))
-                                    .font(.caption).foregroundStyle(waiting ? .red : (working != nil ? .blue : .secondary)).lineLimit(1)
+                if full {
+                    ForEach(rt.profiles) { p in
+                        let (working, waiting) = botStatus(rt, p)
+                        Button { rt.selectedProfile = p.name; model.selectedTab = .chats } label: {
+                            HStack(spacing: 12) {
+                                BotAvatar(profile: p.name, size: 36, active: working != nil)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(p.label).font(.body.weight(.medium))
+                                    Text(waiting ? "Needs you" : (working.map { $0.statusLine ?? "Working…" } ?? "Idle"))
+                                        .font(.caption).foregroundStyle(waiting ? .red : (working != nil ? .blue : .secondary)).lineLimit(1)
+                                }
+                                Spacer()
+                                Circle().fill(waiting ? Color.red : (working != nil ? Color.blue : Color.secondary.opacity(0.4))).frame(width: 8, height: 8)
                             }
-                            Spacer()
-                            Circle().fill(waiting ? Color.red : (working != nil ? Color.blue : Color.secondary.opacity(0.4))).frame(width: 8, height: 8)
+                            .contentShape(Rectangle())
                         }
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 14) {
+                            ForEach(rt.profiles) { p in
+                                let (working, waiting) = botStatus(rt, p)
+                                Button { rt.selectedProfile = p.name; model.selectedTab = .chats } label: {
+                                    VStack(spacing: 4) {
+                                        ZStack(alignment: .topTrailing) {
+                                            BotAvatar(profile: p.name, size: 44, active: working != nil)
+                                            if waiting || working != nil {
+                                                Circle().fill(waiting ? Color.red : Color.blue).frame(width: 10, height: 10).offset(x: 2, y: -2)
+                                            }
+                                        }
+                                        Text(p.label).font(.caption2).lineLimit(1).frame(width: 60)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("\(p.label): \(waiting ? "needs you" : (working != nil ? "working" : "idle"))")
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
                 }
             } else {
                 Text("Connect a gateway to see your bots.").font(.subheadline).foregroundStyle(.secondary)
             }
-        }
-        .padding(16)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        })
     }
 
     // MARK: Pick up
 
-    private var recent: [StoredSession] {
-        Array(sessions.filter { $0.archived != true }.sorted { ($0.lastActive ?? 0) > ($1.lastActive ?? 0) }.prefix(5))
+    private func recent(_ n: Int) -> [StoredSession] {
+        Array(sessions.filter { $0.archived != true }.sorted { ($0.lastActive ?? 0) > ($1.lastActive ?? 0) }.prefix(n))
     }
 
-    private var pickUpCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private func pickUpCard(full: Bool) -> some View {
+        let list = recent(full ? 5 : 3)
+        return cardBackground(VStack(alignment: .leading, spacing: 10) {
             Text("Pick up where you left off").font(.headline)
-            if recent.isEmpty {
-                Text(loading ? "Loading…" : "No chats yet. Start one from the Chats tab.").font(.subheadline).foregroundStyle(.secondary)
+            if list.isEmpty {
+                Text(loading ? "Loading…" : (error == nil ? "No chats yet. Start one from the Chats tab." : "The chat list did not load. Pull down to try again.")).font(.subheadline).foregroundStyle(.secondary)
             }
-            ForEach(recent) { s in
+            ForEach(list) { s in
                 NavigationLink(value: ChatRoute(storedID: s.id, title: s.displayTitle, profile: s.profile)) {
                     HStack(spacing: 10) {
                         BotAvatar(profile: s.profile ?? runtime?.selectedProfile ?? "default", size: 28)
@@ -255,44 +310,40 @@ struct DashboardView: View {
                 }
                 .buttonStyle(.plain)
             }
-        }
-        .padding(16)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        })
     }
 
     // MARK: Since you were here
 
+    /// The last visit, or the last day when there is none yet: the card has something to say
+    /// from the first open.
+    private var sinceStamp: Double { lastVisit > 0 ? lastVisit : Date().timeIntervalSince1970 - 86400 }
     private var changedSinceVisit: [StoredSession] {
-        guard lastVisit > 0 else { return [] }
-        return sessions.filter { ($0.lastActive ?? 0) > lastVisit }.sorted { ($0.lastActive ?? 0) > ($1.lastActive ?? 0) }
+        sessions.filter { ($0.lastActive ?? 0) > sinceStamp }.sorted { ($0.lastActive ?? 0) > ($1.lastActive ?? 0) }
     }
 
-    private var sinceCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private func sinceCard(full: Bool) -> some View {
+        cardBackground(VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Since you were here").font(.headline)
+                Text(lastVisit > 0 ? "Since you were here" : "The last day").font(.headline)
                 Spacer()
                 if summarizing { ProgressView().controlSize(.small) }
                 else { Button { Task { await summarizeSince(force: true) } } label: { Image(systemName: "arrow.clockwise") }.buttonStyle(.plain).foregroundStyle(.secondary) }
             }
-            if lastVisit == 0 {
-                Text("First visit. From now on this sums up what your bots did while you were away.").font(.subheadline).foregroundStyle(.secondary)
-            } else if let sinceSummary {
-                Text(sinceSummary).font(.subheadline)
+            if let sinceSummary {
+                Text(sinceSummary).font(.subheadline).lineLimit(full ? nil : 3)
                 Text("Summed up on this iPhone.").font(.caption2).foregroundStyle(.tertiary)
             } else if changedSinceVisit.isEmpty, !loading {
-                Text("Nothing new since \(Date(timeIntervalSince1970: lastVisit), format: .relative(presentation: .named)).").font(.subheadline).foregroundStyle(.secondary)
+                Text(lastVisit > 0 ? "Nothing new since \(Date(timeIntervalSince1970: lastVisit), format: .relative(presentation: .named))." : "Nothing happened in the last day.").font(.subheadline).foregroundStyle(.secondary)
             } else {
-                ForEach(changedSinceVisit.prefix(5)) { s in
+                ForEach(changedSinceVisit.prefix(full ? 5 : 3)) { s in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Circle().fill(.secondary).frame(width: 5, height: 5).padding(.top, 6)
                         Text("\(s.displayTitle): \(s.preview ?? "updated")").font(.subheadline).lineLimit(2)
                     }
                 }
             }
-        }
-        .padding(16)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        })
         .task(id: changedSinceVisit.map(\.id).joined()) { await summarizeSince(force: false) }
     }
 
@@ -315,8 +366,9 @@ struct DashboardView: View {
     private func load() async {
         guard let rt = runtime else { return }
         loading = true; defer { loading = false }
+        // The gateway caps a page at 100 (a larger ask is refused outright).
         async let u: UsageAnalytics? = try? rt.api.get("/api/analytics/usage", query: [URLQueryItem(name: "days", value: String(rangeDays))], profile: rt.selectedProfile)
-        async let s: SessionListResponse? = try? rt.api.get("/api/sessions", query: [URLQueryItem(name: "order", value: "recent"), URLQueryItem(name: "limit", value: "200")], profile: rt.selectedProfile)
+        async let s: SessionListResponse? = try? rt.api.get("/api/sessions", query: [URLQueryItem(name: "order", value: "recent"), URLQueryItem(name: "limit", value: "100")], profile: rt.selectedProfile)
         let (usageResult, list) = await (u, s)
         usage = usageResult
         if let list { sessions = list.sessions; error = nil }

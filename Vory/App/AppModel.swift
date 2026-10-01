@@ -52,7 +52,8 @@ final class AppModel {
         companionInstalledVersion = probe.installedVersion
     }
 
-    enum AppTab: String, Hashable, CaseIterable, Sendable {
+    enum AppTab: String, Hashable, CaseIterable, Sendable, Identifiable {
+        var id: String { rawValue }
         case chats, dashboard, bots, files, sessions, cron, approvals, system, projects, status, settings
 
         var title: String {
@@ -105,7 +106,9 @@ final class AppModel {
     var popToRoot: [AppTab: Int] = [:]
     /// Bumped on every tap of the already-selected tab (root or not): lists scroll to the top.
     var tabReselected: [AppTab: Int] = [:]
-    var tabBarHidden: Bool { (selectedTab == .chats && chatsPathOpen) || (tabBarHiders[selectedTab] ?? 0) > 0 }
+    /// A keyboard is up somewhere: the bar hides rather than floating over it.
+    var keyboardUp = false
+    var tabBarHidden: Bool { (selectedTab == .chats && chatsPathOpen) || (tabBarHiders[selectedTab] ?? 0) > 0 || keyboardUp }
 
     init() {
         NotificationCenter.default.addObserver(forName: .hermesPushRegistrationNeedsSync, object: nil, queue: .main) { [weak self] _ in
