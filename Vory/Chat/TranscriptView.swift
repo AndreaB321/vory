@@ -951,6 +951,8 @@ struct MarkdownImageView: View {
     var link: String?
     @Environment(\.openURL) private var openURL
     @State private var loadRequested = false
+    /// Set when a requested load has been pending past `loadTimeout`.
+    @State private var timedOut = false
 
     var body: some View {
         // Only remote https images load: a reply must not make the app read local paths, and
@@ -968,9 +970,32 @@ struct MarkdownImageView: View {
                 .accessibilityHint("Loads the image from \(host)")
             }
         } else {
-            Text(alt.isEmpty ? url : alt).font(.footnote).foregroundStyle(.secondary)
+            placeholder
         }
     }
+
+    /// What a standalone image shows. Pure, so the decision can be unit-tested without a network.
+    enum Display: Equatable { case image, spinner, placeholder }
+
+    /// A finished load wins (even a late one); a failure or a stalled load (`timedOut`) shows the placeholder;
+    /// otherwise the spinner keeps turning.
+    static func display(success: Bool, failure: Bool, timedOut: Bool) -> Display {
+        if success { return .image }
+        if failure || timedOut { return .placeholder }
+        return .spinner
+    }
+
+    static func placeholderTitle(alt: String) -> String { alt.isEmpty ? "Image unavailable" : alt }
+
+    /// The one fallback for every image that cannot be shown: a blocked scheme, a failed load, a stalled load.
+    private var placeholder: some View {
+        Label(Self.placeholderTitle(alt: alt), systemImage: "photo")
+            .font(.footnote).foregroundStyle(.secondary)
+    }
+
+    /// AsyncImage has no timeout of its own: past this, a stalled load shows the placeholder, and an image that
+    /// still arrives later replaces it.
+    private static let loadTimeout: Duration = .seconds(15)
 
     @ViewBuilder private func loaded(_ u: URL) -> some View {
         let image = AsyncImage(url: u) { phase in
@@ -978,13 +1003,19 @@ struct MarkdownImageView: View {
             case .success(let img):
                 img.resizable().scaledToFit().clipShape(.rect(cornerRadius: 8))
             case .failure:
-                Label(alt.isEmpty ? "Image unavailable" : alt, systemImage: "photo")
-                    .font(.footnote).foregroundStyle(.secondary)
+                placeholder
             default:
-                ProgressView().frame(maxWidth: .infinity, minHeight: 60)
+                if Self.display(success: false, failure: false, timedOut: timedOut) == .placeholder {
+                    placeholder
+                } else {
+                    ProgressView().frame(maxWidth: .infinity, minHeight: 60)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .task {
+            do { try await Task.sleep(for: Self.loadTimeout); timedOut = true } catch {}
+        }
         .accessibilityLabel(alt.isEmpty ? "Image" : alt)
         if let link, let target = URL(string: link), ["http", "https"].contains(target.scheme?.lowercased() ?? "") {
             Button { openURL(target) } label: { image }.buttonStyle(.plain)
