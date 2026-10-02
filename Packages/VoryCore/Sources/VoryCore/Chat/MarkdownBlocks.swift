@@ -207,6 +207,8 @@ public enum MarkdownParser {
     static func stripFrontMatter(_ text: String) -> String {
         var body = text
         if body.hasPrefix("\u{FEFF}") { body.removeFirst() }
+        // Cheap exit for the common case: this runs on every streamed update.
+        guard body.hasPrefix("---") else { return text }
         let all = body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         guard all.count > 2, all[0].trimmingCharacters(in: .whitespaces) == "---",
               all[1].range(of: #"^[A-Za-z0-9_-]+\s*:"#, options: .regularExpression) != nil

@@ -942,36 +942,54 @@ struct MarkdownTableView: View {
     }
 }
 
-/// A standalone markdown image, loaded lazily and scaled to the bubble; optionally a link.
+/// A standalone markdown image. It is fetched only after the user taps it: a reply can embed an
+/// arbitrary URL, and auto-loading one would let injected content leak chat data through the
+/// query string (and reveal the device IP) without any interaction. Optionally a link.
 struct MarkdownImageView: View {
     var alt: String
     var url: String
     var link: String?
     @Environment(\.openURL) private var openURL
+    @State private var loadRequested = false
 
     var body: some View {
-        // Only remote http(s) images load: a reply must not make the app read local paths.
-        if let u = URL(string: url), let scheme = u.scheme?.lowercased(), scheme == "https" || scheme == "http" {
-            let image = AsyncImage(url: u) { phase in
-                switch phase {
-                case .success(let img):
-                    img.resizable().scaledToFit().clipShape(.rect(cornerRadius: 8))
-                case .failure:
-                    Label(alt.isEmpty ? "Image unavailable" : alt, systemImage: "photo")
-                        .font(.footnote).foregroundStyle(.secondary)
-                default:
-                    ProgressView().frame(maxWidth: .infinity, minHeight: 60)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityLabel(alt.isEmpty ? "Image" : alt)
-            if let link, let target = URL(string: link), ["http", "https"].contains(target.scheme?.lowercased() ?? "") {
-                Button { openURL(target) } label: { image }.buttonStyle(.plain)
+        // Only remote https images load: a reply must not make the app read local paths, and
+        // App Transport Security rejects cleartext http anyway.
+        if let u = URL(string: url), u.scheme?.lowercased() == "https", let host = u.host() {
+            if loadRequested {
+                loaded(u)
             } else {
-                image
+                Button { loadRequested = true } label: {
+                    Label(alt.isEmpty ? "Load image from \(host)" : "\(alt) (load from \(host))", systemImage: "photo")
+                        .font(.footnote)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityHint("Loads the image from \(host)")
             }
         } else {
             Text(alt.isEmpty ? url : alt).font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private func loaded(_ u: URL) -> some View {
+        let image = AsyncImage(url: u) { phase in
+            switch phase {
+            case .success(let img):
+                img.resizable().scaledToFit().clipShape(.rect(cornerRadius: 8))
+            case .failure:
+                Label(alt.isEmpty ? "Image unavailable" : alt, systemImage: "photo")
+                    .font(.footnote).foregroundStyle(.secondary)
+            default:
+                ProgressView().frame(maxWidth: .infinity, minHeight: 60)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityLabel(alt.isEmpty ? "Image" : alt)
+        if let link, let target = URL(string: link), ["http", "https"].contains(target.scheme?.lowercased() ?? "") {
+            Button { openURL(target) } label: { image }.buttonStyle(.plain)
+        } else {
+            image
         }
     }
 }
