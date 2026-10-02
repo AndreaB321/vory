@@ -115,7 +115,7 @@ public enum MarkdownParser {
             list.append(MarkdownListItem(depth: depth, marker: marker, text: body))
         }
 
-        let lines = stripFrontMatter(text).split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let lines = stripFrontMatter(text.replacingOccurrences(of: "\r\n", with: "\n")).split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var i = 0
         while i < lines.count {
             let line = lines[i]

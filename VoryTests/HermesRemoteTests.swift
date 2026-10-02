@@ -235,6 +235,13 @@ import Testing
         if case .paragraph = blocks[2] {} else { Issue.record("inline image stays in the paragraph") }
     }
 
+    @Test func windowsLineEndingsParseLikeUnix() {
+        let md = "---\r\ntitle: Hi\r\n---\r\n| a | b |\r\n|---|---|\r\n| 1 | 2 |\r\n"
+        let blocks = MarkdownParser.blocks(from: md)
+        #expect(blocks.count == 1)
+        if case .table(let t) = blocks[0] { #expect(t.header == ["a", "b"]); #expect(t.rows == [["1", "2"]]) } else { Issue.record("table") }
+    }
+
     @Test func frontMatterIsHiddenOnlyWhenClosedAndKeyed() {
         let blocks = MarkdownParser.blocks(from: "---\ntitle: Hi\ntags: [a]\n---\n# Body")
         #expect(blocks.count == 1)
