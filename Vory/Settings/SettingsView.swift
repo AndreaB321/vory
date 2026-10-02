@@ -99,6 +99,7 @@ struct SettingsView: View {
                 Section("Hermes") {
                     ForEach(filtered(hermesRows)) { row in
                         NavigationLink { row.destination.navigationTitle("").navigationBarTitleDisplayMode(.inline) } label: { SettingsLabel(row.title, row.symbol, row.color) }
+                            .accessibilityIdentifier("settings.row.\(row.id)")
                     }
                 }
                 .disabled(model.runtime == nil)
@@ -111,6 +112,7 @@ struct SettingsView: View {
                                 if row.id == "companion", model.companionUpdateAvailable { CountBadge(1) }
                             }
                         }
+                        .accessibilityIdentifier("settings.row.\(row.id)")
                     }
                 }
             }

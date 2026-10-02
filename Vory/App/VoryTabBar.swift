@@ -142,6 +142,7 @@ struct VoryTabBar: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(tab.title)
+        .accessibilityIdentifier("tab.\(tab.rawValue)")
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : [.isButton])
         .accessibilityAction { select(tab) }
     }
