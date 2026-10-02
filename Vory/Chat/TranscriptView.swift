@@ -843,6 +843,7 @@ struct MarkdownView: View, Equatable {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         listMarker(it)
                         Text(Self.inline(it.text))
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.leading, CGFloat(it.depth) * 18)
                 }
@@ -855,6 +856,7 @@ struct MarkdownView: View, Equatable {
             HStack(spacing: 10) {
                 RoundedRectangle(cornerRadius: 2).fill(.secondary).frame(width: 3)
                 Text(Self.inline(t)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         case .rule:
             Divider()
