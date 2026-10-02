@@ -169,10 +169,79 @@ import Testing
         let blocks = MarkdownParser.blocks(from: "# Title\n- a\n- b\n1. one\n2. two\n> quoted\n---")
         #expect(blocks.count == 5)
         if case .heading(let l, let t) = blocks[0] { #expect(l == 1); #expect(t == "Title") } else { Issue.record("heading") }
-        if case .bullets(let items) = blocks[1] { #expect(items == ["a", "b"]) } else { Issue.record("bullets") }
-        if case .numbered(let items) = blocks[2] { #expect(items == ["one", "two"]) } else { Issue.record("numbered") }
+        if case .list(let items) = blocks[1] { #expect(items.map(\.text) == ["a", "b"]); #expect(items.allSatisfy { $0.marker == .bullet }) } else { Issue.record("bullets") }
+        if case .list(let items) = blocks[2] { #expect(items.map(\.marker) == [.number(1), .number(2)]); #expect(items.map(\.text) == ["one", "two"]) } else { Issue.record("numbered") }
         if case .quote(let q) = blocks[3] { #expect(q == "quoted") } else { Issue.record("quote") }
         if case .rule = blocks[4] {} else { Issue.record("rule") }
+    }
+
+    @Test func nestedListsKeepDepthAndNumbering() {
+        let blocks = MarkdownParser.blocks(from: "- a\n  - b\n    - c\n- d\n\n1. x\n   1. y\n   2. z\n2. w")
+        #expect(blocks.count == 2)
+        if case .list(let items) = blocks[0] { #expect(items.map(\.depth) == [0, 1, 2, 0]); #expect(items.map(\.text) == ["a", "b", "c", "d"]) } else { Issue.record("nested bullets") }
+        if case .list(let items) = blocks[1] {
+            #expect(items.map(\.depth) == [0, 1, 1, 0])
+            #expect(items.map(\.marker) == [.number(1), .number(1), .number(2), .number(2)])
+        } else { Issue.record("nested numbered") }
+    }
+
+    @Test func taskListItems() {
+        let blocks = MarkdownParser.blocks(from: "- [ ] todo\n- [x] done\n- [X] DONE\n- plain")
+        guard case .list(let items) = blocks.first else { Issue.record("task list"); return }
+        #expect(items.map(\.marker) == [.task(checked: false), .task(checked: true), .task(checked: true), .bullet])
+        #expect(items.map(\.text) == ["todo", "done", "DONE", "plain"])
+    }
+
+    @Test func tableWithAlignmentsAndRaggedRows() {
+        let md = "Before\n| Name | Qty | Note |\n|:--|:-:|--:|\n| a | 1 | x |\n| b | 2 |\n| c | 3 | y | extra |\nAfter"
+        let blocks = MarkdownParser.blocks(from: md)
+        #expect(blocks.count == 3)
+        guard case .table(let t) = blocks[1] else { Issue.record("table"); return }
+        #expect(t.header == ["Name", "Qty", "Note"])
+        #expect(t.alignments == [.leading, .center, .trailing])
+        #expect(t.rows == [["a", "1", "x"], ["b", "2", ""], ["c", "3", "y"]])
+        if case .paragraph(let p) = blocks[2] { #expect(p == "After") } else { Issue.record("paragraph after table") }
+    }
+
+    @Test func tableCellsHonourEscapedPipesAndCodeSpans() {
+        let md = "| a | b |\n|---|---|\n| x \\| y | `p|q` |"
+        guard case .table(let t) = MarkdownParser.blocks(from: md).first else { Issue.record("table"); return }
+        #expect(t.rows == [["x | y", "`p|q`"]])
+    }
+
+    @Test func tableWithoutOuterPipes() {
+        guard case .table(let t) = MarkdownParser.blocks(from: "a | b\n--|--\n1 | 2").first else { Issue.record("table"); return }
+        #expect(t.header == ["a", "b"]); #expect(t.rows == [["1", "2"]])
+    }
+
+    @Test func streamingTableHeaderStaysParagraphUntilDelimiterArrives() {
+        let partial = MarkdownParser.blocks(from: "| a | b |")
+        if case .paragraph = partial[0] {} else { Issue.record("expected paragraph") }
+        let full = MarkdownParser.blocks(from: "| a | b |\n|---|---|")
+        if case .table(let t) = full[0] { #expect(t.rows.isEmpty) } else { Issue.record("expected table") }
+    }
+
+    @Test func pipesWithoutDelimiterAreNotATable() {
+        let blocks = MarkdownParser.blocks(from: "a | b\nnot a delimiter")
+        #expect(blocks.count == 1)
+        if case .paragraph = blocks[0] {} else { Issue.record("paragraph") }
+    }
+
+    @Test func standaloneAndLinkedImages() {
+        let blocks = MarkdownParser.blocks(from: "![logo](https://x.test/a.png \"t\")\n\n[![badge](https://x.test/b.svg)](https://x.test)\n\ntext ![inline](https://x.test/c.png) here")
+        #expect(blocks.count == 3)
+        if case .image(let alt, let url, let link) = blocks[0] { #expect(alt == "logo"); #expect(url == "https://x.test/a.png"); #expect(link == nil) } else { Issue.record("image") }
+        if case .image(let alt, let url, let link) = blocks[1] { #expect(alt == "badge"); #expect(url == "https://x.test/b.svg"); #expect(link == "https://x.test") } else { Issue.record("linked image") }
+        if case .paragraph = blocks[2] {} else { Issue.record("inline image stays in the paragraph") }
+    }
+
+    @Test func frontMatterIsHiddenOnlyWhenClosedAndKeyed() {
+        let blocks = MarkdownParser.blocks(from: "---\ntitle: Hi\ntags: [a]\n---\n# Body")
+        #expect(blocks.count == 1)
+        if case .heading(_, let t) = blocks[0] { #expect(t == "Body") } else { Issue.record("heading") }
+        // A rule followed by prose, or an unclosed block, is left alone.
+        #expect(MarkdownParser.blocks(from: "---\nhello\n---\nx").count == 4)
+        #expect(MarkdownParser.blocks(from: "---\ntitle: Hi\nno close").first == .rule)
     }
 }
 
